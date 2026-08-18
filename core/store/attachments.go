@@ -90,6 +90,24 @@ func ListOrphanedAttachments(ctx context.Context, exec Executor, workspaceID mod
 	return attachments, nil
 }
 
+// DeleteAttachment permanently removes an attachment's catalog row and
+// every note_attachments row that references it (present=1 or the
+// present=0 tombstones SetNoteAttachment leaves behind when a note removes
+// its reference — orphaning requires none present=1, but old present=0
+// rows remain and would otherwise violate note_attachments' foreign key
+// into attachments). The caller is responsible for removing the published
+// blob file separately (see store.BlobStore.Path) and must only call this
+// once its orphan grace period has elapsed (see ListOrphanedAttachments).
+func DeleteAttachment(ctx context.Context, exec Executor, blobID BlobID) error {
+	if _, err := exec.ExecContext(ctx, `DELETE FROM note_attachments WHERE blob_id = ?`, blobID.Bytes()); err != nil {
+		return fmt.Errorf("store: delete attachment references: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM attachments WHERE blob_id = ?`, blobID.Bytes()); err != nil {
+		return fmt.Errorf("store: delete attachment: %w", err)
+	}
+	return nil
+}
+
 func scanAttachment(scanner rowScanner) (Attachment, error) {
 	var a Attachment
 	var blobIDBytes, workspaceIDBytes []byte

@@ -104,6 +104,42 @@ func SetNoteDeleted(ctx context.Context, exec Executor, noteID model.ID, deleted
 	return ignoreStaleWrite(ctx, exec, result, "notes", noteID)
 }
 
+// DeleteNoteCompletely permanently erases a note and every row that
+// belongs to it alone: CRDT state/update log, revisions, tag/attachment
+// membership, and its FTS entry. It reconciles the orphan status of every
+// attachment the note referenced (see SetNoteAttachment), since removing
+// its note_attachments rows can newly orphan them. Callers must only use
+// this on a note whose tombstone (SetNoteDeleted) has already passed the
+// minimum retention window (see specs/sync-engine.md, "Tombstones and
+// garbage collection"); it is not itself a synchronized operation.
+func DeleteNoteCompletely(ctx context.Context, exec Executor, noteID model.ID, nowUnixMS int64) error {
+	blobIDs, err := NoteAttachmentBlobIDs(ctx, exec, noteID)
+	if err != nil {
+		return err
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM note_attachments WHERE note_id = ?`, noteID.Bytes()); err != nil {
+		return fmt.Errorf("store: delete note attachment references: %w", err)
+	}
+	for _, blobID := range blobIDs {
+		if err := reconcileAttachmentOrphan(ctx, exec, blobID, nowUnixMS); err != nil {
+			return err
+		}
+	}
+	for _, stmt := range []string{
+		`DELETE FROM note_tags WHERE note_id = ?`,
+		`DELETE FROM revisions WHERE note_id = ?`,
+		`DELETE FROM crdt_updates WHERE note_id = ?`,
+		`DELETE FROM crdt_states WHERE note_id = ?`,
+		`DELETE FROM notes_fts WHERE note_id = ?`,
+		`DELETE FROM notes WHERE id = ?`,
+	} {
+		if _, err := exec.ExecContext(ctx, stmt, noteID.Bytes()); err != nil {
+			return fmt.Errorf("store: delete note completely: %w", err)
+		}
+	}
+	return nil
+}
+
 // GetNote returns one note's metadata row.
 func GetNote(ctx context.Context, exec Executor, noteID model.ID) (model.Note, error) {
 	row := exec.QueryRowContext(ctx, noteSelectColumns+` FROM notes WHERE id = ?`, noteID.Bytes())

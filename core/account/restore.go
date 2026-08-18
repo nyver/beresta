@@ -532,6 +532,20 @@ func (a *Account) RestoreWhole(ctx context.Context, backupID model.ID, destRoot 
 	if err := store.InsertBackup(ctx, a.db, safetyBackup); err != nil {
 		return RestoreResult{SafetyBackup: safetyBackup}, fmt.Errorf("account: re-register pre-restore safety backup: %w", err)
 	}
+	// The same is true of backupID itself: a backup's snapshot is always
+	// taken before its own catalog row is written, so restoring from it
+	// never carries that row along either. Re-register it too, unless an
+	// even-older backup's snapshot already happened to include it, so the
+	// backup a user just restored from stays usable (for example, for a
+	// later selective restore) instead of silently disappearing from the
+	// catalog.
+	if _, err := store.GetBackup(ctx, a.db, backupID); errors.Is(err, store.ErrNotFound) {
+		if err := store.InsertBackup(ctx, a.db, backup); err != nil {
+			return RestoreResult{SafetyBackup: safetyBackup}, fmt.Errorf("account: re-register restored-from backup: %w", err)
+		}
+	} else if err != nil {
+		return RestoreResult{SafetyBackup: safetyBackup}, err
+	}
 
 	// The restored database's attachment rows may reference blobs no longer
 	// present in the live blob store (for example, a backup older than a

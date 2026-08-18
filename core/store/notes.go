@@ -143,18 +143,23 @@ const noteSelectColumns = `SELECT id, workspace_id, notebook_id, notebook_physic
 	       deleted, deleted_physical_ms, deleted_logical, deleted_device_id,
 	       created_physical_ms, created_logical, created_device_id`
 
-func scanNote(scanner rowScanner) (model.Note, error) {
+// scanNote scans one note row. extra, when given, is appended to the Scan
+// call so a caller selecting additional trailing columns (e.g. search's bm25
+// rank) can read them in the same pass without duplicating the note field
+// list.
+func scanNote(scanner rowScanner, extra ...any) (model.Note, error) {
 	var n model.Note
 	var idBytes, workspaceIDBytes, notebookIDBytes, notebookDeviceID []byte
 	var titleDeviceID, flagsDeviceID, deletedDeviceID, createdDeviceID []byte
 	var notebookPhysical, notebookLogical, flagsPhysical, flagsLogical, deletedPhysical, deletedLogical sql.NullInt64
-	if err := scanner.Scan(
+	dest := []any{
 		&idBytes, &workspaceIDBytes, &notebookIDBytes, &notebookPhysical, &notebookLogical, &notebookDeviceID,
 		&n.Title.Value, &n.Title.Clock.PhysicalMS, &n.Title.Clock.Logical, &titleDeviceID,
 		&n.Flags.Value, &flagsPhysical, &flagsLogical, &flagsDeviceID,
 		&n.Deleted.Value, &deletedPhysical, &deletedLogical, &deletedDeviceID,
 		&n.CreatedAt.PhysicalMS, &n.CreatedAt.Logical, &createdDeviceID,
-	); err != nil {
+	}
+	if err := scanner.Scan(append(dest, extra...)...); err != nil {
 		return model.Note{}, fmt.Errorf("store: scan note: %w", err)
 	}
 

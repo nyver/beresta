@@ -9,7 +9,7 @@ import (
 	"github.com/beresta-app/beresta/core/model"
 )
 
-func repoTestDeviceID(t *testing.T, seed byte) model.ID {
+func repoTestDeviceID(t testing.TB, seed byte) model.ID {
 	t.Helper()
 	var raw [16]byte
 	for i := range raw {
@@ -24,12 +24,12 @@ func repoTestDeviceID(t *testing.T, seed byte) model.ID {
 	return id
 }
 
-func repoClock(t *testing.T, physicalMS uint64, logical uint32, deviceSeed byte) model.HLC {
+func repoClock(t testing.TB, physicalMS uint64, logical uint32, deviceSeed byte) model.HLC {
 	t.Helper()
 	return model.HLC{PhysicalMS: physicalMS, Logical: logical, DeviceID: repoTestDeviceID(t, deviceSeed)}
 }
 
-func seedWorkspace(t *testing.T, db *sql.DB) model.ID {
+func seedWorkspace(t testing.TB, db *sql.DB) model.ID {
 	t.Helper()
 	id, err := model.NewID()
 	if err != nil {
@@ -45,7 +45,7 @@ func seedWorkspace(t *testing.T, db *sql.DB) model.ID {
 	return id
 }
 
-func repoTestDB(t *testing.T) *sql.DB {
+func repoTestDB(t testing.TB) *sql.DB {
 	t.Helper()
 	db := openTestDB(t)
 	if _, err := Migrate(context.Background(), db); err != nil {

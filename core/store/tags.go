@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/beresta-app/beresta/core/model"
@@ -96,6 +97,40 @@ func ListTags(ctx context.Context, exec Executor, workspaceID model.ID) ([]Tag, 
 		return nil, fmt.Errorf("store: list tags: %w", err)
 	}
 	return tags, nil
+}
+
+// GetTagByName returns the one non-deleted tag with the given name in a
+// workspace. Deleted tags are excluded so a `tag:` search filter (or a
+// re-run saved search) never silently matches a name someone has since
+// reused for a different tag; it reports ErrNotFound instead.
+func GetTagByName(ctx context.Context, exec Executor, workspaceID model.ID, name string) (Tag, error) {
+	row := exec.QueryRowContext(ctx,
+		`SELECT id, workspace_id, name, created_physical_ms, created_logical, created_device_id, deleted, deleted_physical_ms, deleted_logical, deleted_device_id
+		 FROM tags WHERE workspace_id = ? AND name = ? AND deleted = 0`,
+		workspaceID.Bytes(), name,
+	)
+	var t Tag
+	var idBytes, workspaceIDBytes, createdDeviceID, deletedDeviceID []byte
+	var deletedPhysicalMS, deletedLogical sql.NullInt64
+	if err := row.Scan(&idBytes, &workspaceIDBytes, &t.Name, &t.CreatedAt.PhysicalMS, &t.CreatedAt.Logical, &createdDeviceID, &t.Deleted, &deletedPhysicalMS, &deletedLogical, &deletedDeviceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Tag{}, ErrNotFound
+		}
+		return Tag{}, fmt.Errorf("store: get tag by name: %w", err)
+	}
+	id, err := model.ParseID(idBytes)
+	if err != nil {
+		return Tag{}, fmt.Errorf("store: stored tag ID: %w", err)
+	}
+	wsID, err := model.ParseID(workspaceIDBytes)
+	if err != nil {
+		return Tag{}, fmt.Errorf("store: stored tag workspace ID: %w", err)
+	}
+	t.ID, t.WorkspaceID = id, wsID
+	if deviceID, err := model.ParseID(createdDeviceID); err == nil {
+		t.CreatedAt.DeviceID = deviceID
+	}
+	return t, nil
 }
 
 // SetNoteTag adds or removes a note's membership in one tag as an

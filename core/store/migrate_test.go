@@ -11,7 +11,7 @@ import (
 	_ "github.com/AnoRebel/go-sqlcipher"
 )
 
-func openTestDB(t *testing.T) *sql.DB {
+func openTestDB(t testing.TB) *sql.DB {
 	t.Helper()
 	path := filepath.Join(tempDBDir(t), "beresta.db")
 	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on")

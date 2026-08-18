@@ -16,7 +16,7 @@ import (
 // SQLite connection's Windows file handle on a -wal/-shm sidecar file is
 // released, retrying cleanup instead of failing the test on a removal race
 // unrelated to the behavior under test.
-func tempDBDir(t *testing.T) string {
+func tempDBDir(t testing.TB) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "beresta-store-test-*")
 	if err != nil {

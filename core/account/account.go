@@ -78,6 +78,13 @@ type Account struct {
 	workspaceKeys map[model.ID]workspaceKeyEntry
 	clock         *model.Clock
 	blobs         *store.BlobStore
+	// databasePath and wrapper are retained (neither is secret material)
+	// because whole-database restore (see core/account/restore.go) must
+	// generate and wrap a brand-new device database key and replace the
+	// live database file on disk: the original device key is never
+	// portable, so a restored database cannot simply reuse it.
+	databasePath string
+	wrapper      keystore.Wrapper
 }
 
 // workspaceSession snapshots what one workspace-scoped local mutation needs
@@ -95,6 +102,18 @@ func (a *Account) workspaceSession(workspaceID model.ID) (db *sql.DB, entry work
 		return nil, workspaceKeyEntry{}, model.ID{}, nil, ErrUnknownWorkspace
 	}
 	return a.db, entry, a.DeviceID, a.devicePrivate, nil
+}
+
+// accountSession snapshots what an account-wide operation (not scoped to
+// one workspace, e.g. backup/restore) needs under a single lock
+// acquisition: the open database and the retained Root Key.
+func (a *Account) accountSession() (db *sql.DB, rootKey *corecrypto.Secret, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.locked {
+		return nil, nil, ErrAccountLocked
+	}
+	return a.db, a.rootKey, nil
 }
 
 // tick issues this device's next Hybrid Logical Clock value for a new local
@@ -404,8 +423,10 @@ func createAccountContent(
 		workspaceKeys: map[model.ID]workspaceKeyEntry{
 			workspaceID: {KeyID: workspaceKeyID, Key: workspaceKey, State: workspaceKeyStateCurrent},
 		},
-		clock: clock,
-		blobs: newBlobStore(opts.DatabasePath),
+		clock:        clock,
+		blobs:        newBlobStore(opts.DatabasePath),
+		databasePath: opts.DatabasePath,
+		wrapper:      opts.Wrapper,
 	}, nil
 }
 
@@ -624,6 +645,8 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 		workspaceKeys:      workspaceKeys,
 		clock:              clock,
 		blobs:              newBlobStore(opts.DatabasePath),
+		databasePath:       opts.DatabasePath,
+		wrapper:            opts.Wrapper,
 	}, nil
 }
 

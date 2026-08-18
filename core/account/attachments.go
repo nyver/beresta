@@ -135,8 +135,16 @@ func (a *Account) ReadAttachment(ctx context.Context, workspaceID model.ID, blob
 	if err != nil {
 		return "", "", err
 	}
+	return readAttachmentFrom(ctx, db, a.blobs, entry.Key, workspaceID, blobID, destination)
+}
 
-	row, err := store.GetAttachment(ctx, db, blobID)
+// readAttachmentFrom authenticates and streams one attachment's plaintext
+// to destination, sourcing its catalog row from sourceDB and its published
+// blob from sourceBlobs. It is shared by ReadAttachment (the live account)
+// and whole/selective restore, which read the same shape of data out of a
+// backup set's plaintext database export and blob directory instead.
+func readAttachmentFrom(ctx context.Context, sourceDB store.Executor, sourceBlobs *store.BlobStore, workspaceKey *corecrypto.Secret, workspaceID model.ID, blobID store.BlobID, destination io.Writer) (displayName, mediaType string, err error) {
+	row, err := store.GetAttachment(ctx, sourceDB, blobID)
 	if err != nil {
 		return "", "", err
 	}
@@ -151,12 +159,12 @@ func (a *Account) ReadAttachment(ctx context.Context, workspaceID model.ID, blob
 		BlobID:        blobID.Bytes(),
 		KeyID:         row.KeyID,
 	}
-	payload, err := openAttachmentManifest(entry.Key, metadata, row.Manifest)
+	payload, err := openAttachmentManifest(workspaceKey, metadata, row.Manifest)
 	if err != nil {
 		return "", "", err
 	}
 
-	blobFile, err := a.blobs.Open(blobID)
+	blobFile, err := sourceBlobs.Open(blobID)
 	if err != nil {
 		return "", "", err
 	}
@@ -183,7 +191,7 @@ func (a *Account) ReadAttachment(ctx context.Context, workspaceID model.ID, blob
 		}
 	}
 
-	if _, err := corecrypto.VerifyAttachment(ctx, entry.Key, metadata, chunks, destination); err != nil {
+	if _, err := corecrypto.VerifyAttachment(ctx, workspaceKey, metadata, chunks, destination); err != nil {
 		return "", "", err
 	}
 	return payload.displayName, payload.mediaType, nil

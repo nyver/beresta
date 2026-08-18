@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -188,6 +189,40 @@ func ExportPlaintextSnapshot(ctx context.Context, db *sql.DB, destPath string) e
 	}
 	if detachErr != nil {
 		return fmt.Errorf("store: detach backup export target: %w", detachErr)
+	}
+	return nil
+}
+
+// ExportEncryptedSnapshot re-keys a plaintext SQLite database (for example,
+// one produced by decrypting a portable backup) into a new SQLCipher
+// database at destPath, encrypted under key, using the same
+// sqlcipher_export() cross-key recipe as ExportPlaintextSnapshot but in
+// reverse. destPath must not already exist. It is used by whole-database
+// restore, which cannot reuse this device's existing database key (that key
+// is wrapped by this device's own OS keystore and is never portable), so it
+// generates and wraps a fresh one instead, exactly as account creation
+// does.
+func ExportEncryptedSnapshot(ctx context.Context, plainDB *sql.DB, destPath string, key []byte) error {
+	if len(key) != 32 {
+		return fmt.Errorf("store: encrypted export key must be 32 bytes, got %d", len(key))
+	}
+	conn, err := plainDB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("store: acquire connection for encrypted export: %w", err)
+	}
+	defer conn.Close()
+
+	rawKey := "x'" + hex.EncodeToString(key) + "'"
+	if _, err := conn.ExecContext(ctx, `ATTACH DATABASE ? AS backup_encrypted KEY ?`, destPath, rawKey); err != nil {
+		return fmt.Errorf("store: attach encrypted export target: %w", err)
+	}
+	_, exportErr := conn.ExecContext(ctx, `SELECT sqlcipher_export('backup_encrypted')`)
+	_, detachErr := conn.ExecContext(ctx, `DETACH DATABASE backup_encrypted`)
+	if exportErr != nil {
+		return fmt.Errorf("store: export encrypted snapshot: %w", exportErr)
+	}
+	if detachErr != nil {
+		return fmt.Errorf("store: detach encrypted export target: %w", detachErr)
 	}
 	return nil
 }

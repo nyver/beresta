@@ -4,31 +4,33 @@ Beresta is an offline-first encrypted notes application for Windows and Android 
 
 ## Project Status
 
-Beresta is in phase 2A (cryptographic core). The completed phase-1 architecture
-and feasibility baseline plus the current cryptographic work provide:
+Beresta has completed phase 2B (encrypted local store and domain model). Phases
+1 and 2A delivered the architecture baseline and cryptographic core; phase 2B
+adds the encrypted client store built on top of them:
 
 - a buildable Wails v2 Windows host with a React/TypeScript frontend;
 - a generated Flutter Android wrapper project with an analyzed and tested mobile shell;
 - a Yjs V1/V2 adapter plus a SQLCipher 4.14 encrypted-database probe whose Android AAR is produced by `gomobile bind`;
-- owned mutable secret buffers with copy-minimizing callback access and explicit wipe behavior on lock, close, and error paths;
-- device-bounded Argon2id calibration and persisted KDF profiles with a fixed 128 MiB safety ceiling;
-- profile-checked, domain-separated HKDF-SHA-256 derivation for keybags, workspace objects, private blob identities/chunks, backups, and pairing exports;
-- X25519 account identities with libsodium-compatible anonymous workspace-key envelopes and domain-separated Ed25519 account/device signatures;
-- XChaCha20-Poly1305 keybag and workspace-object encryption with deterministic CBOR associated data, random nonces, substitution resistance, and uniform keybag unlock failures;
-- streaming workspace-private HMAC attachment IDs, encrypted manifests, independently authenticated 4 MiB chunks, nonce-reuse guards, and complete pre-publication verification;
-- standalone XChaCha20-Poly1305 backup envelopes with complete authenticated headers and portable, traversal-safe SHA-256 file manifests;
-- a shared versioned key-wrapping contract, user-scoped Windows DPAPI, Windows 11+ Hello-gated unwrap with an explicit DPAPI fallback, and Android Keystore AES-256-GCM with optional authentication-per-use biometrics;
+- owned mutable secret buffers, device-bounded Argon2id, domain-separated HKDF, X25519/Ed25519 identities, XChaCha20-Poly1305 keybag/object/attachment/backup encryption, and the shared Windows DPAPI/Hello and Android Keystore/biometric key-wrapping contract (phase 2A);
+- validated UUIDv7 identifiers, Hybrid Logical Clock persistence, and deterministic last-writer-wins registers with device-ID and logical-counter tie breaks;
+- the complete embedded client schema (accounts, devices, workspaces, notebooks, tags, notes, CRDT state/updates, revisions, attachments, inbox/outbox, cursors, snapshots, backups, saved searches, FTS5) under SQLCipher with WAL, foreign keys, and transactional migrations;
+- account creation/unlock/lock services that derive every local key without network access;
+- transactional notebook/tag/note repositories, the `DocumentCRDT` rich-text adapter with canonical Markdown projection, and atomic local note commands that update CRDT state, metadata, FTS, encrypted revisions, and the signed outbox in one transaction;
+- local full-text search with title/body ranking, tag/date filters, saved queries, and cancellation, meeting the 150 ms budget on a 20,000-note fixture;
+- an encrypted content-addressed blob store (write-temp/fsync/rename publication, content-addressed deduplication, transactional note references, and orphan grace-period tracking) for attachments;
+- schema-migration safety backups taken automatically before a pending migration runs, an FTS index rebuild primitive, and a tested backup/restore round trip as the forward-fix recovery path;
 - build-time validation for source English and Russian localization catalogs;
-- the shared Go package structure used by later crypto, storage, backup, and synchronization phases;
 - architecture, threat-model, crypto, synchronization, and ADR documentation;
 - one root verification command and a Windows CI workflow.
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
-Current cryptographic/platform protection verification is recorded in
-[the phase-2A delivery report](docs/phase-2a-report.md).
+Cryptographic/platform protection verification is recorded in
+[the phase-2A delivery report](docs/phase-2a-report.md), and the encrypted
+local store is recorded in
+[the phase-2B delivery report](docs/phase-2b-report.md).
 
-The current shell does not yet store real notes or provide production encryption or synchronization. Those capabilities are implemented and accepted in the ordered OpenSpec phases; do not use this revision for sensitive data.
+The current shell does not yet store real notes through a user interface or provide synchronization. Those capabilities are implemented and accepted in the ordered OpenSpec phases; do not use this revision for sensitive data.
 
 ## Security Model
 
@@ -209,7 +211,7 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 
 ## Current Limitations
 
-- The desktop and mobile applications are phase-1 shells, not functional note clients.
+- The desktop and mobile applications are phase-1 shells, not functional note clients; the phase-2B encrypted local store (`core/store`) is exercised only through Go tests and the account service, with no desktop/mobile screen wired to it yet.
 - The optional synchronization server has not been implemented.
 - The SQLCipher encrypted round trip passes on Windows amd64 and on an Android arm64 device through the packaged AAR and Flutter application linkage.
 - The Go mobile binding, SQLCipher-linked Android AAR, and Flutter debug APK builds pass on Windows.

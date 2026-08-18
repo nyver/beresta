@@ -133,6 +133,8 @@ The database contains canonical note metadata, CRDT updates/state, revisions, op
 
 Blob publication follows write temporary file, flush, atomic rename, then database reference commit. A crash can therefore leave an unreferenced immutable blob, which delayed garbage collection can remove, but cannot leave a committed reference to a partial blob.
 
+Opening the database takes a whole-file safety backup (`beresta.db.pre-migration-v<from>-<timestamp>.bak`, beside `beresta.db`) before applying a pending schema migration to a pre-existing database; a fresh database and one already at the latest schema skip this. These backups are never auto-deleted and are the forward-fix recovery path if a migration is later found to be wrong.
+
 The optional server data root is intentionally simple:
 
 ```text

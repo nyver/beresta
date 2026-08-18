@@ -138,6 +138,158 @@ func TestDocumentSerializesConcurrentOperations(t *testing.T) {
 	}
 }
 
+func TestDocumentRichTextRoundTrip(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	if err := doc.Insert("body", 0, "hello world", nil); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := doc.Format("body", 0, 5, Attributes{AttrBold: true}); err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	if err := doc.Delete("body", 5, 6); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	text, err := doc.Text("body")
+	if err != nil {
+		t.Fatalf("text: %v", err)
+	}
+	if text != "hello" {
+		t.Fatalf("text = %q, want %q", text, "hello")
+	}
+
+	markdown, err := doc.Markdown("body")
+	if err != nil {
+		t.Fatalf("markdown: %v", err)
+	}
+	if markdown != "**hello**" {
+		t.Fatalf("markdown = %q, want %q", markdown, "**hello**")
+	}
+}
+
+func TestDocumentMutationsRejectInvalidInput(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	if err := doc.Insert("", 0, "x", nil); !errors.Is(err, ErrInvalidRootName) {
+		t.Fatalf("empty root error = %v", err)
+	}
+	if err := doc.Insert("body", 0, "\xff", nil); !errors.Is(err, ErrInvalidText) {
+		t.Fatalf("invalid utf8 error = %v", err)
+	}
+	if err := doc.Insert("body", 0, "x", Attributes{"k": struct{}{}}); !errors.Is(err, ErrInvalidAttributes) {
+		t.Fatalf("invalid attribute error = %v", err)
+	}
+	if err := doc.Insert("body", 0, "x", Attributes{AttrHeader: 99}); !errors.Is(err, ErrInvalidAttributes) {
+		t.Fatalf("out of range header error = %v", err)
+	}
+	if err := doc.Insert("body", 0, "x", Attributes{AttrBold: "yes"}); !errors.Is(err, ErrInvalidAttributes) {
+		t.Fatalf("wrong-typed bold error = %v", err)
+	}
+	if err := doc.Insert("body", 0, "x", Attributes{AttrList: "square"}); !errors.Is(err, ErrInvalidAttributes) {
+		t.Fatalf("unknown list value error = %v", err)
+	}
+	if err := doc.Insert("body", 0, "x", Attributes{AttrLink: ""}); !errors.Is(err, ErrInvalidAttributes) {
+		t.Fatalf("empty link error = %v", err)
+	}
+	if err := doc.Insert("body", 5, "x", nil); !errors.Is(err, ErrInvalidRange) {
+		t.Fatalf("out of range insert error = %v", err)
+	}
+	if err := doc.Insert("body", -1, "x", nil); !errors.Is(err, ErrInvalidRange) {
+		t.Fatalf("negative index insert error = %v", err)
+	}
+	if err := doc.Insert("body", 0, "hello", nil); err != nil {
+		t.Fatalf("insert setup: %v", err)
+	}
+	if err := doc.Delete("body", 0, 100); !errors.Is(err, ErrInvalidRange) {
+		t.Fatalf("out of range delete error = %v", err)
+	}
+	if err := doc.Delete("body", -1, 1); !errors.Is(err, ErrInvalidRange) {
+		t.Fatalf("negative index delete error = %v", err)
+	}
+	if err := doc.Format("body", 0, 100, Attributes{AttrBold: true}); !errors.Is(err, ErrInvalidRange) {
+		t.Fatalf("out of range format error = %v", err)
+	}
+	if err := doc.Format("body", 0, 0, Attributes{AttrBold: true}); !errors.Is(err, ErrInvalidRange) {
+		t.Fatalf("zero length format error = %v", err)
+	}
+
+	doc.Close()
+	if err := doc.Insert("body", 0, "x", nil); !errors.Is(err, ErrClosed) {
+		t.Fatalf("insert after close error = %v", err)
+	}
+	if err := doc.Delete("body", 0, 1); !errors.Is(err, ErrClosed) {
+		t.Fatalf("delete after close error = %v", err)
+	}
+	if err := doc.Format("body", 0, 1, nil); !errors.Is(err, ErrClosed) {
+		t.Fatalf("format after close error = %v", err)
+	}
+	if _, err := doc.Markdown("body"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("markdown after close error = %v", err)
+	}
+	if _, err := doc.EncodeStateVector(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("state vector after close error = %v", err)
+	}
+}
+
+func TestEncodeStateVectorReflectsAppliedUpdate(t *testing.T) {
+	fixture := loadYjsFixture(t)
+	update := decodeHex(t, fixture.V1Hex)
+
+	empty := New()
+	defer empty.Close()
+	emptySV, err := empty.EncodeStateVector()
+	if err != nil {
+		t.Fatalf("empty state vector: %v", err)
+	}
+
+	applied := New()
+	defer applied.Close()
+	if err := applied.ApplyUpdate(FormatV1, update); err != nil {
+		t.Fatalf("apply update: %v", err)
+	}
+	appliedSV, err := applied.EncodeStateVector()
+	if err != nil {
+		t.Fatalf("applied state vector: %v", err)
+	}
+	if bytes.Equal(emptySV, appliedSV) {
+		t.Fatal("state vector did not change after applying an update")
+	}
+}
+
+func TestRestoreRoundTripsSnapshotAndRejectsMalformedInput(t *testing.T) {
+	original := New()
+	defer original.Close()
+	if err := original.Insert("body", 0, "hello", Attributes{AttrBold: true}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	snapshot, err := original.EncodeStateAsUpdate(FormatV2)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+
+	restored, err := Restore(FormatV2, snapshot)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	defer restored.Close()
+
+	text, err := restored.Text("body")
+	if err != nil || text != "hello" {
+		t.Fatalf("restored text = %q, err = %v", text, err)
+	}
+	markdown, err := restored.Markdown("body")
+	if err != nil || markdown != "**hello**" {
+		t.Fatalf("restored markdown = %q, err = %v", markdown, err)
+	}
+
+	if _, err := Restore(FormatV2, []byte{0xff, 0xff, 0xff}); !errors.Is(err, ErrInvalidUpdate) {
+		t.Fatalf("malformed snapshot error = %v", err)
+	}
+}
+
 func loadYjsFixture(t *testing.T) yjsFixture {
 	t.Helper()
 	_, source, _, ok := runtime.Caller(0)

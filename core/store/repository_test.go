@@ -334,6 +334,34 @@ func TestNoteTombstoneAndRestore(t *testing.T) {
 	}
 }
 
+// TestSetNoteFlagsLogicalClockBreaksTie complements
+// TestRenameNotebookDeviceIDBreaksTie by exercising the other tie-break
+// field: equal physical_ms with a higher logical counter must win,
+// regardless of write arrival order, independent of device ID.
+func TestSetNoteFlagsLogicalClockBreaksTie(t *testing.T) {
+	db := repoTestDB(t)
+	ctx := context.Background()
+	workspaceID := seedWorkspace(t, db)
+	note, err := CreateNote(ctx, db, workspaceID, model.Nil, "Note", repoClock(t, 10, 0, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SetNoteFlags(ctx, db, note.ID, model.NoteFlagArchived, repoClock(t, 20, 5, 0x02)); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetNoteFlags(ctx, db, note.ID, model.NoteFlagPinned, repoClock(t, 20, 2, 0x02)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := GetNote(ctx, db, note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Flags.Value != model.NoteFlagArchived {
+		t.Fatalf("Flags = %v, want the higher logical counter's write (Archived) to win the tie", got.Flags.Value)
+	}
+}
+
 func TestSavedSearchCRUD(t *testing.T) {
 	db := repoTestDB(t)
 	ctx := context.Background()

@@ -1,0 +1,12 @@
+{
+  "fixture_format": 1,
+  "cases": [
+    {"case":"uint-zero","value":0,"canonical_cbor_hex":"00"},
+    {"case":"uint-23","value":23,"canonical_cbor_hex":"17"},
+    {"case":"uint-24","value":24,"canonical_cbor_hex":"1818"},
+    {"case":"empty-map","value":{},"canonical_cbor_hex":"a0"},
+    {"case":"protocol-text","value":"beresta.sync.v1","canonical_cbor_hex":"6f626572657374612e73796e632e7631"},
+    {"case":"uuid-bytes","value":{"bytes":"018f44ab4c1f7a2b8c3d001122334455"},"canonical_cbor_hex":"50018f44ab4c1f7a2b8c3d001122334455"},
+    {"case":"ordered-map","value":{"a":1,"bb":2},"canonical_cbor_hex":"a261610162626202"}
+  ]
+}

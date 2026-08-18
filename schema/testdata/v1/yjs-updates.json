@@ -1,0 +1,9 @@
+{
+  "fixture_format": 1,
+  "source": "yjs@13.6.30 via github.com/reearth/ygo v1.48.0 testutil/fixtures",
+  "case": "official-ytext-hello",
+  "text_root": "content",
+  "text": "Hello, world!",
+  "v1_hex": "0101d680b68a0d00040107636f6e74656e740d48656c6c6f2c20776f726c642100",
+  "v2_hex": "0000058ba0d6cd04000001041714636f6e74656e7448656c6c6f2c20776f726c6421070d0101000001010000"
+}

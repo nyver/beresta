@@ -1,0 +1,38 @@
+# Local agent and OpenSpec working material
+.agents/
+.claude/
+.gigacode/
+.history/
+openspec/
+AGENTS.md
+CLAUDE.md
+
+# Local configuration and generated artifacts
+config.yaml
+bin/
+build/output/
+build/tools/
+build/.go/
+build/.go-cache/
+build/.flutter/
+build/.pub-cache/
+build/.gradle/
+desktop/build/
+desktop/frontend/dist/
+desktop/frontend/node_modules/
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/build/
+mobile/android/.gradle/
+
+# Editor and operating-system state
+.idea/
+.vscode/
+*.log
+*.tmp
+
+# Documents are not source artifacts
+*.doc
+*.docx

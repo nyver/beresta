@@ -1,0 +1,14 @@
+{
+  "fixture_format": 1,
+  "cases": [
+    {"case":"account-uuidv7","schema":"account_id.v1","valid":true,"value":"018f44ab4c1f7a2b8c3d001122334455"},
+    {"case":"device-uuidv7","schema":"device_id.v1","valid":true,"value":"018f44ab4c207b3c9d4e102132435465"},
+    {"case":"key-id","schema":"key_id.v1","valid":true,"value":"00112233445566778899aabbccddeeff"},
+    {"case":"blob-id","schema":"blob_id.v1","valid":true,"value":"00112233445566778899aabbccddeeffffeeddccbbaa99887766554433221100"},
+    {"case":"hlc","schema":"beresta.hlc.v1","valid":true,"value":{"physical_ms":1710000000123,"logical":7,"device_id":"018f44ab4c207b3c9d4e102132435465"}},
+    {"case":"uuid-wrong-version","schema":"account_id.v1","valid":false,"value":"018f44ab4c1f6a2b8c3d001122334455","error":"invalid-identifier"},
+    {"case":"uuid-wrong-variant","schema":"device_id.v1","valid":false,"value":"018f44ab4c207b3c7d4e102132435465","error":"invalid-identifier"},
+    {"case":"key-id-zero","schema":"key_id.v1","valid":false,"value":"00000000000000000000000000000000","error":"invalid-identifier"},
+    {"case":"hlc-logical-overflow","schema":"beresta.hlc.v1","valid":false,"value":{"physical_ms":1710000000123,"logical":4294967296,"device_id":"018f44ab4c207b3c9d4e102132435465"},"error":"integer-overflow"}
+  ]
+}

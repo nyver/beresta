@@ -1,0 +1,9 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Beresta",
+  "outputfilename": "beresta",
+  "frontend:dir": "frontend",
+  "frontend:install": "npm.cmd install",
+  "frontend:build": "npm.cmd run build",
+  "frontend:dev:watcher": "npm.cmd run dev"
+}

@@ -1,0 +1,27 @@
+{
+  "fixture_format": 1,
+  "constants": {
+    "account_id":"018f44ab4c1f7a2b8c3d001122334455",
+    "device_id":"018f44ab4c207b3c9d4e102132435465",
+    "workspace_id":"018f44ab4c217c4dae5f203142536475",
+    "op_id":"018f44ab4c227d5ebf60304152637485",
+    "object_id":"018f44ab4c237e6c8061405162738495",
+    "snapshot_id":"018f44ab4c247f7d91725061728394a5",
+    "backup_id":"018f44ab4c25717ea28360718293a4b5",
+    "key_id":"00112233445566778899aabbccddeeff",
+    "nonce":"000102030405060708090a0b0c0d0e0f1011121314151617"
+  },
+  "cases": [
+    {"case":"operation-envelope","schema":"beresta.operation.v1","valid":true,"value":{"protocol":"beresta.sync.v1","schema_version":1,"op_id":"$op_id","workspace_id":"$workspace_id","device_id":"$device_id","hlc":{"physical_ms":1710000000123,"logical":7,"device_id":"$device_id"},"key_id":"$key_id","nonce":"$nonce","ciphertext":"000102030405060708090a0b0c0d0e0f","sig":"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"}},
+    {"case":"keybag","schema":"beresta.keybag.v1","valid":true,"value":{"magic":"425253544b444631","format_version":1,"crypto_profile":"beresta.crypto.v1","account_id":"$account_id","keybag_version":1,"kdf":{"algorithm":"argon2id","salt":"000102030405060708090a0b0c0d0e0f","memory_kib":131072,"time_cost":3,"parallelism":4,"derived_key_bytes":32},"nonce":"$nonce","ciphertext":"000102030405060708090a0b0c0d0e0f"}},
+    {"case":"encrypted-object","schema":"beresta.encrypted-object.v1","valid":true,"value":{"schema_version":1,"crypto_profile":"beresta.crypto.v1","workspace_id":"$workspace_id","object_id":"$object_id","object_type":"revision","key_id":"$key_id","nonce":"$nonce","ciphertext":"000102030405060708090a0b0c0d0e0f"}},
+    {"case":"attachment-envelope","schema":"beresta.attachment-envelope.v1","valid":true,"value":{"schema_version":1,"workspace_id":"$workspace_id","blob_id":"00112233445566778899aabbccddeeffffeeddccbbaa99887766554433221100","key_id":"$key_id","manifest_nonce":"$nonce","manifest_ciphertext":"000102030405060708090a0b0c0d0e0f","chunk_count":1,"total_ciphertext_bytes":16,"chunks":[{"index":0,"ciphertext_size":16,"ciphertext_sha256":"00112233445566778899aabbccddeeffffeeddccbbaa99887766554433221100"}]}},
+    {"case":"workspace-snapshot","schema":"beresta.workspace-snapshot.v1","valid":true,"value":{"protocol":"beresta.sync.v1","schema_version":1,"snapshot_id":"$snapshot_id","workspace_id":"$workspace_id","base_seq":42,"cursor_epoch":0,"key_id":"$key_id","creator_device_id":"$device_id","created_hlc":{"physical_ms":1710000000123,"logical":7,"device_id":"$device_id"},"nonce":"$nonce","ciphertext_hash":"00112233445566778899aabbccddeeffffeeddccbbaa99887766554433221100","ciphertext":"000102030405060708090a0b0c0d0e0f","sig":"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"}},
+    {"case":"backup-header","schema":"beresta.backup.v1","valid":true,"value":{"magic":"4252535442414b31","format_version":1,"crypto_profile":"beresta.crypto.v1","account_id":"$account_id","backup_id":"$backup_id","created_unix_ms":1710000000123,"kdf":{"algorithm":"argon2id","salt":"000102030405060708090a0b0c0d0e0f","memory_kib":131072,"time_cost":3,"parallelism":4,"derived_key_bytes":32},"nonce":"$nonce","ciphertext_size":16}},
+    {"case":"operation-device-mismatch","schema":"beresta.operation.v1","valid":false,"value":{"device_id":"$device_id","hlc":{"physical_ms":1710000000123,"logical":7,"device_id":"018f44ab4c26728fb394708192a3b4c5"}},"error":"inconsistent-field"},
+    {"case":"keybag-memory-excess","schema":"beresta.keybag.v1","valid":false,"value":{"kdf":{"memory_kib":131073}},"error":"resource-limit-exceeded"},
+    {"case":"attachment-index-gap","schema":"beresta.attachment-envelope.v1","valid":false,"value":{"chunk_count":2,"chunks":[{"index":0},{"index":2}]},"error":"invalid-manifest"},
+    {"case":"backup-traversal","schema":"beresta.backup-manifest.v1","valid":false,"value":{"entries":[{"path":"../profile.db","size":1,"sha256":"00112233445566778899aabbccddeeffffeeddccbbaa99887766554433221100"}]},"error":"unsafe-path"},
+    {"case":"unknown-field","schema":"beresta.encrypted-object.v1","valid":false,"value":{"unexpected":true},"error":"unknown-field"}
+  ]
+}

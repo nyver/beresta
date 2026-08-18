@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/AnoRebel/go-sqlcipher v1.0.0
+	github.com/klauspost/compress v1.19.2
 	github.com/reearth/ygo v1.48.0
 	github.com/wailsapp/wails/v2 v2.14.0
 	golang.org/x/crypto v0.55.0

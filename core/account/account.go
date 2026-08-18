@@ -71,9 +71,13 @@ type Account struct {
 	identityPrivate  *corecrypto.Secret
 	authorityPrivate *corecrypto.Secret
 	devicePrivate    *corecrypto.Secret
-	workspaceKeys    map[model.ID]workspaceKeyEntry
-	clock            *model.Clock
-	blobs            *store.BlobStore
+	// rootKey is retained for the account's unlocked lifetime (unlike a
+	// transient keybag-unlock derivation) because backup creation derives a
+	// fresh per-backup key from it on demand; see core/account/backup.go.
+	rootKey       *corecrypto.Secret
+	workspaceKeys map[model.ID]workspaceKeyEntry
+	clock         *model.Clock
+	blobs         *store.BlobStore
 }
 
 // workspaceSession snapshots what one workspace-scoped local mutation needs
@@ -138,6 +142,7 @@ func (a *Account) Lock() error {
 	a.identityPrivate.Close()
 	a.authorityPrivate.Close()
 	a.devicePrivate.Close()
+	a.rootKey.Close()
 	for _, entry := range a.workspaceKeys {
 		entry.Key.Close()
 	}
@@ -345,9 +350,9 @@ func createAccountContent(
 		return nil, err
 	}
 	encryptedKeybag, err := corecrypto.EncryptKeybag(rootKey, header, payloadSecret)
-	rootKey.Close()
 	payloadSecret.Close()
 	if err != nil {
+		rootKey.Close()
 		identityPriv.Close()
 		authorityPriv.Close()
 		devicePriv.Close()
@@ -367,6 +372,7 @@ func createAccountContent(
 		keybag:          encryptedKeybag,
 		createdClock:    createdClock,
 	}); err != nil {
+		rootKey.Close()
 		identityPriv.Close()
 		authorityPriv.Close()
 		devicePriv.Close()
@@ -376,6 +382,7 @@ func createAccountContent(
 
 	clock, err := model.NewClock(deviceID, createdClock, 0)
 	if err != nil {
+		rootKey.Close()
 		identityPriv.Close()
 		authorityPriv.Close()
 		devicePriv.Close()
@@ -393,6 +400,7 @@ func createAccountContent(
 		identityPrivate:    identityPriv,
 		authorityPrivate:   authorityPriv,
 		devicePrivate:      devicePriv,
+		rootKey:            rootKey,
 		workspaceKeys: map[model.ID]workspaceKeyEntry{
 			workspaceID: {KeyID: workspaceKeyID, Key: workspaceKey, State: workspaceKeyStateCurrent},
 		},
@@ -555,14 +563,29 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 		Ciphertext: accountRow.keybagCiphertext,
 	}
 
-	keybagSecret, err := corecrypto.UnlockKeybag(ctx, opts.Passphrase, encryptedKeybag)
+	// Derive the Root Key directly (rather than through the UnlockKeybag
+	// convenience wrapper, which derives and discards it internally) so it
+	// can be retained on the returned Account: backup creation (see
+	// core/account/backup.go) derives a fresh per-backup key from it later,
+	// on demand, exactly as workspace/identity keys are already retained
+	// for the account's unlocked lifetime. OpenKeybag reports the same
+	// uniform error for a wrong passphrase and a corrupt/tampered keybag as
+	// UnlockKeybag does, since UnlockKeybag is just these two calls.
+	rootKey, err := corecrypto.DeriveRootKey(ctx, opts.Passphrase, kdfParams)
 	if err != nil {
+		devicePrivate.Close()
+		return nil, err
+	}
+	keybagSecret, err := corecrypto.OpenKeybag(rootKey, encryptedKeybag)
+	if err != nil {
+		rootKey.Close()
 		devicePrivate.Close()
 		return nil, err
 	}
 	payload, err := decodeKeybagPlaintext(keybagSecret)
 	keybagSecret.Close()
 	if err != nil {
+		rootKey.Close()
 		devicePrivate.Close()
 		return nil, err
 	}
@@ -574,12 +597,14 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 
 	persistedClock, err := store.LoadDeviceClock(ctx, db, deviceRow.id)
 	if err != nil {
+		rootKey.Close()
 		devicePrivate.Close()
 		closeUnlockedSecrets(payload, workspaceKeys)
 		return nil, err
 	}
 	clock, err := model.NewClock(deviceRow.id, persistedClock, 0)
 	if err != nil {
+		rootKey.Close()
 		devicePrivate.Close()
 		closeUnlockedSecrets(payload, workspaceKeys)
 		return nil, err
@@ -595,6 +620,7 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 		identityPrivate:    payload.IdentityPrivateKey,
 		authorityPrivate:   payload.AuthorityPrivateKey,
 		devicePrivate:      devicePrivate,
+		rootKey:            rootKey,
 		workspaceKeys:      workspaceKeys,
 		clock:              clock,
 		blobs:              newBlobStore(opts.DatabasePath),

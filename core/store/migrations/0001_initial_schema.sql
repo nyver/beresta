@@ -44,7 +44,12 @@ CREATE TABLE devices (
     is_local              INTEGER NOT NULL DEFAULT 0,
     created_physical_ms   INTEGER NOT NULL,
     created_logical       INTEGER NOT NULL,
-    created_device_id     BLOB NOT NULL
+    created_device_id     BLOB NOT NULL,
+    -- The highest Hybrid Logical Clock value this (local) device has issued,
+    -- persisted so a restarted core/model.Clock never regresses. Meaningless
+    -- for a remote device record synchronized from another device.
+    clock_physical_ms     INTEGER NOT NULL DEFAULT 0,
+    clock_logical         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX devices_account_id_idx ON devices (account_id);

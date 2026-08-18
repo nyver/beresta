@@ -18,6 +18,8 @@ const (
 	AccountIDBytes   = 16
 	WorkspaceIDBytes = 16
 	BackupIDBytes    = 16
+	DeviceIDBytes    = 16
+	OpIDBytes        = 16
 	BlobIDBytes      = 32
 	TranscriptBytes  = 32
 

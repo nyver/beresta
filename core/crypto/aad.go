@@ -1,6 +1,103 @@
 package crypto
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"errors"
+)
+
+// SyncProtocolV1 identifies synchronization protocol version 1
+// (schema/v1/operation.md); it is the required value of an operation
+// record's protocol field.
+const SyncProtocolV1 = "beresta.sync.v1"
+
+// MaxOperationCiphertextBytes is the maximum encrypted operation payload size
+// from schema/v1/operation.md's `ciphertext` field.
+const MaxOperationCiphertextBytes = 1 << 20
+
+// ErrInvalidOperationFields reports a structurally invalid set of operation
+// signature fields: a wrong-length identifier, a mismatched HLC device ID, or
+// an out-of-range ciphertext.
+var ErrInvalidOperationFields = errors.New("crypto: invalid operation signature fields")
+
+// OperationSignatureFields is the closed set of client-signed fields from
+// `beresta.operation.v1` (schema/v1/operation.md). `seq` is excluded by
+// design: the server assigns it after signing, and it never changes the
+// immutable signed fields.
+type OperationSignatureFields struct {
+	OpID          []byte // bytes(16)
+	WorkspaceID   []byte // bytes(16)
+	DeviceID      []byte // bytes(16)
+	HLCPhysicalMS uint64
+	HLCLogical    uint32
+	HLCDeviceID   []byte // bytes(16); must equal DeviceID
+	KeyID         []byte // bytes(16)
+	Nonce         []byte // bytes(24)
+	Ciphertext    []byte // bytes(16..1048576), AEAD tag included
+}
+
+// CanonicalOperationSignatureInput encodes the client-signed operation fields
+// as a closed CBOR map with RFC 8949 deterministic ordering, for use with
+// SignCanonical/VerifyCanonical under SignatureDomainOperation.
+func CanonicalOperationSignatureInput(fields OperationSignatureFields) ([]byte, error) {
+	if err := fields.validate(); err != nil {
+		return nil, err
+	}
+	encoded := make([]byte, 0, 256)
+	encoded = appendCBORHeader(encoded, 5, 8)
+	encoded = appendCBORText(encoded, "protocol")
+	encoded = appendCBORText(encoded, SyncProtocolV1)
+	encoded = appendCBORText(encoded, "schema_version")
+	encoded = appendCBORUint(encoded, SchemaVersionV1)
+	encoded = appendCBORText(encoded, "op_id")
+	encoded = appendCBORBytes(encoded, fields.OpID)
+	encoded = appendCBORText(encoded, "workspace_id")
+	encoded = appendCBORBytes(encoded, fields.WorkspaceID)
+	encoded = appendCBORText(encoded, "device_id")
+	encoded = appendCBORBytes(encoded, fields.DeviceID)
+	encoded = appendCBORText(encoded, "hlc")
+	encoded = appendCBORHeader(encoded, 5, 3)
+	encoded = appendCBORText(encoded, "physical_ms")
+	encoded = appendCBORUint(encoded, fields.HLCPhysicalMS)
+	encoded = appendCBORText(encoded, "logical")
+	encoded = appendCBORUint(encoded, uint64(fields.HLCLogical))
+	encoded = appendCBORText(encoded, "device_id")
+	encoded = appendCBORBytes(encoded, fields.HLCDeviceID)
+	encoded = appendCBORText(encoded, "key_id")
+	encoded = appendCBORBytes(encoded, fields.KeyID)
+	encoded = appendCBORText(encoded, "nonce")
+	encoded = appendCBORBytes(encoded, fields.Nonce)
+	encoded = appendCBORText(encoded, "ciphertext")
+	encoded = appendCBORBytes(encoded, fields.Ciphertext)
+	return encoded, nil
+}
+
+func (f OperationSignatureFields) validate() error {
+	if err := requireBytes("op ID", f.OpID, OpIDBytes); err != nil {
+		return ErrInvalidOperationFields
+	}
+	if err := requireBytes("workspace ID", f.WorkspaceID, WorkspaceIDBytes); err != nil {
+		return ErrInvalidOperationFields
+	}
+	if err := requireBytes("device ID", f.DeviceID, DeviceIDBytes); err != nil {
+		return ErrInvalidOperationFields
+	}
+	if err := requireBytes("HLC device ID", f.HLCDeviceID, DeviceIDBytes); err != nil {
+		return ErrInvalidOperationFields
+	}
+	if string(f.HLCDeviceID) != string(f.DeviceID) {
+		return ErrInvalidOperationFields
+	}
+	if err := requireBytes("key ID", f.KeyID, KeyIDBytes); err != nil {
+		return ErrInvalidOperationFields
+	}
+	if len(f.Nonce) != XChaCha20NonceBytes {
+		return ErrInvalidOperationFields
+	}
+	if len(f.Ciphertext) < AEADTagBytes || len(f.Ciphertext) > MaxOperationCiphertextBytes {
+		return ErrInvalidOperationFields
+	}
+	return nil
+}
 
 // CanonicalKeybagAAD encodes the closed keybag AAD map using RFC 8949
 // deterministic ordering and shortest-width integers.

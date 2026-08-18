@@ -68,6 +68,19 @@ type Account struct {
 	authorityPrivate *corecrypto.Secret
 	devicePrivate    *corecrypto.Secret
 	workspaceKeys    map[model.ID]workspaceKeyEntry
+	clock            *model.Clock
+}
+
+// tick issues this device's next Hybrid Logical Clock value for a new local
+// event. The caller must persist it (see store.AdvanceDeviceClock) in the
+// same transaction as the event it timestamps.
+func (a *Account) tick() (model.HLC, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.locked {
+		return model.HLC{}, ErrAccountLocked
+	}
+	return a.clock.Tick()
 }
 
 // DB returns the account's open database connection. It becomes invalid
@@ -339,6 +352,15 @@ func createAccountContent(
 		return nil, err
 	}
 
+	clock, err := model.NewClock(deviceID, createdClock, 0)
+	if err != nil {
+		identityPriv.Close()
+		authorityPriv.Close()
+		devicePriv.Close()
+		workspaceKey.Close()
+		return nil, err
+	}
+
 	return &Account{
 		ID:                 accountID,
 		DeviceID:           deviceID,
@@ -352,6 +374,7 @@ func createAccountContent(
 		workspaceKeys: map[model.ID]workspaceKeyEntry{
 			workspaceID: {KeyID: workspaceKeyID, Key: workspaceKey, State: workspaceKeyStateCurrent},
 		},
+		clock: clock,
 	}, nil
 }
 
@@ -388,10 +411,11 @@ func insertNewAccount(ctx context.Context, db *sql.DB, p insertAccountParams) er
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO devices (id, account_id, public_key, signing_key_envelope, status, is_local, created_physical_ms, created_logical, created_device_id)
-		 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+		`INSERT INTO devices (id, account_id, public_key, signing_key_envelope, status, is_local, created_physical_ms, created_logical, created_device_id, clock_physical_ms, clock_logical)
+		 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
 		p.deviceID.Bytes(), p.accountID.Bytes(), p.devicePublicKey, p.signingEnvelope, model.DeviceStatusActive,
 		p.createdClock.PhysicalMS, p.createdClock.Logical, p.createdClock.DeviceID.Bytes(),
+		p.createdClock.PhysicalMS, p.createdClock.Logical,
 	); err != nil {
 		return fmt.Errorf("account: insert device row: %w", err)
 	}
@@ -525,6 +549,19 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 		workspaceKeys[wk.WorkspaceID] = workspaceKeyEntry{KeyID: wk.KeyID, Key: wk.Key, State: wk.State}
 	}
 
+	persistedClock, err := store.LoadDeviceClock(ctx, db, deviceRow.id)
+	if err != nil {
+		devicePrivate.Close()
+		closeUnlockedSecrets(payload, workspaceKeys)
+		return nil, err
+	}
+	clock, err := model.NewClock(deviceRow.id, persistedClock, 0)
+	if err != nil {
+		devicePrivate.Close()
+		closeUnlockedSecrets(payload, workspaceKeys)
+		return nil, err
+	}
+
 	return &Account{
 		ID:                 accountRow.id,
 		DeviceID:           deviceRow.id,
@@ -536,7 +573,20 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 		authorityPrivate:   payload.AuthorityPrivateKey,
 		devicePrivate:      devicePrivate,
 		workspaceKeys:      workspaceKeys,
+		clock:              clock,
 	}, nil
+}
+
+// closeUnlockedSecrets wipes every secret decoded from the keybag. It is
+// used only on an unlockAccountContent failure path after the keybag has
+// already been opened, since Account.Lock is not reachable until a value is
+// returned.
+func closeUnlockedSecrets(payload keybagPlaintext, workspaceKeys map[model.ID]workspaceKeyEntry) {
+	payload.IdentityPrivateKey.Close()
+	payload.AuthorityPrivateKey.Close()
+	for _, entry := range workspaceKeys {
+		entry.Key.Close()
+	}
 }
 
 type accountRow struct {

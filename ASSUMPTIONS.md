@@ -9,6 +9,7 @@ This file records implementation decisions that fill gaps without changing the f
 3. Note bodies are rich-text CRDT documents with a canonical Markdown projection. Markdown is used for search/export/diff presentation but is not the merge source.
 4. Tags use per-tag metadata registers so concurrent changes to unrelated tags do not replace the entire tag set.
 5. Restore creates new current operations rather than rewinding synchronization history.
+6. Revision rollback and portable/Evernote import recreate a note's content as plain text. Neither the canonical Markdown export nor Evernote's ENML has a parser back into the CRDT rich-text model in this codebase, so formatting is not round-tripped through either path; both report this to the user (rollback implicitly, import as a per-note warning) rather than silently dropping it.
 
 ## Identity and Keys
 
@@ -27,6 +28,9 @@ This file records implementation decisions that fill gaps without changing the f
 3. Daily retention means the newest seven valid daily backup sets once seven exist. Pre-migration and pre-restore safety backups are separate and do not consume daily slots.
 4. A self-contained backup contains every encrypted blob referenced by its database snapshot. Hardlinks or trusted content-addressed reuse are optimizations, not correctness requirements.
 5. Plaintext export is intentionally distinct from encrypted backup and always requires an explicit disclosure and confirmation.
+6. The account's Root Key is retained in memory for the whole unlocked session, wiped on lock like every other live secret, because backup creation derives a fresh per-backup key from it on demand. It is not re-derived from the passphrase for each backup, which would otherwise require re-prompting on every scheduled daily backup.
+7. Garbage collection's backup-awareness check is informational only: it reports whether a collection candidate is still present in an existing backup set, but never blocks collection on it. A backup set is a self-contained copy and never depends on live blob or note retention to remain restorable.
+8. Selective restore always assigns freshly generated note IDs rather than reusing the backup's, and recreates any notebook/tag it does not find locally by name rather than requiring an exact structural match against the backup.
 
 ## Synchronization
 

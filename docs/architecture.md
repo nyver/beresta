@@ -60,6 +60,10 @@ Owns the versioned cryptographic profile, key derivation, keybags, content encry
 
 Owns client migrations, transaction boundaries, repositories, operation inbox/outbox, cursor durability, FTS5 projections, and content-addressed encrypted blob publication. SQLCipher adapters are selected by platform build tags. The store does not perform network I/O.
 
+### `core/account`
+
+Owns the live unlocked session and every application service built on it: account creation/unlock/lock, note/notebook/tag/attachment commands and their outbox operations, revision history (checkpoints, diff, rollback), and the backup/restore/export/import/garbage-collection orchestration that needs the session's retained Root Key, workspace keys, and open database connection. It is the account's Root Key retention boundary: the Root Key is kept live for the whole unlocked session (not just transiently during unlock) specifically so backup creation can derive a fresh per-backup key on demand, and is wiped by `Lock` like every other live secret. `core/account` is the headless client itself; `desktop` and `mobile` call it and add no persistence logic of their own.
+
 ### `core/sync`
 
 Owns operation encoding and validation, HLC merge rules, the Yjs-compatible CRDT adapter, metadata LWW resolution, idempotent apply, retry state, snapshots, and compaction eligibility. It performs all content merge work on clients.
@@ -70,7 +74,7 @@ Defines the `SyncTransport` boundary and implements local, HTTP, folder, and tra
 
 ### `core/backup`
 
-Owns client backup manifests, encrypted snapshot creation, seven-day retention, integrity checks, restore planning, selective restore, import, and export. It operates independently of synchronization.
+Owns the platform-independent, key-agnostic manifest primitive: hashing a set of files under a root and verifying them against a previously generated manifest. It has no knowledge of accounts, encryption keys, or SQLCipher. `core/account` builds every backup-specific behavior — encrypted snapshot creation, seven-day retention, corruption classification, capacity preflight, preview, dry-run restore planning, whole/selective restore, export, import, and garbage collection — on top of this primitive, since all of that needs the live session's Root Key, workspace keys, and database connection that only `core/account` holds.
 
 ### `core/mobileapi`
 
@@ -171,7 +175,9 @@ Encrypted snapshots become compaction boundaries only after all active authorize
 
 Client backups are the primary recovery mechanism and work without a server. A backup contains a consistent SQLCipher snapshot plus all referenced encrypted blobs, compressed and then authenticated-encrypted under a backup key. Integrity manifests are checked at startup and before restore. Pre-migration and pre-restore safety snapshots do not consume the seven daily slots.
 
-Whole restore validates in a temporary location before atomic replacement. Selective restore imports chosen objects as new local operations so future synchronization remains coherent. Plaintext export is separate from backup and requires an explicit warning and confirmation.
+Whole restore validates in a temporary location before atomic replacement: the backup's decrypted snapshot is re-encrypted under a freshly generated device database key (the original device key is wrapped by this device's OS keystore and is never portable) and swapped into place, with the original file and key envelope restored if anything after that point fails. Selective restore imports chosen objects as new local operations, under freshly assigned IDs, so future synchronization remains coherent. Plaintext export is separate from backup and requires an explicit warning and confirmation.
+
+Garbage collection permanently deletes an orphaned attachment blob or a tombstoned note only once at least 30 days have passed, matching the tombstone retention window above. It never depends on or is gated by backup state: a backup set is a self-contained copy of everything it referenced at creation time, so live collection cannot make an existing backup unrestorable.
 
 Server backups protect availability of opaque synchronization state only. They cannot recover user content without a client keybag and passphrase.
 

@@ -4,9 +4,11 @@ Beresta is an offline-first encrypted notes application for Windows and Android 
 
 ## Project Status
 
-Beresta has completed phase 2B (encrypted local store and domain model). Phases
-1 and 2A delivered the architecture baseline and cryptographic core; phase 2B
-adds the encrypted client store built on top of them:
+Beresta has completed phase 3 (complete local-only product core). Phases 1
+and 2A delivered the architecture baseline and cryptographic core; phase 2B
+added the encrypted client store; phase 3 adds the complete offline note
+application surface on top of them, entirely through `core/account` — still
+with no desktop or mobile screen wired to it yet:
 
 - a buildable Wails v2 Windows host with a React/TypeScript frontend;
 - a generated Flutter Android wrapper project with an analyzed and tested mobile shell;
@@ -14,10 +16,15 @@ adds the encrypted client store built on top of them:
 - owned mutable secret buffers, device-bounded Argon2id, domain-separated HKDF, X25519/Ed25519 identities, XChaCha20-Poly1305 keybag/object/attachment/backup encryption, and the shared Windows DPAPI/Hello and Android Keystore/biometric key-wrapping contract (phase 2A);
 - validated UUIDv7 identifiers, Hybrid Logical Clock persistence, and deterministic last-writer-wins registers with device-ID and logical-counter tie breaks;
 - the complete embedded client schema (accounts, devices, workspaces, notebooks, tags, notes, CRDT state/updates, revisions, attachments, inbox/outbox, cursors, snapshots, backups, saved searches, FTS5) under SQLCipher with WAL, foreign keys, and transactional migrations;
-- account creation/unlock/lock services that derive every local key without network access;
-- transactional notebook/tag/note repositories, the `DocumentCRDT` rich-text adapter with canonical Markdown projection, and atomic local note commands that update CRDT state, metadata, FTS, encrypted revisions, and the signed outbox in one transaction;
+- account creation/unlock/lock services that derive every local key without network access, and the default local no-op `SyncTransport`;
+- note/notebook/tag/attachment application services (`core/account`) that commit local state and a signed encrypted outbox operation atomically, the `DocumentCRDT` rich-text adapter with canonical Markdown projection, and seven-day note revision history with periodic checkpoints, a line-based diff, and rollback-as-new-revision;
 - local full-text search with title/body ranking, tag/date filters, saved queries, and cancellation, meeting the 150 ms budget on a 20,000-note fixture;
 - an encrypted content-addressed blob store (write-temp/fsync/rename publication, content-addressed deduplication, transactional note references, and orphan grace-period tracking) for attachments;
+- daily encrypted client backups (zstd-compressed, encrypted under a Root-Key-derived backup key, self-contained attachment blob sets, exact seven-day rotation, missed-day catch-up, startup/pre-restore verification with corruption classification, and capacity preflight);
+- backup catalog preview, a dry-run restore change plan, atomic whole-database restore (onto a freshly generated device key, with crash-safe rollback to the original database on failure), and selective restore as new local operations, always behind a mandatory pre-restore safety backup;
+- confirmed plaintext Markdown/attachment/`manifest.json` export, and import of both Beresta's own portable archives and Evernote `.enex` files, with a user-visible report of anything that could not be represented (rich text is flattened to plain text on import — see [ASSUMPTIONS.md](ASSUMPTIONS.md));
+- blob and tombstone garbage collection at the 30-day minimum retention floor, with dry-run reporting and backup-awareness (informational, never blocking: a backup set is self-contained);
+- a headless end-to-end suite covering the complete local-only lifecycle, including a real forced-termination (process-kill) recovery test and randomized local-operation/restore-convergence property tests;
 - schema-migration safety backups taken automatically before a pending migration runs, an FTS index rebuild primitive, and a tested backup/restore round trip as the forward-fix recovery path;
 - build-time validation for source English and Russian localization catalogs;
 - architecture, threat-model, crypto, synchronization, and ADR documentation;
@@ -26,9 +33,11 @@ adds the encrypted client store built on top of them:
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
 Cryptographic/platform protection verification is recorded in
-[the phase-2A delivery report](docs/phase-2a-report.md), and the encrypted
+[the phase-2A delivery report](docs/phase-2a-report.md), the encrypted
 local store is recorded in
-[the phase-2B delivery report](docs/phase-2b-report.md).
+[the phase-2B delivery report](docs/phase-2b-report.md), and the complete
+local-only product core is recorded in
+[the phase-3 delivery report](docs/phase-3-report.md).
 
 The current shell does not yet store real notes through a user interface or provide synchronization. Those capabilities are implemented and accepted in the ordered OpenSpec phases; do not use this revision for sensitive data.
 
@@ -211,8 +220,10 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 
 ## Current Limitations
 
-- The desktop and mobile applications are phase-1 shells, not functional note clients; the phase-2B encrypted local store (`core/store`) is exercised only through Go tests and the account service, with no desktop/mobile screen wired to it yet.
-- The optional synchronization server has not been implemented.
+- The desktop and mobile applications are phase-1 shells, not functional note clients; the complete phase-3 local-only product core (`core/account`, `core/store`) is exercised only through Go tests, with no desktop/mobile screen wired to it yet.
+- The optional synchronization server has not been implemented; `core/transport`'s `SyncTransport` currently has only the default local no-op implementation.
+- `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.
+- Revision rollback and portable/Evernote import recreate content as plain text; rich-text formatting is not round-tripped through either path (see [ASSUMPTIONS.md](ASSUMPTIONS.md)).
 - The SQLCipher encrypted round trip passes on Windows amd64 and on an Android arm64 device through the packaged AAR and Flutter application linkage.
 - The Go mobile binding, SQLCipher-linked Android AAR, and Flutter debug APK builds pass on Windows.
 - Release signing, installers, automatic updates, and store packaging are implemented in later phases.

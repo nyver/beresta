@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/beresta-app/beresta/core/model"
@@ -27,6 +28,10 @@ type Backup struct {
 	NoteCount      *int64
 	SizeBytes      *int64
 	CreatedUnixMS  int64
+	// Corrupt is set once manifest verification has found this backup
+	// archive damaged. A corrupt backup is kept (not deleted) but excluded
+	// from restore eligibility and from the seven-valid-day rotation count.
+	Corrupt bool
 }
 
 // InsertBackup records one completed backup in the catalog.
@@ -41,13 +46,26 @@ func InsertBackup(ctx context.Context, exec Executor, b Backup) error {
 	return nil
 }
 
-// ListBackups returns every catalog entry of one kind, newest first.
+// ListBackups returns every catalog entry of one kind, newest first,
+// including corrupt ones (so a catalog UI can still show that they exist).
+// Callers deciding rotation counts or restore eligibility must use
+// ListValidBackups instead.
 func ListBackups(ctx context.Context, exec Executor, kind int) ([]Backup, error) {
-	rows, err := exec.QueryContext(ctx,
-		`SELECT id, kind, location, manifest_hash, verified_unix_ms, note_count, size_bytes, created_unix_ms
-		 FROM backups WHERE kind = ? ORDER BY created_unix_ms DESC, id DESC`,
-		kind,
-	)
+	return queryBackups(ctx, exec, `SELECT id, kind, location, manifest_hash, verified_unix_ms, note_count, size_bytes, created_unix_ms, corrupt
+		 FROM backups WHERE kind = ? ORDER BY created_unix_ms DESC, id DESC`, kind)
+}
+
+// ListValidBackups returns every non-corrupt catalog entry of one kind,
+// newest first. The seven-valid-day rotation count and restore eligibility
+// (specs/backup-and-recovery.md, "Backup integrity classification") both
+// use this, not ListBackups.
+func ListValidBackups(ctx context.Context, exec Executor, kind int) ([]Backup, error) {
+	return queryBackups(ctx, exec, `SELECT id, kind, location, manifest_hash, verified_unix_ms, note_count, size_bytes, created_unix_ms, corrupt
+		 FROM backups WHERE kind = ? AND corrupt = 0 ORDER BY created_unix_ms DESC, id DESC`, kind)
+}
+
+func queryBackups(ctx context.Context, exec Executor, query string, kind int) ([]Backup, error) {
+	rows, err := exec.QueryContext(ctx, query, kind)
 	if err != nil {
 		return nil, fmt.Errorf("store: list backups: %w", err)
 	}
@@ -78,11 +96,45 @@ func DeleteBackup(ctx context.Context, exec Executor, id model.ID) error {
 	return nil
 }
 
+// MarkBackupVerified records that a backup passed manifest verification at
+// verifiedUnixMS and clears any previous corrupt classification (a backup
+// found corrupt once is eligible to be reclassified valid if a later
+// verification, for example after copying it back from a healthy replica,
+// succeeds).
+func MarkBackupVerified(ctx context.Context, exec Executor, id model.ID, verifiedUnixMS int64) error {
+	if _, err := exec.ExecContext(ctx, `UPDATE backups SET verified_unix_ms = ?, corrupt = 0 WHERE id = ?`, verifiedUnixMS, id.Bytes()); err != nil {
+		return fmt.Errorf("store: mark backup verified: %w", err)
+	}
+	return nil
+}
+
+// MarkBackupCorrupt records that a backup failed manifest verification. The
+// row and its on-disk backup set are both left in place; see Backup.Corrupt.
+func MarkBackupCorrupt(ctx context.Context, exec Executor, id model.ID) error {
+	if _, err := exec.ExecContext(ctx, `UPDATE backups SET corrupt = 1 WHERE id = ?`, id.Bytes()); err != nil {
+		return fmt.Errorf("store: mark backup corrupt: %w", err)
+	}
+	return nil
+}
+
+// GetBackup returns one backup's catalog entry.
+func GetBackup(ctx context.Context, exec Executor, id model.ID) (Backup, error) {
+	row := exec.QueryRowContext(ctx,
+		`SELECT id, kind, location, manifest_hash, verified_unix_ms, note_count, size_bytes, created_unix_ms, corrupt
+		 FROM backups WHERE id = ?`,
+		id.Bytes(),
+	)
+	return scanBackup(row)
+}
+
 func scanBackup(scanner rowScanner) (Backup, error) {
 	var b Backup
 	var idBytes []byte
 	var verified, noteCount, sizeBytes sql.NullInt64
-	if err := scanner.Scan(&idBytes, &b.Kind, &b.Location, &b.ManifestHash, &verified, &noteCount, &sizeBytes, &b.CreatedUnixMS); err != nil {
+	if err := scanner.Scan(&idBytes, &b.Kind, &b.Location, &b.ManifestHash, &verified, &noteCount, &sizeBytes, &b.CreatedUnixMS, &b.Corrupt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Backup{}, ErrNotFound
+		}
 		return Backup{}, fmt.Errorf("store: scan backup: %w", err)
 	}
 	id, err := model.ParseID(idBytes)
@@ -180,4 +232,18 @@ func CountNotes(ctx context.Context, exec Executor) (int64, error) {
 		return 0, fmt.Errorf("store: count notes: %w", err)
 	}
 	return count, nil
+}
+
+// SumAttachmentSizes returns the total plaintext size of every attachment
+// tracked anywhere in the account, for a backup capacity preflight
+// estimate.
+func SumAttachmentSizes(ctx context.Context, exec Executor) (uint64, error) {
+	var total sql.NullInt64
+	if err := exec.QueryRowContext(ctx, `SELECT SUM(size_bytes) FROM attachments`).Scan(&total); err != nil {
+		return 0, fmt.Errorf("store: sum attachment sizes: %w", err)
+	}
+	if !total.Valid {
+		return 0, nil
+	}
+	return uint64(total.Int64), nil
 }

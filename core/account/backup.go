@@ -1,10 +1,13 @@
 package account
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,6 +41,67 @@ const (
 // raw ciphertext. It is a private on-disk encoding, not a synchronization
 // wire format.
 const backupFileMagic = "BRSTBKF1"
+
+// backupCapacityMarginNumerator/Denominator pads the raw plaintext-size
+// estimate used for capacity preflight: the exported snapshot is written to
+// disk once before compression, and rounding/filesystem block overhead
+// across many small blob files adds a little more, so headroom beyond the
+// exact estimate avoids failing partway through a backup that a tighter
+// estimate would have called safe.
+const (
+	backupCapacityMarginNumerator   = 11
+	backupCapacityMarginDenominator = 10
+)
+
+// ErrInsufficientBackupCapacity reports that a backup destination did not
+// have enough free space for the estimated backup size. CreateBackup
+// returns it before writing anything, so existing valid backups are always
+// left untouched (specs/backup-and-recovery.md, "Insufficient mobile
+// storage": "the client skips the unsafe write, preserves existing valid
+// backups").
+var ErrInsufficientBackupCapacity = errors.New("account: insufficient free space for backup")
+
+// checkBackupCapacity estimates the size CreateBackup is about to write to
+// destRoot (the plaintext database export plus every tracked attachment,
+// deliberately not netting out zstd compression, which only shrinks the
+// database portion) and fails closed if destRoot's free space is not enough
+// for it.
+func checkBackupCapacity(ctx context.Context, db *sql.DB, destRoot string) error {
+	estimated, err := estimateBackupBytes(ctx, db)
+	if err != nil {
+		return err
+	}
+	estimated = estimated * backupCapacityMarginNumerator / backupCapacityMarginDenominator
+
+	free, err := freeBytesAt(destRoot)
+	if err != nil {
+		return fmt.Errorf("account: check backup destination capacity: %w", err)
+	}
+	if free < estimated {
+		return ErrInsufficientBackupCapacity
+	}
+	return nil
+}
+
+// estimateBackupBytes sums the live database's on-disk size (via SQLite's
+// own page accounting, not a file stat, so it works before any export
+// exists) and every tracked attachment's plaintext size.
+func estimateBackupBytes(ctx context.Context, db *sql.DB) (uint64, error) {
+	var pageCount, pageSize int64
+	if err := db.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pageCount); err != nil {
+		return 0, fmt.Errorf("account: read database page count: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&pageSize); err != nil {
+		return 0, fmt.Errorf("account: read database page size: %w", err)
+	}
+	databaseBytes := uint64(pageCount) * uint64(pageSize)
+
+	blobBytes, err := store.SumAttachmentSizes(ctx, db)
+	if err != nil {
+		return 0, err
+	}
+	return databaseBytes + blobBytes, nil
+}
 
 // CreateBackup assembles and durably publishes one backup set under
 // destRoot/<backup ID>: a SQLCipher-consistent plaintext export of the
@@ -81,6 +145,9 @@ func (a *Account) CreateBackup(ctx context.Context, destRoot string, kind int, n
 
 	if err := os.MkdirAll(destRoot, 0o700); err != nil {
 		return store.Backup{}, fmt.Errorf("account: create backup destination: %w", err)
+	}
+	if err := checkBackupCapacity(ctx, db, destRoot); err != nil {
+		return store.Backup{}, err
 	}
 	stagingDir, err := os.MkdirTemp(destRoot, ".staging-*")
 	if err != nil {
@@ -203,7 +270,7 @@ func (a *Account) EnsureDailyBackup(ctx context.Context, destRoot string, now ti
 	db := a.db
 	a.mu.Unlock()
 
-	existing, err := store.ListBackups(ctx, db, store.BackupKindDaily)
+	existing, err := store.ListValidBackups(ctx, db, store.BackupKindDaily)
 	if err != nil {
 		return false, err
 	}
@@ -235,15 +302,18 @@ func (a *Account) rotateDailyBackups(ctx context.Context, destRoot string) error
 	db := a.db
 	a.mu.Unlock()
 
-	backups, err := store.ListBackups(ctx, db, store.BackupKindDaily)
+	backups, err := store.ListValidBackups(ctx, db, store.BackupKindDaily)
 	if err != nil {
 		return err
 	}
 	if len(backups) <= dailyBackupRetention {
 		return nil
 	}
-	// ListBackups orders newest first; everything past the retention count
-	// is the oldest excess.
+	// ListValidBackups orders newest first; everything past the retention
+	// count is the oldest excess. Corrupt backups are excluded from this
+	// list entirely (specs/backup-and-recovery.md: corrupt archives "SHALL
+	// not count as valid snapshots during rotation"), so they are never
+	// counted toward or removed by this rotation.
 	for _, b := range backups[dailyBackupRetention:] {
 		if err := os.RemoveAll(b.Location); err != nil {
 			return fmt.Errorf("account: remove rotated backup set: %w", err)
@@ -253,6 +323,88 @@ func (a *Account) rotateDailyBackups(ctx context.Context, destRoot string) error
 		}
 	}
 	return nil
+}
+
+// VerifyBackup re-hashes every file in one backup's set against the
+// manifest it was published with and confirms that manifest itself matches
+// the catalog's recorded hash, then records the result: verified at now on
+// success, or corrupt on failure (see specs/backup-and-recovery.md,
+// "Backup integrity classification"). It does not decrypt the encrypted
+// snapshot itself; that authentication only happens on restore, with the
+// account's Root Key. Call it at startup for every backup and again
+// immediately before a restore, per the spec's two required verification
+// points.
+func (a *Account) VerifyBackup(ctx context.Context, id model.ID, now time.Time) error {
+	a.mu.Lock()
+	if a.locked {
+		a.mu.Unlock()
+		return ErrAccountLocked
+	}
+	db := a.db
+	a.mu.Unlock()
+
+	backup, err := store.GetBackup(ctx, db, id)
+	if err != nil {
+		return err
+	}
+
+	if verifyErr := verifyBackupSet(ctx, backup); verifyErr != nil {
+		return store.MarkBackupCorrupt(ctx, db, id)
+	}
+	return store.MarkBackupVerified(ctx, db, id, now.UnixMilli())
+}
+
+// VerifyAllBackups runs VerifyBackup over every catalog entry, for the
+// spec's required startup verification pass. It keeps going after an
+// individual backup fails to verify (that failure is recorded on its own
+// row, not fatal to the sweep) and returns every error encountered, if any.
+func (a *Account) VerifyAllBackups(ctx context.Context, now time.Time) error {
+	a.mu.Lock()
+	if a.locked {
+		a.mu.Unlock()
+		return ErrAccountLocked
+	}
+	db := a.db
+	a.mu.Unlock()
+
+	var allBackups []store.Backup
+	for _, kind := range []int{store.BackupKindDaily, store.BackupKindPreMigration, store.BackupKindPreRestore, store.BackupKindManual} {
+		kindBackups, err := store.ListBackups(ctx, db, kind)
+		if err != nil {
+			return err
+		}
+		allBackups = append(allBackups, kindBackups...)
+	}
+
+	var errs []error
+	for _, b := range allBackups {
+		if err := a.VerifyBackup(ctx, b.ID, now); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// verifyBackupSet re-hashes a backup set's manifest.json against the
+// catalog's recorded hash, then re-hashes every file the manifest declares
+// against it. Either mismatch, or a missing file, reports a verification
+// failure.
+func verifyBackupSet(ctx context.Context, backup store.Backup) error {
+	manifestPath := filepath.Join(backup.Location, backupManifestFile)
+	manifestBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("account: read backup manifest: %w", err)
+	}
+	actualHash := sha256.Sum256(manifestBytes)
+	if !bytes.Equal(actualHash[:], backup.ManifestHash) {
+		return fmt.Errorf("account: backup manifest hash mismatch")
+	}
+
+	var manifest corebackup.Manifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return fmt.Errorf("account: decode backup manifest: %w", err)
+	}
+	return corebackup.VerifyManifest(ctx, backup.Location, manifest)
 }
 
 // isSameLocalDay reports whether a and b fall on the same calendar day in

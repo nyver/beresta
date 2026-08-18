@@ -169,3 +169,126 @@ func TestEnsureDailyBackupRejectsLockedAccount(t *testing.T) {
 		t.Fatalf("EnsureDailyBackup on locked account error = %v, want ErrAccountLocked", err)
 	}
 }
+
+func TestVerifyBackupAcceptsAValidBackupAndDetectsTampering(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Untitled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := created.AddAttachment(ctx, workspaceID, note.ID, "a.txt", "text/plain", bytes.NewReader([]byte("payload"))); err != nil {
+		t.Fatalf("AddAttachment: %v", err)
+	}
+
+	now := time.Now()
+	backup, err := created.CreateBackup(ctx, t.TempDir(), store.BackupKindManual, now)
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	if err := created.VerifyBackup(ctx, backup.ID, now); err != nil {
+		t.Fatalf("VerifyBackup (fresh backup): %v", err)
+	}
+	verified, err := store.GetBackup(ctx, created.db, backup.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verified.Corrupt || verified.VerifiedUnixMS == nil {
+		t.Fatalf("verified backup = %+v, want Corrupt=false and VerifiedUnixMS set", verified)
+	}
+
+	// Tamper with a file inside the published backup set.
+	snapshotPath := filepath.Join(backup.Location, backupSnapshotFile)
+	if err := os.WriteFile(snapshotPath, []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := created.VerifyBackup(ctx, backup.ID, now); err != nil {
+		t.Fatalf("VerifyBackup (tampered) unexpectedly returned an error instead of marking corrupt: %v", err)
+	}
+	corrupted, err := store.GetBackup(ctx, created.db, backup.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !corrupted.Corrupt {
+		t.Fatal("tampered backup was not marked corrupt")
+	}
+}
+
+func TestVerifyAllBackupsSweepsEveryKind(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	now := time.Now()
+
+	backupsRoot := t.TempDir()
+	daily, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindDaily, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manual, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := created.VerifyAllBackups(ctx, now); err != nil {
+		t.Fatalf("VerifyAllBackups: %v", err)
+	}
+
+	for _, id := range []model.ID{daily.ID, manual.ID} {
+		b, err := store.GetBackup(ctx, created.db, id)
+		if err != nil || b.VerifiedUnixMS == nil || b.Corrupt {
+			t.Fatalf("backup %v after sweep = %+v, err = %v", id, b, err)
+		}
+	}
+}
+
+func TestEnsureDailyBackupReplacesACorruptTodayBackup(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	backupsRoot := t.TempDir()
+	now := time.Now()
+
+	if _, err := created.EnsureDailyBackup(ctx, backupsRoot, now); err != nil {
+		t.Fatalf("EnsureDailyBackup: %v", err)
+	}
+	backups, err := store.ListBackups(ctx, created.db, store.BackupKindDaily)
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("backups = %v, err = %v", backups, err)
+	}
+	if err := store.MarkBackupCorrupt(ctx, created.db, backups[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	createdAgain, err := created.EnsureDailyBackup(ctx, backupsRoot, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("EnsureDailyBackup (retry same day after corruption): %v", err)
+	}
+	if !createdAgain {
+		t.Fatal("EnsureDailyBackup should create a fresh backup when today's existing one is corrupt")
+	}
+}
+
+func TestCreateBackupRejectsInsufficientCapacity(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Untitled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := created.AddAttachment(ctx, workspaceID, note.ID, "a.txt", "text/plain", bytes.NewReader([]byte("x"))); err != nil {
+		t.Fatal(err)
+	}
+	// Inflate the recorded attachment size far beyond any real free disk
+	// space, without needing to actually fill the disk, to exercise the
+	// capacity preflight deterministically.
+	if _, err := created.db.ExecContext(ctx, `UPDATE attachments SET size_bytes = ?`, int64(1)<<62); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := created.CreateBackup(ctx, t.TempDir(), store.BackupKindManual, time.Now()); err != ErrInsufficientBackupCapacity {
+		t.Fatalf("CreateBackup error = %v, want ErrInsufficientBackupCapacity", err)
+	}
+}

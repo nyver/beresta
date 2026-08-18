@@ -87,8 +87,8 @@ func TestMigrateAppliesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("Migrate() version = %d, want 3", version)
+	if want := latestMigrationVersion(t); version != want {
+		t.Fatalf("Migrate() version = %d, want %d", version, want)
 	}
 
 	expectedTables := []string{
@@ -135,9 +135,30 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 3 {
-		t.Fatalf("schema_migrations row count = %d, want 3 (no re-application)", count)
+	if want := migrationCount(t); count != want {
+		t.Fatalf("schema_migrations row count = %d, want %d (no re-application)", count, want)
 	}
+}
+
+// latestMigrationVersion and migrationCount let assertions track the
+// embedded migration set instead of hardcoding a version number that a
+// future migration would silently make stale.
+func latestMigrationVersion(t *testing.T) int {
+	t.Helper()
+	migrations, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return migrations[len(migrations)-1].Version
+}
+
+func migrationCount(t *testing.T) int {
+	t.Helper()
+	migrations, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(migrations)
 }
 
 func TestMigrateFTS5RoundTrip(t *testing.T) {

@@ -20,6 +20,9 @@ build/.gradle/
 desktop/build/
 desktop/frontend/dist/
 desktop/frontend/node_modules/
+# Wails writes a default icon.png to the repo root during some build/doctor
+# invocations; the real application icon is desktop/build/appicon.png.
+/icon.png
 mobile/.dart_tool/
 mobile/.flutter-plugins
 mobile/.flutter-plugins-dependencies

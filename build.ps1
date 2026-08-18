@@ -23,6 +23,11 @@ if ((Test-Path -LiteralPath $portableCompilerBin -PathType Container) -and
 # Phase-1 client storage is backed by the native SQLCipher amalgamation. Make
 # CGo selection deterministic instead of allowing cached stub builds to pass.
 $env:CGO_ENABLED = "1"
+# The vendored SQLCipher amalgamation only compiles FTS5 support when this
+# build tag is set (see third_party/go-sqlcipher/sqlite3_opt_fts5.go); the
+# client schema's notes_fts table requires it everywhere the "sqlite3"
+# driver is linked, including the Android AAR built through gomobile bind.
+$env:GOFLAGS = "-tags=sqlite_fts5"
 
 function Resolve-Executable {
     param(
@@ -201,7 +206,7 @@ function Invoke-MobileBind {
     Invoke-Checked -FilePath $gomobile -Arguments @("init")
     $outputDirectory = Join-Path $projectRoot "build\output"
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    Invoke-Checked -FilePath $gomobile -Arguments @("bind", "-target=android", "-androidapi", "24", "-o", (Join-Path $outputDirectory "beresta-core.aar"), "./core/mobileapi")
+    Invoke-Checked -FilePath $gomobile -Arguments @("bind", "-target=android", "-androidapi", "24", "-tags=sqlite_fts5", "-o", (Join-Path $outputDirectory "beresta-core.aar"), "./core/mobileapi")
 }
 
 function Invoke-MobileBuildAndroid {
@@ -275,7 +280,7 @@ function Invoke-Tests {
 function Invoke-Build {
     Invoke-LocaleCheck
     Invoke-Checked -FilePath (Resolve-Executable -Name "npm.cmd") -Arguments @("run", "build") -WorkingDirectory (Join-Path $projectRoot "desktop\frontend")
-    Invoke-Checked -FilePath (Get-WailsExecutable) -Arguments @("build", "-clean") -WorkingDirectory (Join-Path $projectRoot "desktop")
+    Invoke-Checked -FilePath (Get-WailsExecutable) -Arguments @("build", "-clean", "-tags", "sqlite_fts5") -WorkingDirectory (Join-Path $projectRoot "desktop")
 }
 
 function Invoke-Package {

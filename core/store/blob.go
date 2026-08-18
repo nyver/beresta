@@ -94,6 +94,15 @@ func NewBlobStore(root, tmpDir string) *BlobStore {
 	return &BlobStore{root: root, tmp: tmpDir, fs: osBlobFS{}}
 }
 
+// TempDir returns the staging directory Publish writes into before its
+// atomic rename. Callers that must buffer content across two passes before
+// publishing it (for example, computing a content address before
+// encrypting) may stage their own temporary files here, on the same volume
+// as Path's target, so a subsequent Publish rename stays atomic.
+func (s *BlobStore) TempDir() string {
+	return s.tmp
+}
+
 // Path returns the content-addressed file path a blob is published to or
 // read from. It performs no filesystem access.
 func (s *BlobStore) Path(id BlobID) string {

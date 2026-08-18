@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 
 	corecrypto "github.com/beresta-app/beresta/core/crypto"
@@ -41,6 +42,9 @@ var (
 	ErrNoLocalAccount = errors.New("account: no local account at this path")
 	// ErrAccountLocked reports use of an Account after Lock.
 	ErrAccountLocked = errors.New("account: account is locked")
+	// ErrUnknownWorkspace reports a workspace ID with no key held by this
+	// unlocked account.
+	ErrUnknownWorkspace = errors.New("account: unknown workspace")
 )
 
 // workspaceKeyEntry is one workspace key held live in memory by an unlocked
@@ -69,6 +73,24 @@ type Account struct {
 	devicePrivate    *corecrypto.Secret
 	workspaceKeys    map[model.ID]workspaceKeyEntry
 	clock            *model.Clock
+	blobs            *store.BlobStore
+}
+
+// workspaceSession snapshots what one workspace-scoped local mutation needs
+// under a single lock acquisition: the open database, this device's
+// identity and signing key, and the requested workspace's current key
+// entry. It performs no I/O beyond the in-memory read.
+func (a *Account) workspaceSession(workspaceID model.ID) (db *sql.DB, entry workspaceKeyEntry, deviceID model.ID, devicePrivate *corecrypto.Secret, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.locked {
+		return nil, workspaceKeyEntry{}, model.ID{}, nil, ErrAccountLocked
+	}
+	entry, ok := a.workspaceKeys[workspaceID]
+	if !ok {
+		return nil, workspaceKeyEntry{}, model.ID{}, nil, ErrUnknownWorkspace
+	}
+	return a.db, entry, a.DeviceID, a.devicePrivate, nil
 }
 
 // tick issues this device's next Hybrid Logical Clock value for a new local
@@ -375,6 +397,7 @@ func createAccountContent(
 			workspaceID: {KeyID: workspaceKeyID, Key: workspaceKey, State: workspaceKeyStateCurrent},
 		},
 		clock: clock,
+		blobs: newBlobStore(opts.DatabasePath),
 	}, nil
 }
 
@@ -574,6 +597,7 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 		devicePrivate:      devicePrivate,
 		workspaceKeys:      workspaceKeys,
 		clock:              clock,
+		blobs:              newBlobStore(opts.DatabasePath),
 	}, nil
 }
 
@@ -648,6 +672,14 @@ func loadLocalDeviceRow(ctx context.Context, db *sql.DB) (localDeviceRow, error)
 
 func envelopePath(databasePath string) string {
 	return databasePath + envelopeFileSuffix
+}
+
+// newBlobStore returns the BlobStore for the data directory containing
+// databasePath, at the fixed layout documented in docs/architecture.md:
+// <data-dir>/blobs for published content, <data-dir>/runtime for staging.
+func newBlobStore(databasePath string) *store.BlobStore {
+	dataDir := filepath.Dir(databasePath)
+	return store.NewBlobStore(filepath.Join(dataDir, "blobs"), filepath.Join(dataDir, "runtime"))
 }
 
 // removeDatabaseFiles removes the main database file and its WAL/SHM

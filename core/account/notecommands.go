@@ -47,18 +47,9 @@ func (a *Account) CommitNoteBody(ctx context.Context, cmd NoteBodyCommand) error
 		return fmt.Errorf("account: note body command requires an update")
 	}
 
-	a.mu.Lock()
-	if a.locked {
-		a.mu.Unlock()
-		return ErrAccountLocked
-	}
-	db := a.db
-	deviceID := a.DeviceID
-	devicePrivate := a.devicePrivate
-	entry, ok := a.workspaceKeys[cmd.WorkspaceID]
-	a.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("account: unknown workspace")
+	db, entry, deviceID, devicePrivate, err := a.workspaceSession(cmd.WorkspaceID)
+	if err != nil {
+		return err
 	}
 
 	clock, err := a.tick()
@@ -218,11 +209,6 @@ func saveNoteRevision(ctx context.Context, exec store.Executor, entry workspaceK
 }
 
 func writeNoteOutboxOperation(ctx context.Context, exec store.Executor, entry workspaceKeyEntry, devicePrivate *corecrypto.Secret, cmd NoteBodyCommand, deviceID model.ID, clock model.HLC) error {
-	opID, err := model.NewID()
-	if err != nil {
-		return err
-	}
-
 	payload, err := sync.EncodeNoteBodyOperation(sync.NoteBodyOperation{
 		NoteID:     cmd.NoteID,
 		CRDTUpdate: cmd.Update,
@@ -231,6 +217,20 @@ func writeNoteOutboxOperation(ctx context.Context, exec store.Executor, entry wo
 	if err != nil {
 		return fmt.Errorf("account: encode note body operation: %w", err)
 	}
+	return writeOutboxOperation(ctx, exec, entry, devicePrivate, cmd.WorkspaceID, deviceID, clock, payload)
+}
+
+// writeOutboxOperation encrypts, signs, and appends one plaintext
+// operation-payload to the outbox for a future synchronization transport.
+// Every local note/notebook/tag/attachment mutation service funnels through
+// this one place so the encrypt/sign/insert steps stay identical regardless
+// of which payload encoder produced the plaintext.
+func writeOutboxOperation(ctx context.Context, exec store.Executor, entry workspaceKeyEntry, devicePrivate *corecrypto.Secret, workspaceID, deviceID model.ID, clock model.HLC, payload []byte) error {
+	opID, err := model.NewID()
+	if err != nil {
+		return err
+	}
+
 	plaintext, err := corecrypto.TakeSecret(payload)
 	if err != nil {
 		return err
@@ -240,19 +240,19 @@ func writeNoteOutboxOperation(ctx context.Context, exec store.Executor, entry wo
 	metadata := corecrypto.ObjectMetadata{
 		SchemaVersion: corecrypto.SchemaVersionV1,
 		CryptoProfile: corecrypto.CryptoProfileV1,
-		WorkspaceID:   cmd.WorkspaceID.Bytes(),
+		WorkspaceID:   workspaceID.Bytes(),
 		ObjectID:      opID.Bytes(),
 		ObjectType:    corecrypto.ObjectTypeOperationPayload,
 		KeyID:         entry.KeyID,
 	}
 	encrypted, err := corecrypto.EncryptObject(entry.Key, metadata, plaintext)
 	if err != nil {
-		return fmt.Errorf("account: encrypt note body operation: %w", err)
+		return fmt.Errorf("account: encrypt outbox operation: %w", err)
 	}
 
 	signatureInput, err := corecrypto.CanonicalOperationSignatureInput(corecrypto.OperationSignatureFields{
 		OpID:          opID.Bytes(),
-		WorkspaceID:   cmd.WorkspaceID.Bytes(),
+		WorkspaceID:   workspaceID.Bytes(),
 		DeviceID:      deviceID.Bytes(),
 		HLCPhysicalMS: clock.PhysicalMS,
 		HLCLogical:    clock.Logical,
@@ -266,12 +266,12 @@ func writeNoteOutboxOperation(ctx context.Context, exec store.Executor, entry wo
 	}
 	signature, err := corecrypto.SignCanonical(corecrypto.CryptoProfileV1, devicePrivate, corecrypto.SignatureDomainOperation, signatureInput)
 	if err != nil {
-		return fmt.Errorf("account: sign note body operation: %w", err)
+		return fmt.Errorf("account: sign outbox operation: %w", err)
 	}
 
 	return store.InsertOutboxOperation(ctx, exec, store.OutboxOperation{
 		OpID:        opID,
-		WorkspaceID: cmd.WorkspaceID,
+		WorkspaceID: workspaceID,
 		DeviceID:    deviceID,
 		Clock:       clock,
 		KeyID:       entry.KeyID,

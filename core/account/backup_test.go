@@ -292,3 +292,24 @@ func TestCreateBackupRejectsInsufficientCapacity(t *testing.T) {
 		t.Fatalf("CreateBackup error = %v, want ErrInsufficientBackupCapacity", err)
 	}
 }
+
+func TestCopyFileCopiesContentAndRejectsMissingSource(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+	if err := os.WriteFile(src, []byte("blob bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil || string(got) != "blob bytes" {
+		t.Fatalf("copied content = %q, err = %v", got, err)
+	}
+
+	if err := copyFile(filepath.Join(dir, "missing.txt"), filepath.Join(dir, "dst2.txt")); err == nil {
+		t.Fatal("expected an error copying a missing source file")
+	}
+}

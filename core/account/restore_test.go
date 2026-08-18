@@ -325,3 +325,94 @@ func TestRestoreDatabaseFileRollsBackAndReopensOnFailure(t *testing.T) {
 	// double-closing it.
 	created.db = reopened
 }
+
+func TestPlanRestoreOnlyCountsStorageForAttachmentsNotAlreadyLocal(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+
+	shared, err := created.CreateNote(ctx, workspaceID, model.Nil, "Shared attachment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedAttachment, err := created.AddAttachment(ctx, workspaceID, shared.ID, "shared.txt", "text/plain", bytes.NewReader([]byte("shared content")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	backup, err := created.CreateBackup(ctx, t.TempDir(), store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	// Delete the note locally so it becomes an "addition" candidate, but
+	// the attachment's blob stays published locally via a second note that
+	// still references identical content (dedup means it is the same
+	// BlobID and so remains in the live blob store).
+	other, err := created.CreateNote(ctx, workspaceID, model.Nil, "Keeps the blob alive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := created.AddAttachment(ctx, workspaceID, other.ID, "shared.txt", "text/plain", bytes.NewReader([]byte("shared content"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := created.DeleteNote(ctx, workspaceID, shared.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := created.PlanRestore(ctx, backup.ID, []model.ID{shared.ID})
+	if err != nil {
+		t.Fatalf("PlanRestore: %v", err)
+	}
+	if len(plan.Entries) != 1 || plan.Entries[0].Kind != RestoreChangeUpdate {
+		t.Fatalf("plan entries = %+v, want one Update (the note's deleted state differs)", plan.Entries)
+	}
+	if plan.RequiredStorageBytes != 0 {
+		t.Fatalf("RequiredStorageBytes = %d, want 0: %x is already published locally", plan.RequiredStorageBytes, sharedAttachment.BlobID.Bytes())
+	}
+}
+
+func TestRestoreWholeRepublishesABlobMissingFromTheLiveStore(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Untitled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachment, err := created.AddAttachment(ctx, workspaceID, note.ID, "a.txt", "text/plain", bytes.NewReader([]byte("payload")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	backupsRoot := t.TempDir()
+	backup, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	// Simulate the live blob having been lost (for example, by disk
+	// corruption or an aggressive external cleanup) while the backup set
+	// still has its own copy.
+	if err := os.Remove(created.blobs.Path(attachment.BlobID)); err != nil {
+		t.Fatal(err)
+	}
+	exists, err := created.blobs.Exists(attachment.BlobID)
+	if err != nil || exists {
+		t.Fatalf("blob should be gone before restore: exists=%v err=%v", exists, err)
+	}
+
+	if _, err := created.RestoreWhole(ctx, backup.ID, backupsRoot, time.Now()); err != nil {
+		t.Fatalf("RestoreWhole: %v", err)
+	}
+
+	exists, err = created.blobs.Exists(attachment.BlobID)
+	if err != nil || !exists {
+		t.Fatalf("blob should be republished from the backup set after restore: exists=%v err=%v", exists, err)
+	}
+	var out bytes.Buffer
+	if _, _, err := created.ReadAttachment(ctx, workspaceID, attachment.BlobID, &out); err != nil || out.String() != "payload" {
+		t.Fatalf("ReadAttachment after republish: content=%q err=%v", out.String(), err)
+	}
+}

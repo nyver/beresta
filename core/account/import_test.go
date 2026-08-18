@@ -172,3 +172,22 @@ func TestEnmlToPlainTextStripsTagsAndPreservesLineBreaks(t *testing.T) {
 		t.Fatalf("enmlToPlainText = %q, want %q", got, want)
 	}
 }
+
+func TestAttachmentMediaTypeFromExtension(t *testing.T) {
+	cases := map[string]string{
+		"photo.png":    "image/png",
+		"photo.PNG":    "image/png",
+		"photo.jpg":    "image/jpeg",
+		"photo.jpeg":   "image/jpeg",
+		"anim.gif":     "image/gif",
+		"doc.pdf":      "application/pdf",
+		"notes.txt":    "text/plain",
+		"archive.dat":  "application/octet-stream",
+		"no-extension": "application/octet-stream",
+	}
+	for name, want := range cases {
+		if got := attachmentMediaTypeFromExtension(name); got != want {
+			t.Errorf("attachmentMediaTypeFromExtension(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

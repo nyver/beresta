@@ -93,12 +93,8 @@ func Migrate(ctx context.Context, db *sql.DB) (int, error) {
 		return 0, err
 	}
 
-	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
-		version         INTEGER PRIMARY KEY,
-		name            TEXT NOT NULL,
-		applied_unix_ms INTEGER NOT NULL
-	)`); err != nil {
-		return 0, fmt.Errorf("store: create schema_migrations table: %w", err)
+	if err := ensureSchemaMigrationsTable(ctx, db); err != nil {
+		return 0, err
 	}
 
 	current, err := schemaVersion(ctx, db)
@@ -119,8 +115,24 @@ func Migrate(ctx context.Context, db *sql.DB) (int, error) {
 	return applied, nil
 }
 
+// ensureSchemaMigrationsTable creates the schema_migrations bookkeeping
+// table if it does not already exist, so schemaVersion can be queried
+// safely on a database that has never been migrated.
+func ensureSchemaMigrationsTable(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+		version         INTEGER PRIMARY KEY,
+		name            TEXT NOT NULL,
+		applied_unix_ms INTEGER NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("store: create schema_migrations table: %w", err)
+	}
+	return nil
+}
+
 // schemaVersion reads the database's current recorded schema version, or
-// zero for a database that has never been migrated.
+// zero for a database that has never been migrated. Callers that have not
+// already ensured the schema_migrations table exists must call
+// ensureSchemaMigrationsTable first.
 func schemaVersion(ctx context.Context, db *sql.DB) (int, error) {
 	var version sql.NullInt64
 	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {

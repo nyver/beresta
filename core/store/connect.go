@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	corecrypto "github.com/beresta-app/beresta/core/crypto"
 	"github.com/beresta-app/beresta/core/store/sqlcipherdb"
@@ -46,6 +47,11 @@ func Open(ctx context.Context, path string, databaseKey *corecrypto.Secret) (*sq
 		return nil, 0, err
 	}
 
+	if err := backupBeforePendingMigration(ctx, db, path); err != nil {
+		db.Close()
+		return nil, 0, fmt.Errorf("store: safety backup before migration: %w", err)
+	}
+
 	version, err := Migrate(ctx, db)
 	if err != nil {
 		db.Close()
@@ -58,6 +64,34 @@ func Open(ctx context.Context, path string, databaseKey *corecrypto.Secret) (*sq
 	}
 
 	return db, version, nil
+}
+
+// backupBeforePendingMigration takes a BackupDatabaseFile safety copy when,
+// and only when, db already holds a schema (version > 0) that is older
+// than the newest embedded migration: a fresh database has nothing yet
+// worth protecting, and an up-to-date one has no migration about to run.
+// The backup is left in place beside path (never auto-deleted) as the
+// forward-fix recovery point if a migration is later found to be wrong.
+func backupBeforePendingMigration(ctx context.Context, db *sql.DB, path string) error {
+	if err := ensureSchemaMigrationsTable(ctx, db); err != nil {
+		return err
+	}
+	current, err := schemaVersion(ctx, db)
+	if err != nil {
+		return err
+	}
+	if current == 0 {
+		return nil
+	}
+	migrations, err := Migrations()
+	if err != nil {
+		return err
+	}
+	if len(migrations) == 0 || current >= migrations[len(migrations)-1].Version {
+		return nil
+	}
+	backupPath := fmt.Sprintf("%s.pre-migration-v%d-%d.bak", path, current, time.Now().UnixMilli())
+	return BackupDatabaseFile(ctx, db, path, backupPath)
 }
 
 // checkIntegrity runs SQLCipher's authenticated integrity check, which

@@ -118,7 +118,10 @@ func (a *Account) CommitNoteBody(ctx context.Context, cmd NoteBodyCommand) error
 	if err != nil {
 		return err
 	}
-	if err := saveNoteRevision(ctx, tx, entry, cmd.WorkspaceID, cmd.NoteID, revisionID, cmd.Update, clock.PhysicalMS); err != nil {
+	if err := saveNoteRevision(ctx, tx, entry, cmd.WorkspaceID, cmd.NoteID, revisionID, store.RevisionKindDelta, cmd.UpdateFormat, cmd.Update, clock.PhysicalMS); err != nil {
+		return err
+	}
+	if err := maybeCheckpointNoteRevisions(ctx, tx, entry, cmd.WorkspaceID, cmd.NoteID, snapshot, clock.PhysicalMS); err != nil {
 		return err
 	}
 
@@ -186,8 +189,12 @@ func saveNoteSnapshot(ctx context.Context, exec store.Executor, entry workspaceK
 	return store.UpsertCRDTState(ctx, exec, noteID, store.CRDTState{Snapshot: blob, StateVector: stateVector}, updatedUnixMS)
 }
 
-func saveNoteRevision(ctx context.Context, exec store.Executor, entry workspaceKeyEntry, workspaceID, noteID, revisionID model.ID, delta []byte, createdUnixMS uint64) error {
-	plaintext, err := corecrypto.TakeSecret(append([]byte(nil), delta...))
+// saveNoteRevision encrypts and stores one revision record, either a delta
+// (the raw Yjs update just applied, itself already an incremental
+// operation) or a checkpoint (a full document snapshot, see
+// maybeCheckpointNoteRevisions).
+func saveNoteRevision(ctx context.Context, exec store.Executor, entry workspaceKeyEntry, workspaceID, noteID, revisionID model.ID, kind int, format yjsadapter.Format, data []byte, createdUnixMS uint64) error {
+	plaintext, err := corecrypto.TakeSecret(append([]byte(nil), data...))
 	if err != nil {
 		return err
 	}
@@ -205,7 +212,37 @@ func saveNoteRevision(ctx context.Context, exec store.Executor, entry workspaceK
 	if err != nil {
 		return fmt.Errorf("account: encrypt note revision: %w", err)
 	}
-	return store.InsertRevision(ctx, exec, revisionID, noteID, store.RevisionKindDelta, blob, createdUnixMS)
+	return store.InsertRevision(ctx, exec, revisionID, noteID, kind, uint8(format), blob, createdUnixMS)
+}
+
+// noteRevisionCheckpointInterval is how many delta revisions accumulate
+// since the last checkpoint (or since the note's first revision) before
+// maybeCheckpointNoteRevisions writes a new one. A checkpoint bounds how
+// many deltas a later revision-history read or retention prune ever has to
+// replay from, at the cost of one extra full-snapshot revision every this
+// many edits.
+const noteRevisionCheckpointInterval = 20
+
+// maybeCheckpointNoteRevisions writes a checkpoint revision containing the
+// note's just-computed full document snapshot once
+// noteRevisionCheckpointInterval delta revisions have accumulated since the
+// last one (or since the note's first revision, if it has never had a
+// checkpoint). It must run in the same transaction as the delta revision it
+// follows, since the checkpoint's snapshot corresponds exactly to the state
+// after that delta.
+func maybeCheckpointNoteRevisions(ctx context.Context, exec store.Executor, entry workspaceKeyEntry, workspaceID, noteID model.ID, snapshot []byte, createdUnixMS uint64) error {
+	due, err := store.CheckpointDue(ctx, exec, noteID, noteRevisionCheckpointInterval)
+	if err != nil {
+		return err
+	}
+	if !due {
+		return nil
+	}
+	checkpointID, err := model.NewID()
+	if err != nil {
+		return err
+	}
+	return saveNoteRevision(ctx, exec, entry, workspaceID, noteID, checkpointID, store.RevisionKindCheckpoint, noteSnapshotFormat, snapshot, createdUnixMS)
 }
 
 func writeNoteOutboxOperation(ctx context.Context, exec store.Executor, entry workspaceKeyEntry, devicePrivate *corecrypto.Secret, cmd NoteBodyCommand, deviceID model.ID, clock model.HLC) error {

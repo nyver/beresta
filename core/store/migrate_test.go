@@ -87,8 +87,8 @@ func TestMigrateAppliesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
-	if version != 2 {
-		t.Fatalf("Migrate() version = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("Migrate() version = %d, want 3", version)
 	}
 
 	expectedTables := []string{
@@ -135,8 +135,8 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 {
-		t.Fatalf("schema_migrations row count = %d, want 2 (no re-application)", count)
+	if count != 3 {
+		t.Fatalf("schema_migrations row count = %d, want 3 (no re-application)", count)
 	}
 }
 

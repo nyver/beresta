@@ -56,8 +56,8 @@ func TestOpenAppliesMigrationsAndPassesIntegrityCheck(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer db.Close()
-	if version != 1 {
-		t.Fatalf("Open() version = %d, want 1", version)
+	if version != 2 {
+		t.Fatalf("Open() version = %d, want 2", version)
 	}
 
 	var name string
@@ -88,8 +88,8 @@ func TestOpenReopensWithSameKey(t *testing.T) {
 		t.Fatalf("second Open() error = %v", err)
 	}
 	defer second.Close()
-	if version != 1 {
-		t.Fatalf("second Open() version = %d, want 1", version)
+	if version != 2 {
+		t.Fatalf("second Open() version = %d, want 2", version)
 	}
 	var count int
 	if err := second.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&count); err != nil {
@@ -144,8 +144,8 @@ func TestDeviceKeyIntegratesWithOpen(t *testing.T) {
 		t.Fatalf("Open() with a keystore-wrapped key error = %v", err)
 	}
 	db.Close()
-	if version != 1 {
-		t.Fatalf("version = %d, want 1", version)
+	if version != 2 {
+		t.Fatalf("version = %d, want 2", version)
 	}
 
 	restoredKey, _, err := LoadOrCreateDatabaseKey(ctx, wrapper, "device-seven", envelope)

@@ -8,6 +8,7 @@ import {
   listTags,
   lockAccount,
   searchByTag,
+  updateSettings,
   unwrapError,
   verifyAllBackups,
 } from "../api";
@@ -34,11 +35,15 @@ type Selection = { kind: "all" } | { kind: "notebook"; id: string } | { kind: "t
  * navigation, a note list, and the Yjs-backed body editor, all wired to
  * real account data.
  */
-export function Shell({ onLocked }: ShellProps) {
+export function Shell({ account, onLocked }: ShellProps) {
   const { t, errorMessage, ready } = useI18n();
   const [locking, setLocking] = useState(false);
   const editorPaneRef = useRef<NoteEditorPaneHandle>(null);
   const searchBarRef = useRef<SearchBarHandle>(null);
+  // null means "not yet loaded"; the auto-lock idle timer stays disarmed
+  // until it knows the real value, so it can never fire early using a
+  // guessed default.
+  const [autoLockMinutes, setAutoLockMinutes] = useState<number | null>(null);
 
   const [notebooks, setNotebooks] = useState<main.NotebookDTO[]>([]);
   const [tags, setTags] = useState<main.TagDTO[]>([]);
@@ -94,6 +99,7 @@ export function Shell({ onLocked }: ShellProps) {
     if (!ready) return;
     getSettings()
       .then((settings) => {
+        setAutoLockMinutes(settings.auto_lock_minutes);
         if (!settings.backup_directory) return;
         return ensureDailyBackup(settings.backup_directory).then(() => verifyAllBackups());
       })
@@ -167,9 +173,53 @@ export function Shell({ onLocked }: ShellProps) {
       await editorPaneRef.current?.flush();
       await lockAccount();
       onLocked();
-    } finally {
+      // Deliberately not reset to false here: the parent (App.tsx)
+      // re-resolves its screen right after onLocked and unmounts Shell,
+      // but that happens on a later render, not synchronously. Resetting
+      // `locking` now would flash Shell's still-loaded note content back
+      // into view for that one render - exactly what the locking overlay
+      // below exists to prevent (task 5.8's "secure content hiding while
+      // locked").
+    } catch (thrown) {
       setLocking(false);
+      throw thrown;
     }
+  }
+
+  // Configurable automatic lock (task 5.8): resets on any user activity
+  // and locks after autoLockMinutes of none. 0/null disarms it. handleLock
+  // is read through a ref rather than listed as a dependency so this
+  // effect (and its event-listener churn) does not re-run on every Shell
+  // render - only when the configured duration itself changes.
+  const handleLockRef = useRef(handleLock);
+  handleLockRef.current = handleLock;
+
+  useEffect(() => {
+    if (!autoLockMinutes) return;
+    let timer: number;
+    const resetTimer = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        void handleLockRef.current();
+      }, autoLockMinutes * 60 * 1000);
+    };
+    const activityEvents = ["mousedown", "mousemove", "keydown", "wheel", "touchstart"] as const;
+    for (const event of activityEvents) {
+      window.addEventListener(event, resetTimer);
+    }
+    resetTimer();
+    return () => {
+      window.clearTimeout(timer);
+      for (const event of activityEvents) {
+        window.removeEventListener(event, resetTimer);
+      }
+    };
+  }, [autoLockMinutes]);
+
+  async function handleAutoLockChange(minutes: number) {
+    const current = await getSettings();
+    const updated = await updateSettings({ ...current, auto_lock_minutes: minutes });
+    setAutoLockMinutes(updated.auto_lock_minutes);
   }
 
   return (
@@ -177,6 +227,27 @@ export function Shell({ onLocked }: ShellProps) {
       <header className="shell-topbar">
         <h1>{t("shell.title")}</h1>
         <div className="shell-topbar-actions">
+          {account.key_protection ? (
+            <span className="key-protection-badge">
+              {account.key_protection === "windows-hello"
+                ? t("shell.key_protection_hello")
+                : t("shell.key_protection_dpapi")}
+            </span>
+          ) : null}
+          <label className="auto-lock-control">
+            <span>{t("shell.auto_lock_label")}</span>
+            <select
+              value={autoLockMinutes ?? ""}
+              disabled={autoLockMinutes === null}
+              onChange={(event) => void handleAutoLockChange(Number(event.target.value))}
+            >
+              <option value={0}>{t("shell.auto_lock_never")}</option>
+              <option value={5}>{t("shell.auto_lock_5min")}</option>
+              <option value={15}>{t("shell.auto_lock_15min")}</option>
+              <option value={30}>{t("shell.auto_lock_30min")}</option>
+              <option value={60}>{t("shell.auto_lock_60min")}</option>
+            </select>
+          </label>
           <button type="button" onClick={() => setDataModalOpen(true)}>
             {t("data.title")}
           </button>
@@ -193,7 +264,16 @@ export function Shell({ onLocked }: ShellProps) {
         </Modal>
       ) : null}
 
-      {error ? (
+      {locking ? (
+        // Replaces every note-bearing element immediately, before the
+        // flush/lock IPC calls above even resolve: task 5.8's "secure
+        // content hiding while locked" covers this transition, not just
+        // the already-swapped-out Unlock screen the parent shows once
+        // onLocked() actually fires.
+        <div className="shell-locking-overlay">
+          <p>{t("shell.locking_message")}</p>
+        </div>
+      ) : error ? (
         <div className="shell-error">
           <p role="alert">{error}</p>
           <button type="button" onClick={loadAll}>

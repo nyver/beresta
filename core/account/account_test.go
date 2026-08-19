@@ -71,6 +71,104 @@ func fastKDF() corecrypto.Argon2idCalibrationOptions {
 	return corecrypto.Argon2idCalibrationOptions{MemoryLimitKiB: corecrypto.MinArgon2idMemoryKiB, Parallelism: 1}
 }
 
+func TestEraseLocalAccountRemovesEveryLocalFile(t *testing.T) {
+	path := tempDBPath(t)
+	wrapper := newFakeWrapper()
+	ctx := context.Background()
+
+	created, err := Create(ctx, CreateOptions{
+		DatabasePath: path,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+		KDFOptions:   fastKDF(),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if err := created.Lock(); err != nil {
+		t.Fatalf("Lock() error = %v", err)
+	}
+
+	// Simulate a populated attachment blob store without needing full
+	// attachment machinery: EraseLocalAccount only needs these directories
+	// (and anything in them) to exist and disappear.
+	dataDir := filepath.Dir(path)
+	blobsDir := filepath.Join(dataDir, "blobs")
+	runtimeDir := filepath.Join(dataDir, "runtime")
+	if err := os.MkdirAll(blobsDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(blobs) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blobsDir, "some-blob"), []byte("ciphertext"), 0o600); err != nil {
+		t.Fatalf("WriteFile(blob) error = %v", err)
+	}
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(runtime) error = %v", err)
+	}
+
+	envelope := envelopePath(path)
+	for _, p := range []string{path, envelope} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("Stat(%s) error = %v, want the file to exist before erasing", p, err)
+		}
+	}
+
+	if err := EraseLocalAccount(path); err != nil {
+		t.Fatalf("EraseLocalAccount() error = %v", err)
+	}
+
+	for _, p := range []string{path, path + "-wal", path + "-shm", envelope, blobsDir, runtimeDir} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("Stat(%s) after EraseLocalAccount() error = %v, want os.IsNotExist", p, err)
+		}
+	}
+
+	if _, err := Unlock(ctx, UnlockOptions{DatabasePath: path, Passphrase: []byte("correct horse battery staple"), Wrapper: wrapper}); !errors.Is(err, ErrNoLocalAccount) {
+		t.Fatalf("Unlock() after erase error = %v, want %v", err, ErrNoLocalAccount)
+	}
+}
+
+func TestEraseLocalAccountOnAnAlreadyMissingPathIsNotAnError(t *testing.T) {
+	path := tempDBPath(t)
+	if err := EraseLocalAccount(path); err != nil {
+		t.Fatalf("EraseLocalAccount() on a never-created path error = %v, want nil", err)
+	}
+}
+
+// TestEraseLocalAccountReportsAFailureToDeleteTheDatabase proves that a
+// database file EraseLocalAccount cannot actually delete - here, because
+// the caller violated the documented precondition and left the account
+// unlocked, so the SQLCipher connection still holds the file open - is
+// reported as an error rather than silently treated as erased. Without
+// this, a caller (WipeLocalAccount) could report a wipe as successful and
+// navigate away while the encrypted database was still fully intact on
+// disk.
+func TestEraseLocalAccountReportsAFailureToDeleteTheDatabase(t *testing.T) {
+	path := tempDBPath(t)
+	wrapper := newFakeWrapper()
+	ctx := context.Background()
+
+	created, err := Create(ctx, CreateOptions{
+		DatabasePath: path,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+		KDFOptions:   fastKDF(),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	defer created.Lock()
+	// Deliberately left unlocked: the open connection should keep the
+	// database file locked open on Windows, so EraseLocalAccount's own
+	// os.Remove of it fails instead of silently no-oping.
+
+	if err := EraseLocalAccount(path); err == nil {
+		t.Fatal("EraseLocalAccount() error = nil while the database is still open, want a non-nil error")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("Stat(path) after a failed EraseLocalAccount() error = %v, want the file to still exist", err)
+	}
+}
+
 func TestCreateThenUnlockRecoversTheSameIdentity(t *testing.T) {
 	path := tempDBPath(t)
 	wrapper := newFakeWrapper()

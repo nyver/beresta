@@ -56,6 +56,7 @@ export const appMock = {
   ExportNotes: vi.fn(),
   ImportBerestaArchive: vi.fn(),
   ImportEvernoteArchive: vi.fn(),
+  WipeLocalAccount: vi.fn(),
 };
 
 (globalThis as unknown as { go: { main: { App: typeof appMock } } }).go = {

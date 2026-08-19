@@ -754,3 +754,45 @@ func removeDatabaseFiles(databasePath string) {
 		os.Remove(databasePath + suffix)
 	}
 }
+
+// EraseLocalAccount permanently deletes every local file this device holds
+// for the account at databasePath: the SQLCipher database and its WAL/SHM
+// sidecars, the DPAPI/Hello-wrapped device-key envelope, and the attachment
+// blob store's published and staging directories. It is the primitive
+// behind the windows-desktop-client spec's revocation response ("erase
+// local decrypted and encrypted account data") and a user-triggered local
+// wipe alike; the caller is responsible for the "clear irreversible
+// confirmation policy" the spec also requires - this function performs no
+// confirmation of its own.
+//
+// The caller must ensure no *Account for this path is open first (Lock it,
+// or never have unlocked it this session): an open SQLCipher connection
+// holds the database file open, and Windows refuses to delete a file that
+// is still open. A path with nothing to erase (already wiped, or never
+// created) is not an error - every removal here tolerates a missing target,
+// the same as removeDatabaseFiles above.
+func EraseLocalAccount(databasePath string) error {
+	// Deliberately not removeDatabaseFiles: that helper is a best-effort
+	// cleanup used on an already-failing Create path and silently discards
+	// every os.Remove error, not just "missing file". EraseLocalAccount's
+	// entire job is guaranteeing the data is actually gone, so a failure
+	// to delete the main database - a still-open handle from a caller that
+	// violated this function's precondition, an antivirus lock, and so on
+	// - must be reported, not swallowed into a false "erased" result.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(databasePath + suffix); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("account: erase database file: %w", err)
+		}
+	}
+	if err := os.Remove(envelopePath(databasePath)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("account: erase key envelope: %w", err)
+	}
+	dataDir := filepath.Dir(databasePath)
+	if err := os.RemoveAll(filepath.Join(dataDir, "blobs")); err != nil {
+		return fmt.Errorf("account: erase attachment blobs: %w", err)
+	}
+	if err := os.RemoveAll(filepath.Join(dataDir, "runtime")); err != nil {
+		return fmt.Errorf("account: erase attachment staging area: %w", err)
+	}
+	return nil
+}

@@ -45,6 +45,7 @@ import {
   UpdateSettings,
   VerifyAllBackups,
   VerifyBackup,
+  WipeLocalAccount,
 } from "../wailsjs/go/main/App";
 import { main } from "../wailsjs/go/models";
 
@@ -368,4 +369,15 @@ export async function importBerestaArchive(sourceDir: string): Promise<main.Impo
 
 export async function importEvernoteArchive(path: string): Promise<main.ImportResultDTO> {
   return ImportEvernoteArchive(path);
+}
+
+/**
+ * wipeLocalAccount permanently deletes every local file this device holds
+ * for the account at databasePath - the database, its key envelope, and
+ * the attachment blob store - without requiring it to be unlocked first.
+ * Callers are responsible for an explicit irreversible-confirmation step
+ * before calling this; it performs no confirmation of its own.
+ */
+export async function wipeLocalAccount(databasePath: string): Promise<void> {
+  return WipeLocalAccount(databasePath);
 }

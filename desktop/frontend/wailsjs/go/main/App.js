@@ -245,3 +245,7 @@ export function VerifyAllBackups() {
 export function VerifyBackup(arg1) {
   return window['go']['main']['App']['VerifyBackup'](arg1);
 }
+
+export function WipeLocalAccount(arg1) {
+  return window['go']['main']['App']['WipeLocalAccount'](arg1);
+}

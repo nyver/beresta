@@ -105,6 +105,33 @@ p {
   gap: 0.5rem;
 }
 
+.wipe-section {
+  margin-top: 1.5rem;
+}
+
+.wipe-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid #8a2c1f;
+  border-radius: 0.35rem;
+}
+
+.wipe-confirm label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.wipe-confirm input {
+  font: inherit;
+  padding: 0.5rem;
+  border: 1px solid #d8d1c4;
+  border-radius: 0.35rem;
+}
+
 .path-row input {
   flex: 1;
 }
@@ -853,4 +880,35 @@ button:disabled {
   margin: 0;
   padding-left: 1.25rem;
   font-size: 0.85rem;
+}
+
+.key-protection-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 1rem;
+  background: #eee2d0;
+  color: #5a5148;
+}
+
+.auto-lock-control {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: #5a5148;
+}
+
+.auto-lock-control select {
+  font: inherit;
+  padding: 0.3rem;
+  border: 1px solid #d8d1c4;
+  border-radius: 0.35rem;
+}
+
+.shell-locking-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(100vh - 3.5rem);
+  color: #5a5148;
 }

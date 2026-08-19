@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
@@ -16,6 +16,7 @@ import {
   mockSettings,
 } from "../testUtils";
 import { Shell } from "./Shell";
+import { main } from "../../wailsjs/go/models";
 
 function mockEmptyNoteDocument() {
   const doc = new Y.Doc();
@@ -27,14 +28,16 @@ function mockEmptyNoteDocument() {
   appMock.ListRevisions.mockResolvedValue([]);
 }
 
-function renderShell() {
+function renderShell(
+  options: { settings?: Partial<main.AppSettings>; account?: main.AccountInfo } = {},
+) {
   mockLocaleCatalog();
-  mockSettings();
+  mockSettings(options.settings);
   mockSavedSearches();
   const onLocked = vi.fn();
   render(
     <I18nProvider>
-      <Shell account={fakeAccountInfo()} onLocked={onLocked} />
+      <Shell account={options.account ?? fakeAccountInfo()} onLocked={onLocked} />
     </I18nProvider>,
   );
   return { onLocked };
@@ -179,5 +182,104 @@ describe("Shell", () => {
 
     await waitFor(() => expect(onLocked).toHaveBeenCalled());
     expect(appMock.LockAccount).toHaveBeenCalled();
+  });
+
+  it("hides note content behind a locking overlay immediately, before LockAccount resolves", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([fakeNote({ title: "Secret note" })]);
+    let resolveLock: () => void = () => {};
+    appMock.LockAccount.mockReturnValue(new Promise<void>((resolve) => (resolveLock = resolve)));
+    renderShell();
+    const user = userEvent.setup();
+
+    await screen.findByText("Secret note");
+    await user.click(screen.getByRole("button", { name: "shell.lock_button" }));
+
+    expect(await screen.findByText("shell.locking_message")).toBeInTheDocument();
+    expect(screen.queryByText("Secret note")).not.toBeInTheDocument();
+
+    resolveLock();
+    await waitFor(() => expect(appMock.LockAccount).toHaveBeenCalled());
+  });
+
+  it("shows a key-protection badge reflecting the account's actual protection mode", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    renderShell({ account: fakeAccountInfo({ key_protection: "windows-hello" }) });
+
+    expect(await screen.findByText("shell.key_protection_hello")).toBeInTheDocument();
+  });
+
+  it("changes the auto-lock duration through the topbar control and persists it", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    appMock.UpdateSettings.mockResolvedValue({
+      language: "en",
+      last_database_path: "",
+      auto_lock_minutes: 30,
+      backup_directory: "C:\\backups",
+    });
+    renderShell();
+    const user = userEvent.setup();
+
+    const select = await screen.findByLabelText("shell.auto_lock_label");
+    // The control starts disabled until the initial GetSettings() fetch
+    // resolves and arms autoLockMinutes; selecting an option before then
+    // would silently no-op.
+    await waitFor(() => expect(select).toBeEnabled());
+    await user.selectOptions(select, "30");
+
+    await waitFor(() =>
+      expect(appMock.UpdateSettings).toHaveBeenCalledWith(expect.objectContaining({ auto_lock_minutes: 30 })),
+    );
+  });
+
+  it("locks automatically after the configured idle timeout with no activity", async () => {
+    vi.useFakeTimers();
+    try {
+      appMock.ListNotebooks.mockResolvedValue([]);
+      appMock.ListTags.mockResolvedValue([]);
+      appMock.ListNotes.mockResolvedValue([]);
+      appMock.LockAccount.mockResolvedValue(undefined);
+      renderShell({ settings: { auto_lock_minutes: 5 } });
+
+      // Flush the initial settings fetch that arms the idle timer, then
+      // advance past the full 5-minute window with no simulated activity.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      });
+
+      expect(appMock.LockAccount).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not lock automatically when auto-lock is disabled", async () => {
+    vi.useFakeTimers();
+    try {
+      appMock.ListNotebooks.mockResolvedValue([]);
+      appMock.ListTags.mockResolvedValue([]);
+      appMock.ListNotes.mockResolvedValue([]);
+      appMock.LockAccount.mockResolvedValue(undefined);
+      renderShell({ settings: { auto_lock_minutes: 0 } });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+      });
+
+      expect(appMock.LockAccount).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

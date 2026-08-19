@@ -123,3 +123,5 @@ export function UpdateSettings(arg1:main.AppSettings):Promise<main.AppSettings>;
 export function VerifyAllBackups():Promise<void>;
 
 export function VerifyBackup(arg1:string):Promise<void>;
+
+export function WipeLocalAccount(arg1:string):Promise<void>;

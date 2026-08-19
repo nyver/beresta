@@ -150,6 +150,22 @@ func (a *Account) WorkspaceKey(workspaceID model.ID) (key *corecrypto.Secret, ke
 	return entry.Key, entry.KeyID, nil
 }
 
+// Workspaces returns the IDs of every workspace this account currently
+// holds a key for, in no particular order. It performs no I/O and exposes
+// no key material.
+func (a *Account) Workspaces() ([]model.ID, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.locked {
+		return nil, ErrAccountLocked
+	}
+	ids := make([]model.ID, 0, len(a.workspaceKeys))
+	for id := range a.workspaceKeys {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 // Lock wipes every live secret and closes the database connection. It is
 // idempotent.
 func (a *Account) Lock() error {

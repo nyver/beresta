@@ -30,6 +30,17 @@ with no desktop or mobile screen wired to it yet:
 - architecture, threat-model, crypto, synchronization, and ADR documentation;
 - one root verification command and a Windows CI workflow.
 
+Phase 4 (Windows desktop application) is in progress. The coarse Wails
+application service layer is implemented (`desktop/app.go` and its sibling
+files): account lifecycle, note/notebook/tag commands, search and saved
+searches, revision history, attachments (via native file pickers, since the
+JS bridge cannot carry Go `io.Reader`/`io.Writer` streams), backup/restore,
+import/export, garbage collection, desktop settings, and the English/Russian
+locale catalogs are all bound to the frontend as JSON-safe methods that never
+expose the raw database handle or key material, plus `account:unlocked`,
+`account:locked`, and `sync:status` events. No screen consumes these bindings
+yet; that is the remaining phase-4 work (tasks 5.2 onward).
+
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
 Cryptographic/platform protection verification is recorded in
@@ -59,6 +70,7 @@ The normative design is documented in [architecture.md](docs/architecture.md), [
 | `desktop/` | Wails v2 process and React/TypeScript Windows UI |
 | `mobile/` | Flutter Android UI and platform wrapper |
 | `server/` | Optional Go home synchronization server and CLI |
+| `locales/` | Embedded English/Russian UI string catalogs shared by clients |
 | `schema/` | Versioned wire/storage formats and compatibility fixtures |
 | `docs/` | Architecture, threat model, crypto/sync specifications, and ADRs |
 | `build/` | Build, packaging, CI, and deployment assets |

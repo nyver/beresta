@@ -1,0 +1,47 @@
+import { appMock } from "./setupTests";
+import { main } from "../wailsjs/go/models";
+
+/**
+ * identityCatalog returns the requested key itself for any lookup, so
+ * component tests can assert on stable key names (e.g.
+ * "onboarding.create_button") instead of duplicating translated copy from
+ * locales/en.json, which would drift out of sync silently.
+ */
+export const identityCatalog: Record<string, string> = new Proxy(
+  {},
+  { get: (_target, prop: string) => prop },
+);
+
+export function mockLocaleCatalog(locale: "en" | "ru" = "en") {
+  appMock.Catalog.mockResolvedValue({ locale, strings: identityCatalog, supported: ["en", "ru"] });
+}
+
+export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
+  const settings: main.AppSettings = {
+    language: "en",
+    last_database_path: "",
+    auto_lock_minutes: 15,
+    ...overrides,
+  };
+  appMock.GetSettings.mockResolvedValue(settings);
+  appMock.UpdateSettings.mockResolvedValue(settings);
+  return settings;
+}
+
+export function mockLockedStatus() {
+  appMock.Status.mockResolvedValue({ unlocked: false });
+}
+
+export function mockUnlockedStatus(account: main.AccountInfo) {
+  appMock.Status.mockResolvedValue({ unlocked: true, account });
+}
+
+export function fakeAccountInfo(overrides: Partial<main.AccountInfo> = {}): main.AccountInfo {
+  return {
+    account_id: "0000-account",
+    device_id: "0000-device",
+    workspace_id: "0000-workspace",
+    key_protection: "WindowsDPAPI",
+    ...overrides,
+  };
+}

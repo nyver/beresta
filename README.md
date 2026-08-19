@@ -38,8 +38,19 @@ JS bridge cannot carry Go `io.Reader`/`io.Writer` streams), backup/restore,
 import/export, garbage collection, desktop settings, and the English/Russian
 locale catalogs are all bound to the frontend as JSON-safe methods that never
 expose the raw database handle or key material, plus `account:unlocked`,
-`account:locked`, and `sync:status` events. No screen consumes these bindings
-yet; that is the remaining phase-4 work (tasks 5.2 onward).
+`account:locked`, and `sync:status` events. Every bound method's failure is a
+stable `{code, message}` pair (`desktop/errors.go`'s `AppError`, JSON-encoded
+because Wails only ever transmits an error's plain string across the JS
+bridge) so the frontend can localize and branch on `code` instead of
+matching English backend text.
+
+The first screen built on top of that layer is now in place: English/Russian
+onboarding with "Only on this computer" selected by default and a "Connect
+to server" card that explains it is not available yet without blocking local
+account creation, a returning-user unlock screen (chosen automatically when
+a previous local account is on record), and a minimal placeholder shell that
+proves an unlocked account round trip end to end. The real notebook/note
+UI is the remaining phase-4 work (tasks 5.3 onward).
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).

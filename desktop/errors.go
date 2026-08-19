@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/beresta-app/beresta/core/account"
@@ -21,8 +22,22 @@ type AppError struct {
 	Message string `json:"message"`
 }
 
+// Error encodes the AppError as JSON rather than returning Message alone.
+// Wails v2's binding dispatcher rejects the frontend's promise with only
+// the plain string from err.Error() (see
+// wailsapp/wails/v2/internal/frontend/dispatcher.processCallMessage); it
+// never transmits a Go error's structured fields. Encoding Code and
+// Message together here, and decoding them back out in the frontend's api
+// helper (desktop/frontend/src/api.ts), is the only way the Code survives
+// the bridge intact.
 func (e *AppError) Error() string {
-	return e.Message
+	data, err := json.Marshal(e)
+	if err != nil {
+		// e's fields are always plain strings, so Marshal cannot fail; this
+		// is an unreachable fallback, not a real error path.
+		return e.Message
+	}
+	return string(data)
 }
 
 // Known AppError codes. Frontend logic must switch on these, never on

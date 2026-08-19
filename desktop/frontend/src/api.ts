@@ -3,8 +3,12 @@ import {
   CreateAccount,
   DefaultDatabasePath,
   GetSettings,
+  ListNotebooks,
+  ListNotes,
+  ListTags,
   LockAccount,
   PickSaveDestination,
+  SearchByTag,
   Status,
   UnlockAccount,
   UpdateSettings,
@@ -105,4 +109,20 @@ export async function pickDatabaseDestination(
   defaultFileName: string,
 ): Promise<string> {
   return PickSaveDestination(defaultFileName);
+}
+
+export async function listNotebooks(): Promise<main.NotebookDTO[]> {
+  return ListNotebooks();
+}
+
+export async function listTags(): Promise<main.TagDTO[]> {
+  return ListTags();
+}
+
+export async function listNotes(): Promise<main.NoteDTO[]> {
+  return ListNotes();
+}
+
+export async function searchByTag(tagId: string): Promise<main.SearchResultDTO[]> {
+  return SearchByTag(tagId);
 }

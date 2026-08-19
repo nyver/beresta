@@ -88,6 +88,8 @@ export function SaveAttachmentToFile(arg1:string,arg2:string):Promise<main.Attac
 
 export function Search(arg1:string):Promise<Array<main.SearchResultDTO>>;
 
+export function SearchByTag(arg1:string):Promise<Array<main.SearchResultDTO>>;
+
 export function SetNoteFlags(arg1:string,arg2:boolean,arg3:boolean):Promise<void>;
 
 export function SetNoteNotebook(arg1:string,arg2:string):Promise<void>;

@@ -45,3 +45,44 @@ export function fakeAccountInfo(overrides: Partial<main.AccountInfo> = {}): main
     ...overrides,
   };
 }
+
+let fixtureCounter = 0;
+function nextFixtureId(prefix: string): string {
+  fixtureCounter += 1;
+  return `${prefix}-${fixtureCounter}`;
+}
+
+export function fakeNotebook(overrides: Partial<main.NotebookDTO> = {}): main.NotebookDTO {
+  return {
+    id: nextFixtureId("notebook"),
+    workspace_id: "workspace",
+    parent_id: "",
+    name: "Notebook",
+    deleted: false,
+    ...overrides,
+  };
+}
+
+export function fakeTag(overrides: Partial<main.TagDTO> = {}): main.TagDTO {
+  return {
+    id: nextFixtureId("tag"),
+    workspace_id: "workspace",
+    name: "Tag",
+    deleted: false,
+    ...overrides,
+  };
+}
+
+export function fakeNote(overrides: Partial<main.NoteDTO> = {}): main.NoteDTO {
+  return {
+    id: nextFixtureId("note"),
+    workspace_id: "workspace",
+    notebook_id: "",
+    title: "Note",
+    pinned: false,
+    archived: false,
+    deleted: false,
+    created_unix_ms: Date.UTC(2026, 0, 1),
+    ...overrides,
+  };
+}

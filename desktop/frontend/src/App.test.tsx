@@ -32,6 +32,9 @@ describe("App", () => {
     const account = fakeAccountInfo();
     mockUnlockedStatus(account);
     mockSettings();
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
 
     render(<App />);
 

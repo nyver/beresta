@@ -174,6 +174,10 @@ export function Search(arg1) {
   return window['go']['main']['App']['Search'](arg1);
 }
 
+export function SearchByTag(arg1) {
+  return window['go']['main']['App']['SearchByTag'](arg1);
+}
+
 export function SetNoteFlags(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetNoteFlags'](arg1, arg2, arg3);
 }

@@ -19,11 +19,35 @@ export const appMock = {
   UnlockAccount: vi.fn(),
   LockAccount: vi.fn(),
   PickSaveDestination: vi.fn(),
+  ListNotebooks: vi.fn(),
+  ListTags: vi.fn(),
+  ListNotes: vi.fn(),
+  SearchByTag: vi.fn(),
 };
 
 (globalThis as unknown as { go: { main: { App: typeof appMock } } }).go = {
   main: { App: appMock },
 };
+
+// jsdom has no layout engine, so every element reports a 0x0 box and has
+// no ResizeObserver at all. @tanstack/react-virtual (the NoteList's
+// virtualization, see shell/NoteList.tsx) measures its scroll container
+// through @tanstack/virtual-core's getRect(), which reads
+// offsetWidth/offsetHeight specifically (not getBoundingClientRect and
+// not clientHeight/clientWidth) - without stubbing those two, the
+// virtualizer always computes a 0-height viewport and renders zero rows.
+// ResizeObserver itself is stubbed separately only so the library's
+// unconditional `new ResizeObserver(...)` call does not throw; it never
+// needs to actually fire for a static test scenario like this one.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+  ResizeObserverStub;
+Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, value: 800 });
+Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, value: 600 });
 
 beforeEach(() => {
   for (const fn of Object.values(appMock)) {

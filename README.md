@@ -44,13 +44,19 @@ because Wails only ever transmits an error's plain string across the JS
 bridge) so the frontend can localize and branch on `code` instead of
 matching English backend text.
 
-The first screen built on top of that layer is now in place: English/Russian
+The first screens built on top of that layer are now in place: English/Russian
 onboarding with "Only on this computer" selected by default and a "Connect
 to server" card that explains it is not available yet without blocking local
 account creation, a returning-user unlock screen (chosen automatically when
-a previous local account is on record), and a minimal placeholder shell that
-proves an unlocked account round trip end to end. The real notebook/note
-UI is the remaining phase-4 work (tasks 5.3 onward).
+a previous local account is on record), and a main shell with a keyboard-
+accessible notebook tree, tag navigation (via a dedicated `SearchByTag`
+binding that reuses the same search index as the search box, without its
+text-query quoting limitations), and a virtualized note list
+(`@tanstack/react-virtual`, since the account ceiling is 20,000 notes)
+selecting into a placeholder detail pane. There is no rich-text editor yet:
+that, plus attachments, revisions, backup/restore UI, lock/unlock polish, the
+system tray/hotkey, and the installer are the remaining phase-4 work (tasks
+5.4 onward).
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
@@ -243,7 +249,7 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 
 ## Current Limitations
 
-- The desktop and mobile applications are phase-1 shells, not functional note clients; the complete phase-3 local-only product core (`core/account`, `core/store`) is exercised only through Go tests, with no desktop/mobile screen wired to it yet.
+- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, and a main shell (notebook tree, tags, note list) wired to the real local-only product core, but has no rich-text editor, attachment, revision, or backup/restore UI yet, and the complete phase-3 core is otherwise exercised only through Go tests.
 - The optional synchronization server has not been implemented; `core/transport`'s `SyncTransport` currently has only the default local no-op implementation.
 - `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.
 - Revision rollback and portable/Evernote import recreate content as plain text; rich-text formatting is not round-tripped through either path (see [ASSUMPTIONS.md](ASSUMPTIONS.md)).

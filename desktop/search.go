@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"github.com/beresta-app/beresta/core/model"
 	"github.com/beresta-app/beresta/core/store"
 )
 
@@ -28,6 +29,33 @@ func (a *App) Search(text string) ([]SearchResultDTO, error) {
 		return nil, mapError(err)
 	}
 	results, err := acc.Search(ctx, workspaceID, q)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := make([]SearchResultDTO, len(results))
+	for i, r := range results {
+		out[i] = SearchResultDTO{Note: noteDTO(r.Note), Rank: r.Rank}
+	}
+	return out, nil
+}
+
+// SearchByTag returns every non-deleted note in the account's workspace
+// carrying tagID (newest first is not guaranteed; see store.SearchNotes),
+// up to the search result cap. It exists for programmatic tag-navigation
+// filtering (the sidebar tag list): going through Search's text query
+// language would require quoting a tag name containing spaces, which
+// store.ParseSearchQueryText's simple whitespace tokenizer does not
+// support.
+func (a *App) SearchByTag(tagID string) ([]SearchResultDTO, error) {
+	acc, workspaceID, err := a.primaryWorkspace()
+	if err != nil {
+		return nil, mapError(err)
+	}
+	tag, err := parseID(tagID)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	results, err := acc.Search(a.requestContext(), workspaceID, store.SearchQuery{TagIDs: []model.ID{tag}})
 	if err != nil {
 		return nil, mapError(err)
 	}

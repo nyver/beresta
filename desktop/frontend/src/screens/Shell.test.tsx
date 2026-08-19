@@ -1,11 +1,21 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import * as Y from "yjs";
 
+import { bytesToBase64 } from "../editor/base64";
 import { I18nProvider } from "../i18n";
 import { appMock } from "../setupTests";
 import { fakeAccountInfo, fakeNote, fakeNotebook, fakeTag, mockLocaleCatalog, mockSettings } from "../testUtils";
 import { Shell } from "./Shell";
+
+function mockEmptyNoteDocument() {
+  const doc = new Y.Doc();
+  const update = Y.encodeStateAsUpdate(doc);
+  doc.destroy();
+  appMock.GetNoteDocument.mockResolvedValue({ update_base64: bytesToBase64(update), format: "v1" });
+  appMock.CommitNoteBody.mockResolvedValue(undefined);
+}
 
 function renderShell() {
   mockLocaleCatalog();
@@ -76,6 +86,29 @@ describe("Shell", () => {
     expect(await screen.findByText("Tagged note")).toBeInTheDocument();
     expect(screen.queryByText("Other note")).not.toBeInTheDocument();
     expect(appMock.SearchByTag).toHaveBeenCalledWith(tag.id);
+  });
+
+  it("shows a renamed note's new title in the list while a tag filter is active", async () => {
+    const tag = fakeTag({ name: "urgent" });
+    const taggedNote = fakeNote({ title: "Tagged note" });
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([tag]);
+    appMock.ListNotes.mockResolvedValue([taggedNote]);
+    appMock.SearchByTag.mockResolvedValue([{ note: taggedNote, rank: 0 }]);
+    mockEmptyNoteDocument();
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "urgent" }));
+    await user.click(await screen.findByText("Tagged note"));
+
+    const titleInput = await screen.findByLabelText("shell.detail_title_label");
+    await user.clear(titleInput);
+    await user.type(titleInput, "Renamed while tag-filtered");
+    await user.tab();
+
+    expect(await screen.findByText("Renamed while tag-filtered")).toBeInTheDocument();
+    expect(screen.queryByText("Tagged note")).not.toBeInTheDocument();
   });
 
   it("shows a retryable error when loading fails", async () => {

@@ -303,10 +303,63 @@ button:disabled {
 }
 
 .note-detail {
-  padding: 1.5rem;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 1rem 1.5rem;
 }
 
 .note-detail-empty {
+  padding: 1.5rem;
   color: #5a5148;
+}
+
+.note-title-input {
+  font: inherit;
+  font-size: 1.2rem;
+  font-weight: 600;
+  border: none;
+  padding: 0.35rem 0;
+  margin-bottom: 0.5rem;
+  background: transparent;
+  color: inherit;
+}
+
+.note-title-input:focus {
+  outline: none;
+  border-bottom: 1px solid #6b4f2a;
+}
+
+.note-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.5rem;
+}
+
+.note-editor-save-error {
+  margin: 0;
+}
+
+.note-editor-quill {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.note-editor-quill .ql-toolbar {
+  border-color: #d8d1c4;
+  border-radius: 0.35rem 0.35rem 0 0;
+}
+
+.note-editor-quill .ql-container {
+  flex: 1;
+  overflow-y: auto;
+  border-color: #d8d1c4;
+  border-radius: 0 0 0.35rem 0.35rem;
+  font-family: inherit;
+  font-size: 1rem;
 }

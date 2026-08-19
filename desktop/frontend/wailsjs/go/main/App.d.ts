@@ -34,6 +34,8 @@ export function ExportNotes(arg1:string,arg2:Array<string>):Promise<main.ExportM
 
 export function GetNote(arg1:string):Promise<main.NoteDTO>;
 
+export function GetNoteDocument(arg1:string):Promise<main.NoteDocumentDTO>;
+
 export function GetSettings():Promise<main.AppSettings>;
 
 export function ImportBerestaArchive(arg1:string):Promise<main.ImportResultDTO>;

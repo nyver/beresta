@@ -53,10 +53,16 @@ accessible notebook tree, tag navigation (via a dedicated `SearchByTag`
 binding that reuses the same search index as the search box, without its
 text-query quoting limitations), and a virtualized note list
 (`@tanstack/react-virtual`, since the account ceiling is 20,000 notes)
-selecting into a placeholder detail pane. There is no rich-text editor yet:
-that, plus attachments, revisions, backup/restore UI, lock/unlock polish, the
-system tray/hotkey, and the installer are the remaining phase-4 work (tasks
-5.4 onward).
+selecting into a working note editor. The editor is Quill 2 bound to the
+note's Yjs `Y.Text` through `y-quill` - matching `core/sync/yjsadapter`'s
+own Quill-Delta-compatible document model exactly, so the toolbar is
+deliberately restricted to the formatting marks the Go core's canonical
+Markdown projection understands. Local edits are captured as incremental
+Yjs updates, debounced, merged, and committed through `CommitNoteBody`;
+they flush immediately (not debounced) when a note closes or the account
+locks, and a failed commit is retried rather than dropped. Attachments,
+revisions, backup/restore UI, lock/unlock polish, the system tray/hotkey,
+and the installer are the remaining phase-4 work (tasks 5.5 onward).
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
@@ -249,7 +255,8 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 
 ## Current Limitations
 
-- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, and a main shell (notebook tree, tags, note list) wired to the real local-only product core, but has no rich-text editor, attachment, revision, or backup/restore UI yet, and the complete phase-3 core is otherwise exercised only through Go tests.
+- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), and a working Quill/Yjs body editor wired to the real local-only product core, but has no attachment, revision, or backup/restore UI yet, and the complete phase-3 core is otherwise exercised only through Go tests.
+- `quill@2.0.3` (the current stable release) has an open low-severity XSS advisory in its HTML-export feature ([GHSA-v3m3-f69x-jf25](https://github.com/advisories/GHSA-v3m3-f69x-jf25)); Beresta never calls that feature (`getSemanticHTML`/HTML clipboard export), relying only on the Delta model and the Go core's own Markdown projection, so it is not reachable through anything this app does.
 - The optional synchronization server has not been implemented; `core/transport`'s `SyncTransport` currently has only the default local no-op implementation.
 - `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.
 - Revision rollback and portable/Evernote import recreate content as plain text; rich-text formatting is not round-tripped through either path (see [ASSUMPTIONS.md](ASSUMPTIONS.md)).

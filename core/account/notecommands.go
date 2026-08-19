@@ -37,6 +37,35 @@ type NoteBodyCommand struct {
 	Title *string
 }
 
+// NoteDocumentState returns a note's complete current CRDT body state as a
+// single Yjs update (from an empty document, i.e. what EncodeStateAsUpdate
+// produces), for a client-side editor to hydrate a fresh Y.Doc from when it
+// opens the note. It returns an empty document's state (not an error) for a
+// note that has never had a body command applied. The returned Format is
+// always noteSnapshotFormat; callers do not choose it, matching
+// CommitNoteBody's own fixed canonical encoding for stored state.
+func (a *Account) NoteDocumentState(ctx context.Context, workspaceID, noteID model.ID) ([]byte, yjsadapter.Format, error) {
+	db, entry, _, _, err := a.workspaceSession(workspaceID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := verifyNoteInWorkspace(ctx, db, workspaceID, noteID); err != nil {
+		return nil, 0, err
+	}
+
+	doc, err := loadNoteDocument(ctx, db, entry, workspaceID, noteID)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer doc.Close()
+
+	state, err := doc.EncodeStateAsUpdate(noteSnapshotFormat)
+	if err != nil {
+		return nil, 0, fmt.Errorf("account: encode note document state: %w", err)
+	}
+	return state, noteSnapshotFormat, nil
+}
+
 // CommitNoteBody atomically applies a CRDT update (and optional title
 // change) to one note and persists every derived artifact needed to keep the
 // local store consistent: the new CRDT state and state vector, the FTS5

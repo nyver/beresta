@@ -1,7 +1,9 @@
 import {
   Catalog,
+  CommitNoteBody,
   CreateAccount,
   DefaultDatabasePath,
+  GetNoteDocument,
   GetSettings,
   ListNotebooks,
   ListNotes,
@@ -125,4 +127,12 @@ export async function listNotes(): Promise<main.NoteDTO[]> {
 
 export async function searchByTag(tagId: string): Promise<main.SearchResultDTO[]> {
   return SearchByTag(tagId);
+}
+
+export async function getNoteDocument(noteId: string): Promise<main.NoteDocumentDTO> {
+  return GetNoteDocument(noteId);
+}
+
+export async function commitNoteBody(req: main.CommitNoteBodyRequest): Promise<void> {
+  return CommitNoteBody(req);
 }

@@ -11,8 +11,11 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.10",
+    "quill": "^2.0.3",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "y-quill": "^1.0.0",
+    "yjs": "^13.6.32"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",

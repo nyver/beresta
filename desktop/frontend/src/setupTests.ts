@@ -23,6 +23,8 @@ export const appMock = {
   ListTags: vi.fn(),
   ListNotes: vi.fn(),
   SearchByTag: vi.fn(),
+  GetNoteDocument: vi.fn(),
+  CommitNoteBody: vi.fn(),
 };
 
 (globalThis as unknown as { go: { main: { App: typeof appMock } } }).go = {

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listNotebooks, listNotes, listTags, lockAccount, searchByTag, unwrapError } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { NotebookTree } from "../shell/NotebookTree";
-import { NoteDetail } from "../shell/NoteDetail";
+import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPane";
 import { NoteList } from "../shell/NoteList";
 import { TagList } from "../shell/TagList";
 
@@ -17,13 +17,13 @@ type Selection = { kind: "all" } | { kind: "notebook"; id: string } | { kind: "t
 
 /**
  * Shell is the desktop application's main screen: notebook tree, tag
- * navigation, and a note list, wired to real account data. Selecting a
- * note only routes to NoteDetail's placeholder pane - the rich-text
- * editor is task 5.4.
+ * navigation, a note list, and the Yjs-backed body editor, all wired to
+ * real account data.
  */
 export function Shell({ onLocked }: ShellProps) {
   const { t, errorMessage, ready } = useI18n();
   const [locking, setLocking] = useState(false);
+  const editorPaneRef = useRef<NoteEditorPaneHandle>(null);
 
   const [notebooks, setNotebooks] = useState<main.NotebookDTO[]>([]);
   const [tags, setTags] = useState<main.TagDTO[]>([]);
@@ -97,9 +97,23 @@ export function Shell({ onLocked }: ShellProps) {
 
   const selectedNote = visibleNotes.find((note) => note.id === selectedNoteId) ?? null;
 
+  function handleTitleCommitted(noteId: string, title: string) {
+    // Optimistic local patch: the editor pane already persisted this
+    // through CommitNoteBody, but Shell's own `notes` state (used by the
+    // "all"/notebook filters) is only refreshed by loadAll, so the note
+    // list would otherwise keep showing the pre-rename title until the
+    // next full reload. tagNotes needs the same patch: it is a separate
+    // fetch (searchByTag), not derived from `notes`, so visibleNotes'
+    // "tag" branch would miss a rename made while that filter is active.
+    const rename = (note: main.NoteDTO) => (note.id === noteId ? { ...note, title } : note);
+    setNotes((current) => current.map(rename));
+    setTagNotes((current) => current.map(rename));
+  }
+
   async function handleLock() {
     setLocking(true);
     try {
+      await editorPaneRef.current?.flush();
       await lockAccount();
       onLocked();
     } finally {
@@ -148,7 +162,7 @@ export function Shell({ onLocked }: ShellProps) {
             />
           </section>
           <section className="shell-detail">
-            <NoteDetail note={selectedNote} />
+            <NoteEditorPane ref={editorPaneRef} note={selectedNote} onTitleCommitted={handleTitleCommitted} />
           </section>
         </div>
       )}

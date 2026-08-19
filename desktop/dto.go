@@ -108,3 +108,16 @@ func parseYjsFormat(s string) (yjsadapter.Format, error) {
 		return 0, &AppError{Code: ErrCodeInvalidInput, Message: fmt.Sprintf("invalid Yjs update format %q", s)}
 	}
 }
+
+// yjsFormatString is parseYjsFormat's inverse, for responses that hand the
+// client a Format alongside encoded update bytes.
+func yjsFormatString(format yjsadapter.Format) string {
+	switch format {
+	case yjsadapter.FormatV1:
+		return "v1"
+	case yjsadapter.FormatV2:
+		return "v2"
+	default:
+		return ""
+	}
+}

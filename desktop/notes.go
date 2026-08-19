@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+
 	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/model"
 	"github.com/beresta-app/beresta/core/store"
@@ -211,6 +213,33 @@ func (a *App) CommitNoteBody(req CommitNoteBodyRequest) error {
 		UpdateFormat: format,
 		Title:        req.Title,
 	}))
+}
+
+// NoteDocumentDTO is a note's complete current CRDT body state, for a
+// client-side editor to hydrate a fresh Y.Doc from when it opens the note.
+type NoteDocumentDTO struct {
+	// UpdateBase64 is a Yjs update (from an empty document) in Format.
+	UpdateBase64 string `json:"update_base64"`
+	Format       string `json:"format"`
+}
+
+// GetNoteDocument returns a note's current body as a Yjs update an editor
+// can apply to a fresh Y.Doc. It returns an empty document (not an error)
+// for a note that has never had a body command applied.
+func (a *App) GetNoteDocument(noteID string) (NoteDocumentDTO, error) {
+	acc, workspaceID, err := a.primaryWorkspace()
+	if err != nil {
+		return NoteDocumentDTO{}, mapError(err)
+	}
+	note, err := parseID(noteID)
+	if err != nil {
+		return NoteDocumentDTO{}, mapError(err)
+	}
+	state, format, err := acc.NoteDocumentState(a.requestContext(), workspaceID, note)
+	if err != nil {
+		return NoteDocumentDTO{}, mapError(err)
+	}
+	return NoteDocumentDTO{UpdateBase64: base64.StdEncoding.EncodeToString(state), Format: yjsFormatString(format)}, nil
 }
 
 // --- Notebooks ---

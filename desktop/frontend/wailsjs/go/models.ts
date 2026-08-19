@@ -375,6 +375,20 @@ export namespace main {
 	        this.created_unix_ms = source["created_unix_ms"];
 	    }
 	}
+	export class NoteDocumentDTO {
+	    update_base64: string;
+	    format: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NoteDocumentDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.update_base64 = source["update_base64"];
+	        this.format = source["format"];
+	    }
+	}
 	export class NotebookDTO {
 	    id: string;
 	    workspace_id: string;

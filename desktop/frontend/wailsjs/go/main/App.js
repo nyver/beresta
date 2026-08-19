@@ -66,6 +66,10 @@ export function GetNote(arg1) {
   return window['go']['main']['App']['GetNote'](arg1);
 }
 
+export function GetNoteDocument(arg1) {
+  return window['go']['main']['App']['GetNoteDocument'](arg1);
+}
+
 export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }

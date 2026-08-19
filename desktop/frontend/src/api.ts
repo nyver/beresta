@@ -4,21 +4,38 @@ import {
   Catalog,
   CommitNoteBody,
   CreateAccount,
+  CreateManualBackup,
   CreateSavedSearch,
   DefaultDatabasePath,
   DeleteSavedSearch,
+  DiffRevisions,
+  EnsureDailyBackup,
+  ExportNotes,
   GetNoteDocument,
   GetSettings,
+  ImportBerestaArchive,
+  ImportEvernoteArchive,
+  ListBackups,
   ListNoteAttachments,
   ListNotebooks,
   ListNotes,
+  ListRevisions,
   ListSavedSearches,
   ListTags,
   LockAccount,
   PickAttachmentFile,
+  PickBackupDirectory,
+  PickExportDestination,
+  PickImportSource,
   PickSaveDestination,
+  PlanRestore,
+  PreviewBackup,
   ReadAttachmentPreview,
   RemoveAttachment,
+  RestoreRevision,
+  RestoreSelective,
+  RestoreWhole,
+  RevisionMarkdown,
   SaveAttachmentToFile,
   Search,
   SearchByTag,
@@ -26,6 +43,8 @@ import {
   UnlockAccount,
   UpdateSavedSearch,
   UpdateSettings,
+  VerifyAllBackups,
+  VerifyBackup,
 } from "../wailsjs/go/main/App";
 import { main } from "../wailsjs/go/models";
 
@@ -231,4 +250,122 @@ export async function saveAttachmentToFile(
   destPath: string,
 ): Promise<main.AttachmentSaveResult> {
   return SaveAttachmentToFile(blobId, destPath);
+}
+
+export async function listRevisions(noteId: string): Promise<main.RevisionDTO[]> {
+  return ListRevisions(noteId);
+}
+
+export async function revisionMarkdown(noteId: string, revisionId: string): Promise<string> {
+  return RevisionMarkdown(noteId, revisionId);
+}
+
+/** diffRevisions diffs fromRevisionId to toRevisionId's content; an empty
+ * fromRevisionId diffs against the note's state before its first
+ * revision (see desktop/revisions.go's App.DiffRevisions). */
+export async function diffRevisions(
+  noteId: string,
+  fromRevisionId: string,
+  toRevisionId: string,
+): Promise<main.DiffLineDTO[]> {
+  return DiffRevisions(noteId, fromRevisionId, toRevisionId);
+}
+
+/** restoreRevision creates a new current revision matching a historical
+ * one's plain-text content, without erasing the intervening history. */
+export async function restoreRevision(noteId: string, revisionId: string): Promise<void> {
+  return RestoreRevision(noteId, revisionId);
+}
+
+/**
+ * pickBackupDirectory opens the native directory picker for the external
+ * destination daily/manual/restore-safety backups write to. It returns ""
+ * if the user canceled.
+ */
+export async function pickBackupDirectory(): Promise<string> {
+  return PickBackupDirectory();
+}
+
+export async function listBackups(kind: string): Promise<main.BackupDTO[]> {
+  return ListBackups(kind);
+}
+
+export async function createManualBackup(destRoot: string): Promise<main.BackupDTO> {
+  return CreateManualBackup(destRoot);
+}
+
+/** ensureDailyBackup creates today's daily backup under destRoot if one
+ * does not already exist yet, rotating old daily backups down to the
+ * retained seven. Returns whether a new backup was actually created. */
+export async function ensureDailyBackup(destRoot: string): Promise<boolean> {
+  return EnsureDailyBackup(destRoot);
+}
+
+export async function verifyAllBackups(): Promise<void> {
+  return VerifyAllBackups();
+}
+
+export async function verifyBackup(backupId: string): Promise<void> {
+  return VerifyBackup(backupId);
+}
+
+export async function previewBackup(backupId: string): Promise<main.BackupPreviewDTO> {
+  return PreviewBackup(backupId);
+}
+
+/** planRestore computes, without mutating current data, what restoring
+ * noteIds (or the whole backup, when noteIds is empty) from backupId
+ * would do. */
+export async function planRestore(backupId: string, noteIds: string[]): Promise<main.RestorePlanDTO> {
+  return PlanRestore(backupId, noteIds);
+}
+
+export async function restoreSelective(
+  backupId: string,
+  noteIds: string[],
+  destRoot: string,
+): Promise<main.RestoreResultDTO> {
+  return RestoreSelective(backupId, noteIds, destRoot);
+}
+
+export async function restoreWhole(backupId: string, destRoot: string): Promise<main.RestoreResultDTO> {
+  return RestoreWhole(backupId, destRoot);
+}
+
+/**
+ * pickExportDestination opens the native directory picker for a new
+ * export destination. ExportNotes requires a directory that does not
+ * already exist, so callers should offer the picked path plus a
+ * caller-supplied subfolder name rather than the picked directory itself.
+ */
+export async function pickExportDestination(): Promise<string> {
+  return PickExportDestination();
+}
+
+/**
+ * pickImportSource opens the native directory picker (kind "beresta") or
+ * file picker (kind "evernote") for an import source. Returns "" if the
+ * user canceled.
+ */
+export async function pickImportSource(kind: "beresta" | "evernote"): Promise<string> {
+  return PickImportSource(kind);
+}
+
+/** exportNotes writes noteIds (or every note, when noteIds is empty) as
+ * plaintext Markdown/attachments/manifest.json to destDir, which must not
+ * already exist. This is the confirmed export action - callers are
+ * responsible for the required warning/confirmation before calling it. */
+export async function exportNotes(
+  destDir: string,
+  noteIds: string[],
+): Promise<main.ExportManifestDTO> {
+  return ExportNotes(destDir, noteIds);
+}
+
+export async function importBerestaArchive(sourceDir: string): Promise<main.ImportResultDTO> {
+  return ImportBerestaArchive(sourceDir);
+}
+
+export async function importEvernoteArchive(path: string): Promise<main.ImportResultDTO> {
+  return ImportEvernoteArchive(path);
 }

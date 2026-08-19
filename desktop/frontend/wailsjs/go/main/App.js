@@ -126,6 +126,10 @@ export function PickAttachmentFile() {
   return window['go']['main']['App']['PickAttachmentFile']();
 }
 
+export function PickBackupDirectory() {
+  return window['go']['main']['App']['PickBackupDirectory']();
+}
+
 export function PickExportDestination() {
   return window['go']['main']['App']['PickExportDestination']();
 }

@@ -79,9 +79,27 @@ picking a notebook or tag, or by the box's own Clear button) and highlights
 its matched free-text terms in each result's title. It runs through the
 same `App.Search` → `core/account.Search` → `store.SearchNotes` path that
 `core/store`'s 20,000-note / 150 ms budget test already benchmarks (see
-above), so that budget covers this UI's queries too. Revisions, backup/restore UI,
-lock/unlock polish, the system tray/hotkey, and the installer are the
-remaining phase-4 work (tasks 5.7 onward).
+above), so that budget covers this UI's queries too. A note's history
+panel lists its retained revisions (newest first, checkpoints marked),
+diffs the selected one against its predecessor, and can restore it as a
+new current revision without erasing anything in between - restoring
+first flushes any not-yet-debounced body edit still queued in the open
+editor, so that stale edit cannot get silently re-committed on top of the
+just-restored content when the editor remounts afterward. A "Backups &
+Data" dialog off the shell's topbar covers the rest of task 5.7: the
+external backup directory setting (with a native folder picker,
+defaulting under the app data directory but movable to any external
+location), a manual "back up now" action, a catalog tabbed by kind
+(daily/manual/pre-restore/pre-migration) with per-backup verify and
+preview, and a dry-run restore plan listing each note's classification
+(new/updated/unchanged) before committing to either "restore selected as
+new notes" (`RestoreSelective`) or the separately confirmed, destructive
+"replace everything with this backup" (`RestoreWhole`); the same dialog's
+import/export section requires an explicit warning acknowledgement before
+a plaintext export (notes and attachments leave the encrypted store as
+plain files) and surfaces per-note warnings from a Beresta-archive or
+Evernote `.enex` import. Lock/unlock polish, the system tray/hotkey, and
+the installer are the remaining phase-4 work (tasks 5.8 onward).
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
@@ -274,7 +292,7 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 
 ## Current Limitations
 
-- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), a working Quill/Yjs body editor, an attachment panel (drag-and-drop, clipboard image paste, inline image preview, save-as), and a search box (instant filtered/full-text search, saved-query management, highlighted results) wired to the real local-only product core, but has no revision or backup/restore UI yet, and the complete phase-3 core is otherwise exercised only through Go tests. Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
+- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), a working Quill/Yjs body editor, an attachment panel (drag-and-drop, clipboard image paste, inline image preview, save-as), a search box (instant filtered/full-text search, saved-query management, highlighted results), a note history panel (revision list, diff, restore), and a Backups & Data dialog (backup directory setting, catalog/preview/dry-run/restore, plaintext export, Beresta/Evernote import) wired to the real local-only product core, but has no lock/unlock polish, system tray/hotkey, or installer yet, and the complete phase-3 core is otherwise exercised only through Go tests. Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
 - `quill@2.0.3` (the current stable release) has an open low-severity XSS advisory in its HTML-export feature ([GHSA-v3m3-f69x-jf25](https://github.com/advisories/GHSA-v3m3-f69x-jf25)); Beresta never calls that feature (`getSemanticHTML`/HTML clipboard export), relying only on the Delta model and the Go core's own Markdown projection, so it is not reachable through anything this app does.
 - The optional synchronization server has not been implemented; `core/transport`'s `SyncTransport` currently has only the default local no-op implementation.
 - `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.

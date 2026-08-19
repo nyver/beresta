@@ -54,6 +54,7 @@ export namespace main {
 	    language: string;
 	    last_database_path: string;
 	    auto_lock_minutes: number;
+	    backup_directory: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -64,6 +65,7 @@ export namespace main {
 	        this.language = source["language"];
 	        this.last_database_path = source["last_database_path"];
 	        this.auto_lock_minutes = source["auto_lock_minutes"];
+	        this.backup_directory = source["backup_directory"];
 	    }
 	}
 	export class AttachmentDTO {

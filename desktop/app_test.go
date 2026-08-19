@@ -227,7 +227,7 @@ func TestSettingsRoundTripAndValidation(t *testing.T) {
 		t.Fatalf("GetSettings() default language = %q", got.Language)
 	}
 
-	updated, err := a.UpdateSettings(AppSettings{Language: locales.Russian, AutoLockMinutes: 5})
+	updated, err := a.UpdateSettings(AppSettings{Language: locales.Russian, AutoLockMinutes: 5, BackupDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatalf("UpdateSettings: %v", err)
 	}

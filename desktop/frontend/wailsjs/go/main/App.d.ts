@@ -64,6 +64,8 @@ export function MoveNotebook(arg1:string,arg2:string):Promise<void>;
 
 export function PickAttachmentFile():Promise<string>;
 
+export function PickBackupDirectory():Promise<string>;
+
 export function PickExportDestination():Promise<string>;
 
 export function PickImportSource(arg1:string):Promise<string>;

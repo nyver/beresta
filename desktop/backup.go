@@ -4,9 +4,27 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/store"
 )
+
+// PickBackupDirectory opens the native directory picker for choosing the
+// external destination that daily/manual/restore-safety backups write to
+// (AppSettings.BackupDirectory). It returns "" if the user canceled,
+// leaving the current setting unchanged.
+func (a *App) PickBackupDirectory() (string, error) {
+	ctx, err := a.runtimeContext()
+	if err != nil {
+		return "", mapError(err)
+	}
+	path, err := runtime.OpenDirectoryDialog(ctx, runtime.OpenDialogOptions{Title: "Choose a backup location"})
+	if err != nil {
+		return "", mapError(err)
+	}
+	return path, nil
+}
 
 // backupKindNames maps store.BackupKind* constants to their JS-facing
 // names.

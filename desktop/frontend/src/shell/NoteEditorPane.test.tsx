@@ -17,6 +17,7 @@ function mockEmptyDocument() {
   appMock.GetNoteDocument.mockResolvedValue({ update_base64: bytesToBase64(update), format: "v1" });
   appMock.CommitNoteBody.mockResolvedValue(undefined);
   appMock.ListNoteAttachments.mockResolvedValue([]);
+  appMock.ListRevisions.mockResolvedValue([]);
 }
 
 describe("NoteEditorPane", () => {
@@ -121,5 +122,47 @@ describe("NoteEditorPane", () => {
     await ref.current!.flush();
 
     expect(onTitleCommitted).toHaveBeenCalledWith(note.id, "Renamed without blur");
+  });
+
+  it("flushes a pending body edit before restoring a revision, so it cannot reappear after the restore", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    mockEmptyDocument();
+    appMock.ListRevisions.mockResolvedValue([
+      { id: "rev-1", checkpoint: false, created_unix_ms: Date.UTC(2026, 0, 1) },
+    ]);
+    appMock.DiffRevisions.mockResolvedValue([]);
+    const callOrder: string[] = [];
+    appMock.CommitNoteBody.mockImplementation(async () => {
+      callOrder.push("commit");
+    });
+    appMock.RestoreRevision.mockImplementation(async () => {
+      callOrder.push("restore");
+    });
+    const note = fakeNote({ title: "Title" });
+    render(
+      <I18nProvider>
+        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    const editor = await waitFor(() => {
+      const element = document.querySelector(".ql-editor");
+      if (!element) throw new Error("editor not mounted yet");
+      return element as HTMLElement;
+    });
+    await user.click(editor);
+    await user.type(editor, "pending edit");
+    // Still under useNoteDocument's 800ms commit debounce: nothing sent yet.
+    expect(appMock.CommitNoteBody).not.toHaveBeenCalled();
+
+    await user.click(await screen.findByRole("button", { name: /2026/ }));
+    await user.click(await screen.findByRole("button", { name: "revisions.restore_button" }));
+    await user.click(screen.getByRole("button", { name: "revisions.restore_confirm_button" }));
+
+    await waitFor(() => expect(appMock.RestoreRevision).toHaveBeenCalled());
+    expect(appMock.CommitNoteBody).toHaveBeenCalled();
+    expect(callOrder).toEqual(["commit", "restore"]);
   });
 });

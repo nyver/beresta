@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { listNotebooks, listNotes, listTags, lockAccount, searchByTag, unwrapError } from "../api";
+import {
+  ensureDailyBackup,
+  getSettings,
+  listNotebooks,
+  listNotes,
+  listTags,
+  lockAccount,
+  searchByTag,
+  unwrapError,
+  verifyAllBackups,
+} from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { BackupsPanel } from "../shell/BackupsPanel";
+import { ImportExportPanel } from "../shell/ImportExportPanel";
+import { Modal } from "../shell/Modal";
 import { NotebookTree } from "../shell/NotebookTree";
 import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPane";
 import { NoteList } from "../shell/NoteList";
@@ -43,6 +56,7 @@ export function Shell({ onLocked }: ShellProps) {
   // by SearchBar.clear() or by picking a notebook/tag from the sidebar.
   const [searchResults, setSearchResults] = useState<main.SearchResultDTO[] | null>(null);
   const [highlightTerms, setHighlightTerms] = useState<string[]>([]);
+  const [dataModalOpen, setDataModalOpen] = useState(false);
 
   const loadAll = useCallback(() => {
     setLoading(true);
@@ -67,6 +81,24 @@ export function Shell({ onLocked }: ShellProps) {
     if (!ready) return;
     loadAll();
   }, [ready, loadAll]);
+
+  useEffect(() => {
+    // Runs once per unlock, matching desktop/backup.go's own doc comments
+    // ("The desktop shell calls this once at every startup") for both
+    // EnsureDailyBackup and VerifyAllBackups. Best-effort: a failure here
+    // (for example, an external backup drive that is currently
+    // disconnected) must not block using the app - BackupsPanel's own
+    // actions surface any real, persistent problem when the user opens
+    // it, so this silently retries at the next unlock instead of erroring
+    // the whole shell.
+    if (!ready) return;
+    getSettings()
+      .then((settings) => {
+        if (!settings.backup_directory) return;
+        return ensureDailyBackup(settings.backup_directory).then(() => verifyAllBackups());
+      })
+      .catch(() => {});
+  }, [ready]);
 
   useEffect(() => {
     setSelectedNoteId("");
@@ -144,10 +176,22 @@ export function Shell({ onLocked }: ShellProps) {
     <div className="screen shell">
       <header className="shell-topbar">
         <h1>{t("shell.title")}</h1>
-        <button type="button" onClick={() => void handleLock()} disabled={locking}>
-          {t("shell.lock_button")}
-        </button>
+        <div className="shell-topbar-actions">
+          <button type="button" onClick={() => setDataModalOpen(true)}>
+            {t("data.title")}
+          </button>
+          <button type="button" onClick={() => void handleLock()} disabled={locking}>
+            {t("shell.lock_button")}
+          </button>
+        </div>
       </header>
+
+      {dataModalOpen ? (
+        <Modal title={t("data.title")} onClose={() => setDataModalOpen(false)}>
+          <BackupsPanel onRestored={loadAll} />
+          <ImportExportPanel onImported={loadAll} />
+        </Modal>
+      ) : null}
 
       {error ? (
         <div className="shell-error">

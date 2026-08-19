@@ -4,6 +4,7 @@ import { NoteEditor, type NoteEditorHandle } from "../editor/NoteEditor";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { AttachmentPanel, type AttachmentPanelHandle } from "./AttachmentPanel";
+import { RevisionsPanel } from "./RevisionsPanel";
 
 export interface NoteEditorPaneHandle {
   /** Flushes the currently open note's pending body edit and any
@@ -30,6 +31,13 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     const editorRef = useRef<NoteEditorHandle>(null);
     const attachmentPanelRef = useRef<AttachmentPanelHandle>(null);
     const [title, setTitle] = useState(note?.title ?? "");
+    // Bumped after RestoreRevision commits a new current revision, and
+    // included in NoteEditor's key below to force it to remount and
+    // refetch the note's document: RestoreRevision writes through the
+    // normal CommitNoteBody path, which the already-open Yjs document (an
+    // in-memory structure with no server push) has no other way to learn
+    // about.
+    const [restoreVersion, setRestoreVersion] = useState(0);
 
     useEffect(() => {
       setTitle(note?.title ?? "");
@@ -78,11 +86,28 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
           placeholder={t("shell.untitled_note")}
         />
         <NoteEditor
+          key={`${note.id}-${restoreVersion}`}
           ref={editorRef}
           noteId={note.id}
           onAttachFiles={(files) => attachmentPanelRef.current?.attachFiles(files)}
         />
         <AttachmentPanel key={note.id} ref={attachmentPanelRef} noteId={note.id} />
+        <RevisionsPanel
+          key={`revisions-${note.id}`}
+          noteId={note.id}
+          onBeforeRestore={async () => {
+            // Flush any not-yet-debounced body edit into its own revision
+            // first: RestoreRevision below unconditionally replaces the
+            // note's current content, but if a pending edit stayed queued
+            // instead, remounting NoteEditor after the restore (via
+            // restoreVersion below) would tear down the old instance and
+            // its useNoteDocument cleanup would flush that stale edit on
+            // top of the just-restored content - silently reintroducing
+            // exactly what the user asked to discard.
+            await editorRef.current?.flush();
+          }}
+          onRestored={() => setRestoreVersion((v) => v + 1)}
+        />
       </div>
     );
   },

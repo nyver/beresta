@@ -31,6 +31,7 @@ export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
     language: "en",
     last_database_path: "",
     auto_lock_minutes: 15,
+    backup_directory: "C:\\Users\\test\\Beresta\\backups",
     ...overrides,
   };
   appMock.GetSettings.mockResolvedValue(settings);

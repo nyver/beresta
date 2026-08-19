@@ -114,8 +114,19 @@ also offers a local-wipe workflow behind a typed `ERASE` confirmation:
 the attachment blob store for a device that cannot or should not be
 unlocked normally - the windows-desktop-client spec's revocation-response
 primitive, usable today as a manual reset since no sync transport exists
-yet to deliver an actual revocation signal. The installer and system
-tray/hotkey are the remaining phase-4 work (tasks 5.9 onward).
+yet to deliver an actual revocation signal. The desktop app also runs a
+native system-tray icon with a "Quick Note" / "Show Beresta" / "Quit"
+context menu, a configurable global quick-note hotkey (default
+`Ctrl+Shift+N`, changeable from the Backups & Data dialog) that opens a
+focused capture surface and brings the main window forward even while it
+is hidden, and an opt-in "launch at sign-in" autostart toggle backed by
+the per-user Windows Run key, with a UI warning when a stale entry from a
+different install path is detected. Closing the main window hides it to
+the tray instead of exiting whenever the tray started successfully; the
+tray menu's "Quit" (or a failed tray/hotkey startup, logged to the
+console) is what actually ends the process. The installer and the
+remaining sync-status UI are the remaining phase-4 work (tasks 5.10
+onward).
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
@@ -308,7 +319,7 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 
 ## Current Limitations
 
-- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), a working Quill/Yjs body editor, an attachment panel (drag-and-drop, clipboard image paste, inline image preview, save-as), a search box (instant filtered/full-text search, saved-query management, highlighted results), a note history panel (revision list, diff, restore), a Backups & Data dialog (backup directory setting, catalog/preview/dry-run/restore, plaintext export, Beresta/Evernote import), and lock handling (configurable auto-lock, an immediate content-hiding overlay while locking, and a typed-confirmation local-wipe workflow) wired to the real local-only product core, but has no system tray/hotkey or installer yet, and the complete phase-3 core is otherwise exercised only through Go tests. The local-wipe workflow is a manually-triggered stand-in for the windows-desktop-client spec's revocation response: nothing can deliver an actual revocation signal yet since no sync transport exists (see below). Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
+- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), a working Quill/Yjs body editor, an attachment panel (drag-and-drop, clipboard image paste, inline image preview, save-as), a search box (instant filtered/full-text search, saved-query management, highlighted results), a note history panel (revision list, diff, restore), a Backups & Data dialog (backup directory setting, catalog/preview/dry-run/restore, plaintext export, Beresta/Evernote import, and the quick-note hotkey/autostart controls), lock handling (configurable auto-lock, an immediate content-hiding overlay while locking, and a typed-confirmation local-wipe workflow), and Windows shell integration (a system-tray icon, a configurable global quick-note hotkey with a focused capture surface, close-to-tray, and opt-in launch-at-sign-in) wired to the real local-only product core, but has no installer yet, and the complete phase-3 core is otherwise exercised only through Go tests. The local-wipe workflow is a manually-triggered stand-in for the windows-desktop-client spec's revocation response: nothing can deliver an actual revocation signal yet since no sync transport exists (see below). Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
 - `quill@2.0.3` (the current stable release) has an open low-severity XSS advisory in its HTML-export feature ([GHSA-v3m3-f69x-jf25](https://github.com/advisories/GHSA-v3m3-f69x-jf25)); Beresta never calls that feature (`getSemanticHTML`/HTML clipboard export), relying only on the Delta model and the Go core's own Markdown projection, so it is not reachable through anything this app does.
 - The optional synchronization server has not been implemented; `core/transport`'s `SyncTransport` currently has only the default local no-op implementation.
 - `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.

@@ -10,6 +10,10 @@ export function AddAttachmentFromFile(arg1, arg2) {
   return window['go']['main']['App']['AddAttachmentFromFile'](arg1, arg2);
 }
 
+export function AutostartStatus() {
+  return window['go']['main']['App']['AutostartStatus']();
+}
+
 export function Catalog(arg1) {
   return window['go']['main']['App']['Catalog'](arg1);
 }

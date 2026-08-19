@@ -31,6 +31,18 @@ type App struct {
 	// non-interactive fake so they never trigger a real OS credential
 	// prompt or the multi-second Windows Hello availability check.
 	keyWrapperFactory func(ctx context.Context, prompt string) (keystore.Wrapper, string, error)
+
+	// shell is the running tray/hotkey controller (desktop/main.go wires
+	// it in before wails.Run, once traymenu.Start succeeds), or nil when
+	// tray integration is unavailable. UpdateSettings re-registers the
+	// hotkey through it; shutdown closes it.
+	shell shellController
+
+	// applyAutostart enables/disables launching this app at sign-in. It
+	// defaults to applyAutostartReal (desktop/autostart_windows.go, real
+	// HKCU Run key); tests substitute a no-op so they never touch the
+	// developer's or CI machine's real autostart registration.
+	applyAutostart func(enabled bool) error
 }
 
 func newApp() *App {
@@ -38,6 +50,7 @@ func newApp() *App {
 		transport:         transport.NewLocal(),
 		settings:          defaultSettings(),
 		keyWrapperFactory: newKeyWrapper,
+		applyAutostart:    applyAutostartReal,
 	}
 }
 
@@ -62,9 +75,16 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown is the Wails OnShutdown hook. It locks any open account,
 // wiping every live secret, so the process never exits with unwrapped key
-// material resident regardless of how it is asked to close.
+// material resident regardless of how it is asked to close, and tears
+// down the tray icon/hotkey so neither lingers after the process exits.
 func (a *App) shutdown(ctx context.Context) {
 	a.lockAccount()
+	a.mu.Lock()
+	shell := a.shell
+	a.mu.Unlock()
+	if shell != nil {
+		shell.Close()
+	}
 }
 
 // currentAccount returns the active unlocked account, or ErrLocked if none

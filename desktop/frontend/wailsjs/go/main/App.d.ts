@@ -6,6 +6,8 @@ export function AddAttachmentFromBytes(arg1:string,arg2:string,arg3:string,arg4:
 
 export function AddAttachmentFromFile(arg1:string,arg2:string):Promise<main.AttachmentDTO>;
 
+export function AutostartStatus():Promise<main.AutostartStatusDTO>;
+
 export function Catalog(arg1:string):Promise<main.LocaleCatalog>;
 
 export function CommitNoteBody(arg1:main.CommitNoteBodyRequest):Promise<void>;

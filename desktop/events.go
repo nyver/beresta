@@ -14,6 +14,10 @@ const (
 	// EventSyncStatus carries the current transport.Status string whenever
 	// synchronization status is queried or changes.
 	EventSyncStatus = "sync:status"
+	// EventQuickNoteOpen carries no payload; it fires whenever the global
+	// quick-note hotkey is pressed or the tray menu's "Quick Note" item is
+	// selected, after the main window has already been shown/restored.
+	EventQuickNoteOpen = "quicknote:open"
 )
 
 // emit forwards a Wails runtime event, but only once startup(ctx) has

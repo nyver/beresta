@@ -5,7 +5,7 @@ import * as Y from "yjs";
 
 import { bytesToBase64 } from "../editor/base64";
 import { I18nProvider } from "../i18n";
-import { appMock } from "../setupTests";
+import { appMock, runtimeMock } from "../setupTests";
 import {
   fakeAccountInfo,
   fakeNote,
@@ -281,5 +281,36 @@ describe("Shell", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("opens the quick-note capture panel on quicknote:open and reloads notes once it closes", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(fakeNote({ title: "" }));
+    renderShell();
+
+    // ready (and thus the quicknote:open subscription effect) only
+    // becomes true once the mocked locale catalog resolves, which is not
+    // yet true on Shell's very first synchronous render.
+    await waitFor(() => expect(runtimeMock.EventsOnMultiple).toHaveBeenCalled());
+    const [, onQuickNoteOpen] =
+      runtimeMock.EventsOnMultiple.mock.calls.find(([eventName]) => eventName === "quicknote:open") ?? [];
+    expect(onQuickNoteOpen).toBeDefined();
+
+    act(() => onQuickNoteOpen?.());
+
+    expect(await screen.findByRole("dialog", { name: "quicknote.title" })).toBeInTheDocument();
+    expect(appMock.CreateNote).toHaveBeenCalledWith("", "");
+
+    const listNotesCallsBeforeClose = appMock.ListNotes.mock.calls.length;
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "quicknote.done_button" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "quicknote.title" })).not.toBeInTheDocument();
+    });
+    expect(appMock.ListNotes.mock.calls.length).toBeGreaterThan(listNotesCallsBeforeClose);
   });
 });

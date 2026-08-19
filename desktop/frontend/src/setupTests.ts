@@ -30,6 +30,7 @@ export const appMock = {
   DeleteSavedSearch: vi.fn(),
   GetNoteDocument: vi.fn(),
   CommitNoteBody: vi.fn(),
+  CreateNote: vi.fn(),
   PickAttachmentFile: vi.fn(),
   ListNoteAttachments: vi.fn(),
   AddAttachmentFromFile: vi.fn(),
@@ -57,6 +58,7 @@ export const appMock = {
   ImportBerestaArchive: vi.fn(),
   ImportEvernoteArchive: vi.fn(),
   WipeLocalAccount: vi.fn(),
+  AutostartStatus: vi.fn(),
 };
 
 (globalThis as unknown as { go: { main: { App: typeof appMock } } }).go = {
@@ -72,6 +74,15 @@ export const appMock = {
 export const runtimeMock = {
   OnFileDrop: vi.fn(),
   OnFileDropOff: vi.fn(),
+  // Backs wailsjs/runtime's EventsOn/EventsOff (see Shell.tsx's
+  // quick-note capture listener, which - like AttachmentPanel's
+  // OnFileDrop/OnFileDropOff above - unsubscribes through EventsOff
+  // rather than through EventsOn's return value, since beforeEach's
+  // mockReset() below would otherwise clear any canned return value
+  // between tests.
+  EventsOnMultiple: vi.fn(),
+  EventsOff: vi.fn(),
+  EventsOffAll: vi.fn(),
 };
 
 (globalThis as unknown as { runtime: typeof runtimeMock }).runtime = runtimeMock;

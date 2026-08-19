@@ -14,14 +14,20 @@ import {
 } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
 import { BackupsPanel } from "../shell/BackupsPanel";
 import { ImportExportPanel } from "../shell/ImportExportPanel";
 import { Modal } from "../shell/Modal";
 import { NotebookTree } from "../shell/NotebookTree";
 import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPane";
 import { NoteList } from "../shell/NoteList";
+import { QuickNotePanel } from "../shell/QuickNotePanel";
 import { SearchBar, type SearchBarHandle } from "../shell/SearchBar";
+import { ShellIntegrationPanel } from "../shell/ShellIntegrationPanel";
 import { TagList } from "../shell/TagList";
+
+// Matches desktop/events.go's EventQuickNoteOpen.
+const EVENT_QUICK_NOTE_OPEN = "quicknote:open";
 
 export interface ShellProps {
   account: main.AccountInfo;
@@ -62,6 +68,11 @@ export function Shell({ account, onLocked }: ShellProps) {
   const [searchResults, setSearchResults] = useState<main.SearchResultDTO[] | null>(null);
   const [highlightTerms, setHighlightTerms] = useState<string[]>([]);
   const [dataModalOpen, setDataModalOpen] = useState(false);
+  // Bumped on every quicknote:open so QuickNotePanel remounts (and thus
+  // creates a fresh note) for each capture session instead of reusing
+  // whatever note the previous session left mounted.
+  const [quickNoteSession, setQuickNoteSession] = useState(0);
+  const [quickNoteOpen, setQuickNoteOpen] = useState(false);
 
   const loadAll = useCallback(() => {
     setLoading(true);
@@ -104,6 +115,21 @@ export function Shell({ account, onLocked }: ShellProps) {
         return ensureDailyBackup(settings.backup_directory).then(() => verifyAllBackups());
       })
       .catch(() => {});
+  }, [ready]);
+
+  useEffect(() => {
+    // Fires when the global quick-note hotkey is pressed or the tray
+    // menu's "Quick Note" item is selected (desktop/shell.go's
+    // handleQuickNoteTrigger already brought the main window to the
+    // front before emitting this). EventOff (not EventsOn's own return
+    // value) is the established unsubscribe pattern in this codebase -
+    // see AttachmentPanel's OnFileDrop/OnFileDropOff.
+    if (!ready) return;
+    EventsOn(EVENT_QUICK_NOTE_OPEN, () => {
+      setQuickNoteSession((session) => session + 1);
+      setQuickNoteOpen(true);
+    });
+    return () => EventsOff(EVENT_QUICK_NOTE_OPEN);
   }, [ready]);
 
   useEffect(() => {
@@ -261,7 +287,18 @@ export function Shell({ account, onLocked }: ShellProps) {
         <Modal title={t("data.title")} onClose={() => setDataModalOpen(false)}>
           <BackupsPanel onRestored={loadAll} />
           <ImportExportPanel onImported={loadAll} />
+          <ShellIntegrationPanel />
         </Modal>
+      ) : null}
+
+      {quickNoteOpen ? (
+        <QuickNotePanel
+          key={quickNoteSession}
+          onClosed={() => {
+            setQuickNoteOpen(false);
+            loadAll();
+          }}
+        />
       ) : null}
 
       {locking ? (

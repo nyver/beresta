@@ -1,6 +1,6 @@
 # Beresta home synchronization server example configuration.
 # The server runs with safe defaults when this file is absent.
-# Client CRDT/mobile binding, secure-buffer lifetimes, Argon2id/HKDF/XChaCha20, 4 MiB attachment, encrypted-backup profiles, X25519/Ed25519 identities, SQLCipher keys, Windows DPAPI/Hello policy, Android Keystore/biometric policy, and localization catalogs are local platform contracts and have no server option.
+# Client CRDT/mobile binding, secure-buffer lifetimes, Argon2id/HKDF/XChaCha20, 4 MiB attachment, encrypted-backup profiles, X25519/Ed25519 identities, SQLCipher keys, Windows DPAPI/Hello policy, Android Keystore/biometric policy, Windows tray/global-hotkey/autostart integration, and localization catalogs are local platform contracts and have no server option.
 
 server:
   # Bind to localhost by default. Use an explicit LAN address after reviewing firewall rules.

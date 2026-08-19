@@ -18,6 +18,11 @@ func newTestApp(t *testing.T) *App {
 	// factory avoids a real (slow, and potentially interactive) Windows
 	// Hello/DPAPI round trip.
 	a.keyWrapperFactory = fakeKeyWrapperFactory
+	// a.shell stays nil (as it does before main() wires a real tray
+	// controller in), so UpdateSettings never tries to re-register a real
+	// global hotkey; this fake keeps a changed AutostartEnabled from
+	// touching the developer's or CI machine's real Run-key entry.
+	a.applyAutostart = func(bool) error { return nil }
 	return a
 }
 

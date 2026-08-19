@@ -38,6 +38,15 @@ type AppSettings struct {
 	// since one Beresta installation backs up whichever account is
 	// currently open.
 	BackupDirectory string `json:"backup_directory"`
+	// QuickNoteHotkey is the global accelerator (for example
+	// "Ctrl+Shift+N") that opens the quick-note capture surface even
+	// while the main window is hidden (task 5.9). Empty disables the
+	// global hotkey; the tray icon and menu remain available either way.
+	QuickNoteHotkey string `json:"quick_note_hotkey"`
+	// AutostartEnabled opts this install into launching, hidden to the
+	// tray, at Windows sign-in (task 5.9). It is off by default: launch
+	// at sign-in is a deliberate per-install choice, never assumed.
+	AutostartEnabled bool `json:"autostart_enabled"`
 }
 
 func defaultSettings() AppSettings {
@@ -50,7 +59,12 @@ func defaultSettings() AppSettings {
 		// empty value once the user is prompted to fix it.
 		dir = ""
 	}
-	return AppSettings{Language: locales.English, AutoLockMinutes: 15, BackupDirectory: dir}
+	return AppSettings{
+		Language:        locales.English,
+		AutoLockMinutes: 15,
+		BackupDirectory: dir,
+		QuickNoteHotkey: DefaultQuickNoteHotkey,
+	}
 }
 
 // defaultBackupDirectory returns the default backup destination offered
@@ -85,6 +99,9 @@ func (s AppSettings) validate() error {
 	}
 	if strings.TrimSpace(s.BackupDirectory) == "" {
 		return &AppError{Code: ErrCodeInvalidInput, Message: "backup directory must not be empty"}
+	}
+	if _, _, err := parseHotkey(s.QuickNoteHotkey); err != nil {
+		return &AppError{Code: ErrCodeInvalidInput, Message: err.Error()}
 	}
 	return nil
 }
@@ -200,13 +217,53 @@ func (a *App) GetSettings() AppSettings {
 }
 
 // UpdateSettings validates and persists next, replacing the current
-// settings entirely.
+// settings entirely. A changed QuickNoteHotkey or AutostartEnabled is
+// applied to the live OS state (re-registering the global hotkey,
+// enabling/disabling the Run-key entry) before the file is saved. If a
+// later step in this sequence fails - the other OS-level change, or the
+// save itself - every OS-level change already applied is rolled back
+// before returning the error, so the live OS state can never end up
+// matching next while settings.json and GetSettings still report
+// previous (or vice versa): the two must always agree.
 func (a *App) UpdateSettings(next AppSettings) (AppSettings, error) {
 	if err := next.validate(); err != nil {
 		return AppSettings{}, err
 	}
-	if err := saveSettings(next); err != nil {
+	a.mu.Lock()
+	previous := a.settings
+	shell := a.shell
+	a.mu.Unlock()
+
+	var rollback []func()
+	fail := func(err error) (AppSettings, error) {
+		for i := len(rollback) - 1; i >= 0; i-- {
+			rollback[i]()
+		}
 		return AppSettings{}, mapError(err)
+	}
+
+	if next.QuickNoteHotkey != previous.QuickNoteHotkey && shell != nil {
+		mod, vk, _ := parseHotkey(next.QuickNoteHotkey) // already validated above
+		if err := shell.SetHotkey(mod, vk); err != nil {
+			return fail(fmt.Errorf("register quick-note hotkey: %w", err))
+		}
+		rollback = append(rollback, func() {
+			if prevMod, prevVK, err := parseHotkey(previous.QuickNoteHotkey); err == nil {
+				_ = shell.SetHotkey(prevMod, prevVK)
+			}
+		})
+	}
+	if next.AutostartEnabled != previous.AutostartEnabled {
+		if err := a.applyAutostart(next.AutostartEnabled); err != nil {
+			return fail(fmt.Errorf("update autostart registration: %w", err))
+		}
+		rollback = append(rollback, func() {
+			_ = a.applyAutostart(previous.AutostartEnabled)
+		})
+	}
+
+	if err := saveSettings(next); err != nil {
+		return fail(err)
 	}
 	a.mu.Lock()
 	a.settings = next

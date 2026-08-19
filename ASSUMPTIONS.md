@@ -66,3 +66,4 @@ This file records implementation decisions that fill gaps without changing the f
 3. Mobile operating systems may delay background work indefinitely; foreground entry always resumes durable pending synchronization.
 4. Revocation confirmation explicitly states that Beresta cannot erase data already copied by a formerly authorized device.
 5. English and Russian are complete supported UI languages from the first user-facing implementation phase.
+6. The desktop tray/taskbar icon is the generic Windows application icon (`IDI_APPLICATION`) until the installer task (5.11) supplies a branded `.ico`; an accidental quick-note hotkey press that is closed without typing anything is accepted to leave one empty note in the workspace rather than adding emptiness-detection logic to discard it.

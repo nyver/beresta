@@ -1,10 +1,12 @@
 import {
   AddAttachmentFromBytes,
   AddAttachmentFromFile,
+  AutostartStatus,
   Catalog,
   CommitNoteBody,
   CreateAccount,
   CreateManualBackup,
+  CreateNote,
   CreateSavedSearch,
   DefaultDatabasePath,
   DeleteSavedSearch,
@@ -114,6 +116,16 @@ export async function localeCatalog(locale: string): Promise<main.LocaleCatalog>
   return Catalog(locale);
 }
 
+/**
+ * autostartStatus reports the live Windows Run-key state for this
+ * install, which can drift from AppSettings.autostart_enabled if the
+ * user removed the entry directly or a different install path left a
+ * stale one behind (see desktop/shell.go's App.AutostartStatus).
+ */
+export async function autostartStatus(): Promise<main.AutostartStatusDTO> {
+  return AutostartStatus();
+}
+
 export async function defaultDatabasePath(): Promise<string> {
   return DefaultDatabasePath();
 }
@@ -191,6 +203,10 @@ export async function updateSavedSearch(
 
 export async function deleteSavedSearch(savedSearchId: string): Promise<void> {
   return DeleteSavedSearch(savedSearchId);
+}
+
+export async function createNote(notebookId: string, title: string): Promise<main.NoteDTO> {
+  return CreateNote(notebookId, title);
 }
 
 export async function getNoteDocument(noteId: string): Promise<main.NoteDocumentDTO> {

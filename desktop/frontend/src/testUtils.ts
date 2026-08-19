@@ -32,11 +32,19 @@ export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
     last_database_path: "",
     auto_lock_minutes: 15,
     backup_directory: "C:\\Users\\test\\Beresta\\backups",
+    quick_note_hotkey: "Ctrl+Shift+N",
+    autostart_enabled: false,
     ...overrides,
   };
   appMock.GetSettings.mockResolvedValue(settings);
   appMock.UpdateSettings.mockResolvedValue(settings);
   return settings;
+}
+
+export function mockAutostartStatus(overrides: Partial<main.AutostartStatusDTO> = {}) {
+  const status: main.AutostartStatusDTO = { enabled: false, conflict_path: "", ...overrides };
+  appMock.AutostartStatus.mockResolvedValue(status);
+  return status;
 }
 
 export function mockLockedStatus() {

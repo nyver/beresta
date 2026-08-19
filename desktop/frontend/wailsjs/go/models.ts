@@ -55,6 +55,8 @@ export namespace main {
 	    last_database_path: string;
 	    auto_lock_minutes: number;
 	    backup_directory: string;
+	    quick_note_hotkey: string;
+	    autostart_enabled: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -66,6 +68,8 @@ export namespace main {
 	        this.last_database_path = source["last_database_path"];
 	        this.auto_lock_minutes = source["auto_lock_minutes"];
 	        this.backup_directory = source["backup_directory"];
+	        this.quick_note_hotkey = source["quick_note_hotkey"];
+	        this.autostart_enabled = source["autostart_enabled"];
 	    }
 	}
 	export class AttachmentDTO {
@@ -116,6 +120,20 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.display_name = source["display_name"];
 	        this.media_type = source["media_type"];
+	    }
+	}
+	export class AutostartStatusDTO {
+	    enabled: boolean;
+	    conflict_path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AutostartStatusDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.conflict_path = source["conflict_path"];
 	    }
 	}
 	export class BackupDTO {

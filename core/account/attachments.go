@@ -115,6 +115,66 @@ func (a *Account) AddAttachment(ctx context.Context, workspaceID, noteID model.I
 	return attachment, nil
 }
 
+// AttachmentInfo is one attachment's display metadata for a note, decrypted
+// from its manifest: everything a client UI needs to list, preview, and
+// offer to save an attachment without exposing the raw manifest or chunk
+// layout.
+type AttachmentInfo struct {
+	BlobID      store.BlobID
+	DisplayName string
+	MediaType   string
+	SizeBytes   uint64
+}
+
+// ListNoteAttachments returns the display metadata for every attachment
+// currently present on noteID, in no particular guaranteed order.
+func (a *Account) ListNoteAttachments(ctx context.Context, workspaceID, noteID model.ID) ([]AttachmentInfo, error) {
+	db, entry, _, _, err := a.workspaceSession(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	note, err := store.GetNote(ctx, db, noteID)
+	if err != nil {
+		return nil, err
+	}
+	if note.WorkspaceID != workspaceID {
+		return nil, store.ErrWrongWorkspace
+	}
+
+	blobIDs, err := store.NoteAttachmentBlobIDs(ctx, db, noteID)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]AttachmentInfo, 0, len(blobIDs))
+	for _, blobID := range blobIDs {
+		row, err := store.GetAttachment(ctx, db, blobID)
+		if err != nil {
+			return nil, err
+		}
+		if row.WorkspaceID != workspaceID {
+			return nil, store.ErrWrongWorkspace
+		}
+		metadata := corecrypto.AttachmentMetadata{
+			SchemaVersion: corecrypto.AttachmentSchemaVersion,
+			CryptoProfile: corecrypto.CryptoProfileV1,
+			WorkspaceID:   workspaceID.Bytes(),
+			BlobID:        blobID.Bytes(),
+			KeyID:         row.KeyID,
+		}
+		payload, err := openAttachmentManifest(entry.Key, metadata, row.Manifest)
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, AttachmentInfo{
+			BlobID:      blobID,
+			DisplayName: payload.displayName,
+			MediaType:   payload.mediaType,
+			SizeBytes:   payload.plaintextSize,
+		})
+	}
+	return infos, nil
+}
+
 // RemoveAttachment removes noteID's reference to one attachment. The
 // published blob itself is left in place for garbage collection (task 4.9)
 // to reclaim once it is unreferenced and past the minimum retention window.

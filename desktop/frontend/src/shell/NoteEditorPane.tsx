@@ -3,6 +3,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { NoteEditor, type NoteEditorHandle } from "../editor/NoteEditor";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { AttachmentPanel, type AttachmentPanelHandle } from "./AttachmentPanel";
 
 export interface NoteEditorPaneHandle {
   /** Flushes the currently open note's pending body edit and any
@@ -27,6 +28,7 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
   function NoteEditorPane({ note, onTitleCommitted }, ref) {
     const { t } = useI18n();
     const editorRef = useRef<NoteEditorHandle>(null);
+    const attachmentPanelRef = useRef<AttachmentPanelHandle>(null);
     const [title, setTitle] = useState(note?.title ?? "");
 
     useEffect(() => {
@@ -75,7 +77,12 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
           aria-label={t("shell.detail_title_label")}
           placeholder={t("shell.untitled_note")}
         />
-        <NoteEditor ref={editorRef} noteId={note.id} />
+        <NoteEditor
+          ref={editorRef}
+          noteId={note.id}
+          onAttachFiles={(files) => attachmentPanelRef.current?.attachFiles(files)}
+        />
+        <AttachmentPanel key={note.id} ref={attachmentPanelRef} noteId={note.id} />
       </div>
     );
   },

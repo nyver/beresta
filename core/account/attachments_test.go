@@ -63,6 +63,68 @@ func TestAddReadRemoveAttachment(t *testing.T) {
 	}
 }
 
+func TestListNoteAttachments(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Untitled")
+	if err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+
+	empty, err := created.ListNoteAttachments(ctx, workspaceID, note.ID)
+	if err != nil {
+		t.Fatalf("ListNoteAttachments (empty): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("ListNoteAttachments (empty) = %v, want none", empty)
+	}
+
+	content := []byte("photo bytes")
+	attachment, err := created.AddAttachment(ctx, workspaceID, note.ID, "photo.png", "image/png", bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("AddAttachment: %v", err)
+	}
+
+	infos, err := created.ListNoteAttachments(ctx, workspaceID, note.ID)
+	if err != nil {
+		t.Fatalf("ListNoteAttachments: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("ListNoteAttachments = %v, want 1 entry", infos)
+	}
+	got := infos[0]
+	if got.BlobID != attachment.BlobID || got.DisplayName != "photo.png" || got.MediaType != "image/png" || got.SizeBytes != uint64(len(content)) {
+		t.Fatalf("ListNoteAttachments[0] = %+v", got)
+	}
+
+	if err := created.RemoveAttachment(ctx, workspaceID, note.ID, attachment.BlobID); err != nil {
+		t.Fatalf("RemoveAttachment: %v", err)
+	}
+	afterRemove, err := created.ListNoteAttachments(ctx, workspaceID, note.ID)
+	if err != nil {
+		t.Fatalf("ListNoteAttachments (after remove): %v", err)
+	}
+	if len(afterRemove) != 0 {
+		t.Fatalf("ListNoteAttachments (after remove) = %v, want none", afterRemove)
+	}
+}
+
+func TestListNoteAttachmentsRejectsUnknownNote(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+
+	unknownNote, err := model.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := created.ListNoteAttachments(ctx, workspaceID, unknownNote); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ListNoteAttachments(unknown note) err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestAddAttachmentDedupsIdenticalContent(t *testing.T) {
 	ctx := context.Background()
 	created := createTestAccount(t)

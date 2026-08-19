@@ -69,6 +69,8 @@ export namespace main {
 	export class AttachmentDTO {
 	    blob_id: string;
 	    workspace_id: string;
+	    display_name: string;
+	    media_type: string;
 	    size_bytes: number;
 	
 	    static createFrom(source: any = {}) {
@@ -79,7 +81,25 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.blob_id = source["blob_id"];
 	        this.workspace_id = source["workspace_id"];
+	        this.display_name = source["display_name"];
+	        this.media_type = source["media_type"];
 	        this.size_bytes = source["size_bytes"];
+	    }
+	}
+	export class AttachmentPreviewDTO {
+	    display_name: string;
+	    media_type: string;
+	    data_base64: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AttachmentPreviewDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.display_name = source["display_name"];
+	        this.media_type = source["media_type"];
+	        this.data_base64 = source["data_base64"];
 	    }
 	}
 	export class AttachmentSaveResult {

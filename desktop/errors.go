@@ -108,6 +108,8 @@ func mapError(err error) error {
 		return &AppError{Code: ErrCodeInvalidInput, Message: err.Error()}
 	case errors.Is(err, corecrypto.ErrAttachmentResourceLimit):
 		return &AppError{Code: ErrCodeInvalidInput, Message: "This file is too large to attach."}
+	case errors.Is(err, errAttachmentPreviewTooLarge):
+		return &AppError{Code: ErrCodeInvalidInput, Message: "This attachment is too large to preview."}
 	case errors.Is(err, keystore.ErrUnavailable):
 		return &AppError{Code: ErrCodeKeystoreUnavailable, Message: "Windows key protection is unavailable on this device."}
 	case errors.Is(err, keystore.ErrAuthentication):

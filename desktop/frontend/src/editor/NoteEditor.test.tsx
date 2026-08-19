@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 
 import { I18nProvider } from "../i18n";
@@ -29,6 +29,32 @@ describe("NoteEditor", () => {
     );
 
     await waitFor(() => expect(document.querySelector(".ql-editor")).toHaveTextContent("hello world"));
+  });
+
+  it("forwards a pasted image to onAttachFiles instead of inserting it inline", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    mockDocument("");
+    const onAttachFiles = vi.fn();
+
+    render(
+      <I18nProvider>
+        <NoteEditor noteId="note-1" onAttachFiles={onAttachFiles} />
+      </I18nProvider>,
+    );
+    const editor = await waitFor(() => {
+      const element = document.querySelector(".ql-editor");
+      if (!element) throw new Error("editor not mounted yet");
+      return element as HTMLElement;
+    });
+
+    const file = new File(["fake image bytes"], "screenshot.png", { type: "image/png" });
+    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(pasteEvent, "clipboardData", { value: { files: [file] } });
+    editor.dispatchEvent(pasteEvent);
+
+    expect(onAttachFiles).toHaveBeenCalledWith([file]);
+    expect(editor).toHaveTextContent("");
   });
 
   it("shows a localized error when the document fails to load", async () => {

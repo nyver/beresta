@@ -1,15 +1,22 @@
 import {
+  AddAttachmentFromBytes,
+  AddAttachmentFromFile,
   Catalog,
   CommitNoteBody,
   CreateAccount,
   DefaultDatabasePath,
   GetNoteDocument,
   GetSettings,
+  ListNoteAttachments,
   ListNotebooks,
   ListNotes,
   ListTags,
   LockAccount,
+  PickAttachmentFile,
   PickSaveDestination,
+  ReadAttachmentPreview,
+  RemoveAttachment,
+  SaveAttachmentToFile,
   SearchByTag,
   Status,
   UnlockAccount,
@@ -135,4 +142,56 @@ export async function getNoteDocument(noteId: string): Promise<main.NoteDocument
 
 export async function commitNoteBody(req: main.CommitNoteBodyRequest): Promise<void> {
   return CommitNoteBody(req);
+}
+
+/**
+ * pickAttachmentFile opens the native file-open dialog for choosing a file
+ * to attach. It returns "" if the user canceled.
+ */
+export async function pickAttachmentFile(): Promise<string> {
+  return PickAttachmentFile();
+}
+
+export async function listNoteAttachments(noteId: string): Promise<main.AttachmentDTO[]> {
+  return ListNoteAttachments(noteId);
+}
+
+export async function addAttachmentFromFile(
+  noteId: string,
+  sourcePath: string,
+): Promise<main.AttachmentDTO> {
+  return AddAttachmentFromFile(noteId, sourcePath);
+}
+
+export async function addAttachmentFromBytes(
+  noteId: string,
+  displayName: string,
+  mediaType: string,
+  dataBase64: string,
+): Promise<main.AttachmentDTO> {
+  return AddAttachmentFromBytes(noteId, displayName, mediaType, dataBase64);
+}
+
+export async function removeAttachment(noteId: string, blobId: string): Promise<void> {
+  return RemoveAttachment(noteId, blobId);
+}
+
+export async function readAttachmentPreview(blobId: string): Promise<main.AttachmentPreviewDTO> {
+  return ReadAttachmentPreview(blobId);
+}
+
+/**
+ * pickAttachmentSaveDestination opens the native save-file dialog,
+ * pre-filled with defaultFileName, and returns the chosen path, or "" if
+ * the user canceled.
+ */
+export async function pickAttachmentSaveDestination(defaultFileName: string): Promise<string> {
+  return PickSaveDestination(defaultFileName);
+}
+
+export async function saveAttachmentToFile(
+  blobId: string,
+  destPath: string,
+): Promise<main.AttachmentSaveResult> {
+  return SaveAttachmentToFile(blobId, destPath);
 }

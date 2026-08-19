@@ -363,3 +363,98 @@ button:disabled {
   font-family: inherit;
   font-size: 1rem;
 }
+
+.attachment-panel {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 40%;
+  overflow-y: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid #d8d1c4;
+}
+
+.attachment-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.attachment-panel-header h2 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #5a5148;
+  margin: 0;
+}
+
+.attachment-panel-header button {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.attachment-dropzone {
+  --wails-drop-target: drop;
+  margin: 0;
+  padding: 0.5rem;
+  border: 1px dashed #d8d1c4;
+  border-radius: 0.35rem;
+}
+
+.attachment-upload-queue,
+.attachment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.attachment-upload-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.attachment-upload-item.status-error .attachment-upload-status {
+  color: #8a2c1f;
+}
+
+.attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #eee2d0;
+}
+
+.attachment-thumbnail {
+  width: 2rem;
+  height: 2rem;
+  object-fit: cover;
+  border-radius: 0.25rem;
+  flex: none;
+  background: #eee2d0;
+}
+
+.attachment-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-size {
+  color: #5a5148;
+  font-size: 0.85rem;
+  flex: none;
+}
+
+.attachment-row button {
+  flex: none;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+}

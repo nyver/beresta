@@ -25,11 +25,31 @@ export const appMock = {
   SearchByTag: vi.fn(),
   GetNoteDocument: vi.fn(),
   CommitNoteBody: vi.fn(),
+  PickAttachmentFile: vi.fn(),
+  ListNoteAttachments: vi.fn(),
+  AddAttachmentFromFile: vi.fn(),
+  AddAttachmentFromBytes: vi.fn(),
+  RemoveAttachment: vi.fn(),
+  ReadAttachmentPreview: vi.fn(),
+  SaveAttachmentToFile: vi.fn(),
 };
 
 (globalThis as unknown as { go: { main: { App: typeof appMock } } }).go = {
   main: { App: appMock },
 };
+
+/**
+ * runtimeMock stubs window.runtime, the Wails runtime bridge that
+ * AttachmentPanel's native drag-and-drop uses directly (OnFileDrop /
+ * OnFileDropOff, see desktop/frontend/wailsjs/runtime/runtime.js) rather
+ * than through window.go.main.App like every other bound call.
+ */
+export const runtimeMock = {
+  OnFileDrop: vi.fn(),
+  OnFileDropOff: vi.fn(),
+};
+
+(globalThis as unknown as { runtime: typeof runtimeMock }).runtime = runtimeMock;
 
 // jsdom has no layout engine, so every element reports a 0x0 box and has
 // no ResizeObserver at all. @tanstack/react-virtual (the NoteList's
@@ -53,6 +73,9 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: tru
 
 beforeEach(() => {
   for (const fn of Object.values(appMock)) {
+    fn.mockReset();
+  }
+  for (const fn of Object.values(runtimeMock)) {
     fn.mockReset();
   }
 });

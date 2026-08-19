@@ -13,6 +13,12 @@ export interface NoteEditorHandle {
 
 export interface NoteEditorProps {
   noteId: string;
+  /** Called with one or more pasted image files when the user pastes an
+   * image from the clipboard. The paste is intercepted before Quill's own
+   * clipboard module ever sees it: inline images have no representation in
+   * the canonical Markdown projection (see TOOLBAR_FORMATS above), so a
+   * pasted image becomes a note attachment instead of an inline blot. */
+  onAttachFiles?: (files: File[]) => void;
 }
 
 // The Yjs root name for a note's body, matching core/account's
@@ -46,19 +52,37 @@ const TOOLBAR_FORMATS = [
  * extra wiring).
  */
 export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEditor(
-  { noteId },
+  { noteId, onAttachFiles },
   ref,
 ) {
   const { t, errorMessage } = useI18n();
   const { ydoc, ready, error, flush } = useNoteDocument(noteId);
   const containerRef = useRef<HTMLDivElement>(null);
+  const onAttachFilesRef = useRef(onAttachFiles);
+  onAttachFilesRef.current = onAttachFiles;
 
   useImperativeHandle(ref, () => ({ flush }), [flush]);
 
   useEffect(() => {
     if (!ready || !ydoc || !containerRef.current) return;
+    const container = containerRef.current;
 
-    const quill = new Quill(containerRef.current, {
+    // Capture-phase, so this runs before Quill's own bubble-phase paste
+    // listener on its editable root ever sees the event: preventDefault
+    // here stops Quill's clipboard module from turning a pasted image into
+    // an inline blot it cannot export.
+    const interceptImagePaste = (event: ClipboardEvent) => {
+      const files = Array.from(event.clipboardData?.files ?? []).filter((file) =>
+        file.type.startsWith("image/"),
+      );
+      if (files.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onAttachFilesRef.current?.(files);
+    };
+    container.addEventListener("paste", interceptImagePaste, true);
+
+    const quill = new Quill(container, {
       theme: "snow",
       placeholder: t("editor.placeholder"),
       modules: {
@@ -70,6 +94,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function
 
     return () => {
       binding.destroy();
+      container.removeEventListener("paste", interceptImagePaste, true);
     };
     // t is stable within one language session; re-creating Quill on every
     // locale switch is unnecessary churn and would drop the user's

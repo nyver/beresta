@@ -16,6 +16,7 @@ function mockEmptyDocument() {
   doc.destroy();
   appMock.GetNoteDocument.mockResolvedValue({ update_base64: bytesToBase64(update), format: "v1" });
   appMock.CommitNoteBody.mockResolvedValue(undefined);
+  appMock.ListNoteAttachments.mockResolvedValue([]);
 }
 
 describe("NoteEditorPane", () => {

@@ -60,9 +60,18 @@ deliberately restricted to the formatting marks the Go core's canonical
 Markdown projection understands. Local edits are captured as incremental
 Yjs updates, debounced, merged, and committed through `CommitNoteBody`;
 they flush immediately (not debounced) when a note closes or the account
-locks, and a failed commit is retried rather than dropped. Attachments,
-revisions, backup/restore UI, lock/unlock polish, the system tray/hotkey,
-and the installer are the remaining phase-4 work (tasks 5.5 onward).
+locks, and a failed commit is retried rather than dropped. Attachments are
+fully wired into the editor pane: native drag-and-drop (Wails'
+`OnFileDrop`, scoped to the attachment panel via the `--wails-drop-target`
+CSS marker) and clipboard image paste (intercepted before Quill's own
+clipboard module can turn it into an unexportable inline blot — see
+`docs/architecture.md`) both feed the same upload queue as the "Attach
+file…" picker button; a still-queued item can be canceled, image
+attachments get an inline decrypt-to-memory preview capped at 8 MiB (never
+written to disk, matching the no-plaintext-attachment-cache rule below),
+and "Save as…" decrypts straight to a user-chosen destination. Revisions,
+backup/restore UI, lock/unlock polish, the system tray/hotkey, and the
+installer are the remaining phase-4 work (tasks 5.6 onward).
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
@@ -255,7 +264,7 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 
 ## Current Limitations
 
-- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), and a working Quill/Yjs body editor wired to the real local-only product core, but has no attachment, revision, or backup/restore UI yet, and the complete phase-3 core is otherwise exercised only through Go tests.
+- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), a working Quill/Yjs body editor, and an attachment panel (drag-and-drop, clipboard image paste, inline image preview, save-as) wired to the real local-only product core, but has no revision or backup/restore UI yet, and the complete phase-3 core is otherwise exercised only through Go tests. Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
 - `quill@2.0.3` (the current stable release) has an open low-severity XSS advisory in its HTML-export feature ([GHSA-v3m3-f69x-jf25](https://github.com/advisories/GHSA-v3m3-f69x-jf25)); Beresta never calls that feature (`getSemanticHTML`/HTML clipboard export), relying only on the Delta model and the Go core's own Markdown projection, so it is not reachable through anything this app does.
 - The optional synchronization server has not been implemented; `core/transport`'s `SyncTransport` currently has only the default local no-op implementation.
 - `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.

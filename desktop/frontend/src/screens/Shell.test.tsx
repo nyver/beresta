@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
@@ -6,7 +6,15 @@ import * as Y from "yjs";
 import { bytesToBase64 } from "../editor/base64";
 import { I18nProvider } from "../i18n";
 import { appMock } from "../setupTests";
-import { fakeAccountInfo, fakeNote, fakeNotebook, fakeTag, mockLocaleCatalog, mockSettings } from "../testUtils";
+import {
+  fakeAccountInfo,
+  fakeNote,
+  fakeNotebook,
+  fakeTag,
+  mockLocaleCatalog,
+  mockSavedSearches,
+  mockSettings,
+} from "../testUtils";
 import { Shell } from "./Shell";
 
 function mockEmptyNoteDocument() {
@@ -21,6 +29,7 @@ function mockEmptyNoteDocument() {
 function renderShell() {
   mockLocaleCatalog();
   mockSettings();
+  mockSavedSearches();
   const onLocked = vi.fn();
   render(
     <I18nProvider>
@@ -110,6 +119,35 @@ describe("Shell", () => {
 
     expect(await screen.findByText("Renamed while tag-filtered")).toBeInTheDocument();
     expect(screen.queryByText("Tagged note")).not.toBeInTheDocument();
+  });
+
+  it("overrides the note list with search results, then restores the sidebar selection when a notebook is clicked", async () => {
+    const notebook = fakeNotebook({ name: "Work" });
+    const browsedNote = fakeNote({ title: "Browsed note" });
+    const foundNote = fakeNote({ title: "Found via search" });
+    appMock.ListNotebooks.mockResolvedValue([notebook]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([browsedNote]);
+    appMock.Search.mockResolvedValue([{ note: foundNote, rank: 0 }]);
+    renderShell();
+    const user = userEvent.setup();
+
+    await screen.findByText("Browsed note");
+    await user.type(screen.getByPlaceholderText("search.placeholder"), "found");
+
+    // The typed query also becomes a highlight term, so "Found" renders
+    // inside its own <mark>, splitting the row's text across elements -
+    // findByText's exact string match cannot see across that split. Scoped
+    // to the listbox because the search filters' <select> options also
+    // carry an implicit "option" role.
+    const noteList = screen.getByRole("listbox");
+    await waitFor(() => expect(within(noteList).getByRole("option")).toHaveTextContent("Found via search"));
+    expect(screen.queryByText("Browsed note")).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+
+    await waitFor(() => expect(within(noteList).queryByRole("option")).not.toBeInTheDocument());
+    expect(screen.getByPlaceholderText("search.placeholder")).toHaveValue("");
   });
 
   it("shows a retryable error when loading fails", async () => {

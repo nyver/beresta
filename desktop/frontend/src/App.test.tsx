@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 
 import { App } from "./App";
 import { appMock } from "./setupTests";
-import { fakeAccountInfo, mockLocaleCatalog, mockLockedStatus, mockSettings, mockUnlockedStatus } from "./testUtils";
+import {
+  fakeAccountInfo,
+  mockLocaleCatalog,
+  mockLockedStatus,
+  mockSavedSearches,
+  mockSettings,
+  mockUnlockedStatus,
+} from "./testUtils";
 
 describe("App", () => {
   it("shows onboarding on a first run with no prior local account", async () => {
@@ -32,6 +39,7 @@ describe("App", () => {
     const account = fakeAccountInfo();
     mockUnlockedStatus(account);
     mockSettings();
+    mockSavedSearches();
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);
     appMock.ListNotes.mockResolvedValue([]);

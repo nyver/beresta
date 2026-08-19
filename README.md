@@ -69,9 +69,19 @@ clipboard module can turn it into an unexportable inline blot — see
 file…" picker button; a still-queued item can be canceled, image
 attachments get an inline decrypt-to-memory preview capped at 8 MiB (never
 written to disk, matching the no-plaintext-attachment-cache rule below),
-and "Save as…" decrypts straight to a user-chosen destination. Revisions,
-backup/restore UI, lock/unlock polish, the system tray/hotkey, and the
-installer are the remaining phase-4 work (tasks 5.6 onward).
+and "Save as…" decrypts straight to a user-chosen destination. The note
+list's search box (debounced ~150 ms after the last keystroke) composes
+free text with tag/after/before/include-deleted filter controls into the
+same `tag:`/`after:`/`before:`/`deleted:true` query language `SavedSearch`
+stores verbatim, so saved searches round-trip through the same box; an
+active search overrides the sidebar's notebook/tag browsing (cleared by
+picking a notebook or tag, or by the box's own Clear button) and highlights
+its matched free-text terms in each result's title. It runs through the
+same `App.Search` → `core/account.Search` → `store.SearchNotes` path that
+`core/store`'s 20,000-note / 150 ms budget test already benchmarks (see
+above), so that budget covers this UI's queries too. Revisions, backup/restore UI,
+lock/unlock polish, the system tray/hotkey, and the installer are the
+remaining phase-4 work (tasks 5.7 onward).
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
@@ -264,7 +274,7 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 
 ## Current Limitations
 
-- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), a working Quill/Yjs body editor, and an attachment panel (drag-and-drop, clipboard image paste, inline image preview, save-as) wired to the real local-only product core, but has no revision or backup/restore UI yet, and the complete phase-3 core is otherwise exercised only through Go tests. Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
+- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), a working Quill/Yjs body editor, an attachment panel (drag-and-drop, clipboard image paste, inline image preview, save-as), and a search box (instant filtered/full-text search, saved-query management, highlighted results) wired to the real local-only product core, but has no revision or backup/restore UI yet, and the complete phase-3 core is otherwise exercised only through Go tests. Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
 - `quill@2.0.3` (the current stable release) has an open low-severity XSS advisory in its HTML-export feature ([GHSA-v3m3-f69x-jf25](https://github.com/advisories/GHSA-v3m3-f69x-jf25)); Beresta never calls that feature (`getSemanticHTML`/HTML clipboard export), relying only on the Delta model and the Go core's own Markdown projection, so it is not reachable through anything this app does.
 - The optional synchronization server has not been implemented; `core/transport`'s `SyncTransport` currently has only the default local no-op implementation.
 - `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.

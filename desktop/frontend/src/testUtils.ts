@@ -16,6 +16,16 @@ export function mockLocaleCatalog(locale: "en" | "ru" = "en") {
   appMock.Catalog.mockResolvedValue({ locale, strings: identityCatalog, supported: ["en", "ru"] });
 }
 
+/**
+ * mockSavedSearches primes ListSavedSearches with a resolved default.
+ * SearchBar (mounted unconditionally inside Shell) fetches saved searches
+ * on mount, so any Shell-rendering test needs this configured before
+ * render or the unconfigured mock's `undefined` return breaks that effect.
+ */
+export function mockSavedSearches(searches: main.SavedSearchDTO[] = []) {
+  appMock.ListSavedSearches.mockResolvedValue(searches);
+}
+
 export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
   const settings: main.AppSettings = {
     language: "en",
@@ -83,6 +93,18 @@ export function fakeNote(overrides: Partial<main.NoteDTO> = {}): main.NoteDTO {
     archived: false,
     deleted: false,
     created_unix_ms: Date.UTC(2026, 0, 1),
+    ...overrides,
+  };
+}
+
+export function fakeSavedSearch(overrides: Partial<main.SavedSearchDTO> = {}): main.SavedSearchDTO {
+  return {
+    id: nextFixtureId("saved-search"),
+    workspace_id: "workspace",
+    name: "Saved search",
+    query: "project",
+    created_unix_ms: Date.UTC(2026, 0, 1),
+    updated_unix_ms: Date.UTC(2026, 0, 1),
     ...overrides,
   };
 }

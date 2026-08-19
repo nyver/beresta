@@ -77,4 +77,44 @@ describe("NoteList", () => {
     await user.keyboard("{ArrowUp}");
     expect(screen.getByText("First").closest("button")).toHaveAttribute("aria-selected", "true");
   });
+
+  it("highlights matching terms in a note's title", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    render(
+      <I18nProvider>
+        <NoteList
+          notes={[fakeNote({ title: "Grocery list for Sunday" })]}
+          loading={false}
+          selectedNoteId=""
+          onSelect={vi.fn()}
+          highlightTerms={["grocery", "sunday"]}
+        />
+      </I18nProvider>,
+    );
+
+    const row = await screen.findByRole("option");
+    expect(row).toHaveTextContent("Grocery list for Sunday");
+    const marks = row.querySelectorAll("mark");
+    expect(Array.from(marks).map((mark) => mark.textContent)).toEqual(["Grocery", "Sunday"]);
+  });
+
+  it("shows a custom empty message when provided", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    render(
+      <I18nProvider>
+        <NoteList
+          notes={[]}
+          loading={false}
+          selectedNoteId=""
+          onSelect={vi.fn()}
+          emptyMessage="search.no_results"
+        />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("search.no_results")).toBeInTheDocument();
+    expect(screen.queryByText("shell.notelist_empty")).not.toBeInTheDocument();
+  });
 });

@@ -263,12 +263,79 @@ button:disabled {
 .shell-notes {
   overflow: hidden;
   border-right: 1px solid #d8d1c4;
+  display: flex;
+  flex-direction: column;
 }
 
 .note-list {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   position: relative;
+}
+
+.search-bar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #d8d1c4;
+}
+
+.search-bar input[type="search"] {
+  font: inherit;
+  padding: 0.5rem;
+  border: 1px solid #d8d1c4;
+  border-radius: 0.35rem;
+}
+
+.search-filters,
+.saved-searches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.search-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.75rem;
+  color: #5a5148;
+}
+
+.search-filter-checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.search-filter select,
+.search-filter input[type="date"],
+.saved-searches select,
+.saved-searches input[type="text"] {
+  font: inherit;
+  padding: 0.35rem;
+  border: 1px solid #d8d1c4;
+  border-radius: 0.35rem;
+}
+
+.saved-searches select,
+.saved-searches input[type="text"] {
+  font-size: 0.85rem;
+}
+
+.saved-searches button {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.note-row-title mark {
+  background: #f4d78a;
+  color: inherit;
+  border-radius: 0.15rem;
 }
 
 .note-list-status {

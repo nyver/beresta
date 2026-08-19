@@ -4,12 +4,15 @@ import {
   Catalog,
   CommitNoteBody,
   CreateAccount,
+  CreateSavedSearch,
   DefaultDatabasePath,
+  DeleteSavedSearch,
   GetNoteDocument,
   GetSettings,
   ListNoteAttachments,
   ListNotebooks,
   ListNotes,
+  ListSavedSearches,
   ListTags,
   LockAccount,
   PickAttachmentFile,
@@ -17,9 +20,11 @@ import {
   ReadAttachmentPreview,
   RemoveAttachment,
   SaveAttachmentToFile,
+  Search,
   SearchByTag,
   Status,
   UnlockAccount,
+  UpdateSavedSearch,
   UpdateSettings,
 } from "../wailsjs/go/main/App";
 import { main } from "../wailsjs/go/models";
@@ -134,6 +139,38 @@ export async function listNotes(): Promise<main.NoteDTO[]> {
 
 export async function searchByTag(tagId: string): Promise<main.SearchResultDTO[]> {
   return SearchByTag(tagId);
+}
+
+/**
+ * search runs the search-box filter language (bare words, `tag:`, `after:`,
+ * `before:`, `deleted:true`) against the account's workspace. See
+ * desktop/search.go's App.Search doc comment for the exact grammar.
+ */
+export async function search(text: string): Promise<main.SearchResultDTO[]> {
+  return Search(text);
+}
+
+export async function listSavedSearches(): Promise<main.SavedSearchDTO[]> {
+  return ListSavedSearches();
+}
+
+export async function createSavedSearch(
+  name: string,
+  query: string,
+): Promise<main.SavedSearchDTO> {
+  return CreateSavedSearch(name, query);
+}
+
+export async function updateSavedSearch(
+  savedSearchId: string,
+  name: string,
+  query: string,
+): Promise<void> {
+  return UpdateSavedSearch(savedSearchId, name, query);
+}
+
+export async function deleteSavedSearch(savedSearchId: string): Promise<void> {
+  return DeleteSavedSearch(savedSearchId);
 }
 
 export async function getNoteDocument(noteId: string): Promise<main.NoteDocumentDTO> {

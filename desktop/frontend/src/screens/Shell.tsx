@@ -6,6 +6,7 @@ import { main } from "../../wailsjs/go/models";
 import { NotebookTree } from "../shell/NotebookTree";
 import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPane";
 import { NoteList } from "../shell/NoteList";
+import { SearchBar, type SearchBarHandle } from "../shell/SearchBar";
 import { TagList } from "../shell/TagList";
 
 export interface ShellProps {
@@ -24,6 +25,7 @@ export function Shell({ onLocked }: ShellProps) {
   const { t, errorMessage, ready } = useI18n();
   const [locking, setLocking] = useState(false);
   const editorPaneRef = useRef<NoteEditorPaneHandle>(null);
+  const searchBarRef = useRef<SearchBarHandle>(null);
 
   const [notebooks, setNotebooks] = useState<main.NotebookDTO[]>([]);
   const [tags, setTags] = useState<main.TagDTO[]>([]);
@@ -35,6 +37,12 @@ export function Shell({ onLocked }: ShellProps) {
   const [selectedNoteId, setSelectedNoteId] = useState("");
   const [tagNotes, setTagNotes] = useState<main.NoteDTO[]>([]);
   const [tagLoading, setTagLoading] = useState(false);
+  // null means no search is active, so the sidebar's notebook/tag/all
+  // selection drives the list below as usual; a search box query (task
+  // 5.6) overrides that selection whenever it is non-null, cleared again
+  // by SearchBar.clear() or by picking a notebook/tag from the sidebar.
+  const [searchResults, setSearchResults] = useState<main.SearchResultDTO[] | null>(null);
+  const [highlightTerms, setHighlightTerms] = useState<string[]>([]);
 
   const loadAll = useCallback(() => {
     setLoading(true);
@@ -81,6 +89,11 @@ export function Shell({ onLocked }: ShellProps) {
   }, [selection, errorMessage]);
 
   const visibleNotes = useMemo(() => {
+    // An active search overrides the sidebar's notebook/tag/all selection
+    // entirely, matching the note list's own deleted-inclusion choice
+    // (SearchBar's "include deleted" checkbox), not the other branches'
+    // blanket exclusion below.
+    if (searchResults !== null) return searchResults.map((result) => result.note);
     const live = notes.filter((note) => !note.deleted);
     switch (selection.kind) {
       case "all":
@@ -93,7 +106,7 @@ export function Shell({ onLocked }: ShellProps) {
       case "tag":
         return tagNotes;
     }
-  }, [notes, tagNotes, selection]);
+  }, [notes, tagNotes, selection, searchResults]);
 
   const selectedNote = visibleNotes.find((note) => note.id === selectedNoteId) ?? null;
 
@@ -102,12 +115,18 @@ export function Shell({ onLocked }: ShellProps) {
     // through CommitNoteBody, but Shell's own `notes` state (used by the
     // "all"/notebook filters) is only refreshed by loadAll, so the note
     // list would otherwise keep showing the pre-rename title until the
-    // next full reload. tagNotes needs the same patch: it is a separate
-    // fetch (searchByTag), not derived from `notes`, so visibleNotes'
-    // "tag" branch would miss a rename made while that filter is active.
+    // next full reload. tagNotes and searchResults need the same patch:
+    // they are separate fetches (searchByTag / search), not derived from
+    // `notes`, so visibleNotes' "tag" and active-search branches would
+    // miss a rename made while that filter is active.
     const rename = (note: main.NoteDTO) => (note.id === noteId ? { ...note, title } : note);
     setNotes((current) => current.map(rename));
     setTagNotes((current) => current.map(rename));
+    setSearchResults((current) =>
+      current === null
+        ? current
+        : current.map((result) => main.SearchResultDTO.createFrom({ ...result, note: rename(result.note) })),
+    );
   }
 
   async function handleLock() {
@@ -145,20 +164,38 @@ export function Shell({ onLocked }: ShellProps) {
               selectedId={
                 selection.kind === "all" ? "" : selection.kind === "notebook" ? selection.id : null
               }
-              onSelect={(id) => setSelection(id === "" ? { kind: "all" } : { kind: "notebook", id })}
+              onSelect={(id) => {
+                searchBarRef.current?.clear();
+                setSelection(id === "" ? { kind: "all" } : { kind: "notebook", id });
+              }}
             />
             <TagList
               tags={tags}
               selectedId={selection.kind === "tag" ? selection.id : ""}
-              onSelect={(id) => setSelection({ kind: "tag", id })}
+              onSelect={(id) => {
+                searchBarRef.current?.clear();
+                setSelection({ kind: "tag", id });
+              }}
             />
           </aside>
           <section className="shell-notes">
+            <SearchBar
+              ref={searchBarRef}
+              tags={tags}
+              onResultsChange={(results, terms) => {
+                setSearchResults(results);
+                setHighlightTerms(terms);
+              }}
+            />
             <NoteList
               notes={visibleNotes}
-              loading={loading || (selection.kind === "tag" && tagLoading)}
+              loading={
+                searchResults === null && (loading || (selection.kind === "tag" && tagLoading))
+              }
               selectedNoteId={selectedNoteId}
               onSelect={setSelectedNoteId}
+              highlightTerms={highlightTerms}
+              emptyMessage={searchResults !== null ? t("search.no_results") : undefined}
             />
           </section>
           <section className="shell-detail">

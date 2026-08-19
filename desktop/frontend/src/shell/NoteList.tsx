@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useRef, type KeyboardEvent } from "react";
+import { Fragment, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
@@ -9,9 +9,40 @@ export interface NoteListProps {
   loading: boolean;
   selectedNoteId: string;
   onSelect: (noteId: string) => void;
+  /** Free-text words to highlight (case-insensitive) within each note's
+   * title, e.g. the terms an active search matched on. Empty/omitted
+   * renders titles plainly. */
+  highlightTerms?: string[];
+  /** Overrides the "no notes" message shown when notes is empty, e.g. to
+   * distinguish an empty search result from an empty notebook. */
+  emptyMessage?: string;
 }
 
 const ESTIMATED_ROW_HEIGHT = 56;
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** highlightTitle wraps every case-insensitive match of any term in
+ * `terms` inside a <mark>. Matching is plain substring, not word-bounded,
+ * mirroring FTS5's own unstemmed token matching closely enough for a
+ * result-list highlight without needing the search engine's own match
+ * offsets (SearchResultDTO carries none). */
+function highlightTitle(title: string, terms: string[]): ReactNode {
+  const cleanTerms = [...new Set(terms.map((term) => term.trim()).filter(Boolean))];
+  if (cleanTerms.length === 0) return title;
+  const pattern = new RegExp(`(${cleanTerms.map(escapeRegExp).join("|")})`, "gi");
+  const parts = title.split(pattern).filter((part) => part !== "");
+  const lowerTerms = new Set(cleanTerms.map((term) => term.toLowerCase()));
+  return parts.map((part, index) =>
+    lowerTerms.has(part.toLowerCase()) ? (
+      <mark key={index}>{part}</mark>
+    ) : (
+      <Fragment key={index}>{part}</Fragment>
+    ),
+  );
+}
 
 /**
  * NoteList only renders the rows currently scrolled into view
@@ -20,7 +51,14 @@ const ESTIMATED_ROW_HEIGHT = 56;
  * list itself the slow part of "instant local search" (task 5.6's 150 ms
  * budget covers the query, not a naive render of every result).
  */
-export function NoteList({ notes, loading, selectedNoteId, onSelect }: NoteListProps) {
+export function NoteList({
+  notes,
+  loading,
+  selectedNoteId,
+  onSelect,
+  highlightTerms = [],
+  emptyMessage,
+}: NoteListProps) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -53,7 +91,7 @@ export function NoteList({ notes, loading, selectedNoteId, onSelect }: NoteListP
     return <p className="note-list-status">{t("common.loading")}</p>;
   }
   if (notes.length === 0) {
-    return <p className="note-list-status">{t("shell.notelist_empty")}</p>;
+    return <p className="note-list-status">{emptyMessage ?? t("shell.notelist_empty")}</p>;
   }
 
   return (
@@ -86,7 +124,9 @@ export function NoteList({ notes, loading, selectedNoteId, onSelect }: NoteListP
               }}
               onClick={() => onSelect(note.id)}
             >
-              <span className="note-row-title">{note.title || t("shell.untitled_note")}</span>
+              <span className="note-row-title">
+                {note.title ? highlightTitle(note.title, highlightTerms) : t("shell.untitled_note")}
+              </span>
               {note.pinned ? (
                 <span aria-label={t("shell.pinned_note")} className="note-row-flag">
                   ★

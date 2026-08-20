@@ -2,6 +2,20 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "Beresta",
   "outputfilename": "beresta",
+  "nsisType": "multiple",
+  "author": {
+    "name": "Beresta Project"
+  },
+  "info": {
+    "companyName": "Beresta Project",
+    "productName": "Beresta",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright 2026 Beresta Project",
+    "comments": "End-to-end encrypted offline-first notes"
+  },
+  "postBuildHooks": {
+    "windows/amd64": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../windows/post-build.ps1 ${bin}"
+  },
   "frontend:dir": "frontend",
   "frontend:install": "npm.cmd install",
   "frontend:build": "npm.cmd run build",

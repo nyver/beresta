@@ -1,11 +1,15 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { accountStatus, getSettings, unwrapError } from "./api";
 import { I18nProvider, useI18n } from "./i18n";
 import { Onboarding } from "./screens/Onboarding";
 import { Unlock } from "./screens/Unlock";
-import { Shell } from "./screens/Shell";
 import { main } from "../wailsjs/go/models";
+
+// The rich editor and complete note shell pull in Quill/Yjs. Locked startup
+// cannot render them before the user unlocks, so keep that code out of the
+// onboarding/unlock bundle and the measured desktop cold-start path.
+const Shell = lazy(async () => ({ default: (await import("./screens/Shell")).Shell }));
 
 type Screen =
   | { name: "loading" }
@@ -81,7 +85,17 @@ function AppShell() {
         />
       );
     case "shell":
-      return <Shell account={screen.account} onLocked={load} />;
+      return (
+        <Suspense
+          fallback={
+            <main className="application-shell">
+              <p>{t("common.loading")}</p>
+            </main>
+          }
+        >
+          <Shell account={screen.account} onLocked={load} />
+        </Suspense>
+      );
     case "error":
       return (
         <main className="application-shell">

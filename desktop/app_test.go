@@ -11,6 +11,11 @@ import (
 
 func newTestApp(t *testing.T) *App {
 	t.Helper()
+	// Desktop settings and default backup paths are rooted in UserConfigDir.
+	// Keep every bound-method test inside its own disposable profile so the
+	// suite neither reads/writes the developer's real Beresta settings nor
+	// depends on sandbox access to AppData.
+	t.Setenv("AppData", t.TempDir())
 	a := newApp()
 	// Tests never call startup(ctx): a.ready stays false, so emit and
 	// runtimeContext behave as they would before the Wails window exists,

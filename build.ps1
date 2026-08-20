@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("bootstrap", "format", "format-check", "locale-check", "lint", "test", "build", "package", "mobile-check", "mobile-bind-android", "mobile-build-android", "mobile-test-android", "verify")]
+    [ValidateSet("bootstrap", "format", "format-check", "locale-check", "lint", "test", "build", "package", "cold-start", "installer-smoke", "mobile-check", "mobile-bind-android", "mobile-build-android", "mobile-test-android", "verify")]
     [string]$Task = "verify"
 )
 
@@ -10,8 +10,9 @@ $projectRoot = $PSScriptRoot
 $env:GOPATH = Join-Path $projectRoot "build\.go"
 $env:GOMODCACHE = Join-Path $env:GOPATH "pkg\mod"
 $env:GOCACHE = Join-Path $projectRoot "build\.go-cache"
+$env:GOTMPDIR = Join-Path $projectRoot "build\.go-tmp"
 $goBin = Join-Path $env:GOPATH "bin"
-New-Item -ItemType Directory -Path $env:GOMODCACHE, $env:GOCACHE, $goBin -Force | Out-Null
+New-Item -ItemType Directory -Path $env:GOMODCACHE, $env:GOCACHE, $env:GOTMPDIR, $goBin -Force | Out-Null
 if (($env:PATH -split [System.IO.Path]::PathSeparator) -notcontains $goBin) {
     $env:PATH = $goBin + [System.IO.Path]::PathSeparator + $env:PATH
 }
@@ -271,24 +272,93 @@ function Invoke-MobileTestAndroid {
     }
 }
 
+function Invoke-GoTests {
+    $go = Get-GoExecutable
+    $packages = @(& $go list ./...)
+    if ($LASTEXITCODE -ne 0) {
+        throw "go list ./... failed with exit code $LASTEXITCODE."
+    }
+
+    # Some Windows endpoint-protection configurations deny execution of a
+    # freshly linked binary named locales.test.exe while allowing the same
+    # linked bytes under a stable project-specific name. Compile
+    # that package separately so a host policy cannot make the complete test
+    # suite flaky; every other package still runs through the normal go test
+    # driver and the locale binary keeps the standard testing flags.
+    $localePackage = "github.com/beresta-app/beresta/locales"
+    $regularPackages = @($packages | Where-Object { $_ -ne $localePackage })
+    if ($regularPackages.Count -gt 0) {
+        Invoke-Checked -FilePath $go -Arguments (@("test") + $regularPackages)
+    }
+
+    $outputDirectory = Join-Path $projectRoot "build\output"
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+    $localeTest = Join-Path $outputDirectory "locales-check.exe"
+    Invoke-Checked -FilePath $go -Arguments @("test", "-c", "-o", $localeTest, "./locales")
+    Invoke-Checked -FilePath $localeTest -Arguments @("-test.v")
+}
+
 function Invoke-Tests {
-    Invoke-Checked -FilePath (Get-GoExecutable) -Arguments @("test", "./...")
+    Invoke-GoTests
     Invoke-Checked -FilePath (Resolve-Executable -Name "npm.cmd") -Arguments @("test") -WorkingDirectory (Join-Path $projectRoot "desktop\frontend")
     Invoke-FlutterChecked -FilePath (Get-FlutterExecutable) -Arguments @("test") -WorkingDirectory (Join-Path $projectRoot "mobile")
 }
 
 function Invoke-Build {
     Invoke-LocaleCheck
+    $desktopBuild = Join-Path $projectRoot "desktop\build"
+    $desktopWindows = Join-Path $desktopBuild "windows"
+    New-Item -ItemType Directory -Force -Path $desktopBuild, $desktopWindows | Out-Null
+    Copy-Item -LiteralPath (Join-Path $projectRoot "desktop\assets\appicon.png") -Destination (Join-Path $desktopBuild "appicon.png") -Force
+    # icon.ico is derived from the canonical appicon.png. Removing only this
+    # generated file forces Wails to refresh every icon size after a brand
+    # update instead of silently packaging a stale cached icon.
+    Remove-Item -LiteralPath (Join-Path $desktopWindows "icon.ico") -Force -ErrorAction SilentlyContinue
     Invoke-Checked -FilePath (Resolve-Executable -Name "npm.cmd") -Arguments @("run", "build") -WorkingDirectory (Join-Path $projectRoot "desktop\frontend")
     Invoke-Checked -FilePath (Get-WailsExecutable) -Arguments @("build", "-clean", "-tags", "sqlite_fts5") -WorkingDirectory (Join-Path $projectRoot "desktop")
 }
 
 function Invoke-Package {
-    Invoke-Build
+    Invoke-LocaleCheck
+    $desktopBuild = Join-Path $projectRoot "desktop\build"
+    $desktopWindows = Join-Path $desktopBuild "windows"
+    New-Item -ItemType Directory -Force -Path $desktopBuild, $desktopWindows | Out-Null
+    Copy-Item -LiteralPath (Join-Path $projectRoot "desktop\assets\appicon.png") -Destination (Join-Path $desktopBuild "appicon.png") -Force
+    Remove-Item -LiteralPath (Join-Path $desktopWindows "icon.ico") -Force -ErrorAction SilentlyContinue
+
+    $makeNSIS = Resolve-Executable -Name "makensis.exe" -Fallbacks @("build\tools\nsis-3.12\nsis-3.12\makensis.exe", "C:\Program Files (x86)\NSIS\makensis.exe", "C:\Program Files\NSIS\makensis.exe")
+    $nsisDirectory = Split-Path -Parent $makeNSIS
+    if (($env:PATH -split [System.IO.Path]::PathSeparator) -notcontains $nsisDirectory) {
+        $env:PATH = $nsisDirectory + [System.IO.Path]::PathSeparator + $env:PATH
+    }
+    Invoke-Checked -FilePath (Resolve-Executable -Name "npm.cmd") -Arguments @("run", "build") -WorkingDirectory (Join-Path $projectRoot "desktop\frontend")
+    Invoke-Checked -FilePath (Get-WailsExecutable) -Arguments @("build", "-clean", "-tags", "sqlite_fts5", "-nsis", "-installscope", "user") -WorkingDirectory (Join-Path $projectRoot "desktop")
 
     $outputDirectory = Join-Path $projectRoot "build\output"
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $projectRoot "desktop\build\bin\beresta.exe") -Destination (Join-Path $outputDirectory "beresta.exe") -Force
+    Copy-Item -LiteralPath (Join-Path $projectRoot "desktop\build\bin\beresta-updater.exe") -Destination (Join-Path $outputDirectory "beresta-updater.exe") -Force
+    $installer = Join-Path $projectRoot "desktop\build\bin\Beresta-amd64-installer.exe"
+    if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+        throw "Wails did not produce the expected NSIS installer: $installer"
+    }
+    Copy-Item -LiteralPath $installer -Destination (Join-Path $outputDirectory "Beresta-amd64-installer.exe") -Force
+}
+
+function Invoke-InstallerSmoke {
+    $installer = Join-Path $projectRoot "build\output\Beresta-amd64-installer.exe"
+    if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+        Invoke-Package
+    }
+    Invoke-Checked -FilePath "powershell.exe" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $projectRoot "build\windows\smoke-installer.ps1"), "-InstallerPath", $installer)
+}
+
+function Invoke-ColdStart {
+    $application = Join-Path $projectRoot "build\output\beresta.exe"
+    if (-not (Test-Path -LiteralPath $application -PathType Leaf)) {
+        Invoke-Package
+    }
+    Invoke-Checked -FilePath "powershell.exe" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $projectRoot "build\windows\cold-start.ps1"), "-ApplicationPath", $application)
 }
 
 switch ($Task) {
@@ -300,6 +370,8 @@ switch ($Task) {
     "test" { Invoke-Tests }
     "build" { Invoke-Build }
     "package" { Invoke-Package }
+    "cold-start" { Invoke-ColdStart }
+    "installer-smoke" { Invoke-InstallerSmoke }
     "mobile-check" { Invoke-MobileCompileCheck }
     "mobile-bind-android" { Invoke-MobileBind }
     "mobile-build-android" { Invoke-MobileBuildAndroid }

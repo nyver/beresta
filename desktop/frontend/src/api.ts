@@ -42,6 +42,7 @@ import {
   Search,
   SearchByTag,
   Status,
+  SyncStatus,
   UnlockAccount,
   UpdateSavedSearch,
   UpdateSettings,
@@ -144,6 +145,21 @@ export async function unlockAccount(
 
 export async function lockAccount(): Promise<void> {
   return LockAccount();
+}
+
+export type SyncStatusValue = "disabled" | "offline" | "active" | "current" | "failed";
+
+/**
+ * syncStatus returns the shared transport state used by every client UI.
+ * Rejecting an unknown backend value keeps version skew visible instead
+ * of silently presenting an unsafe or misleading state.
+ */
+export async function syncStatus(): Promise<SyncStatusValue> {
+  const status = await SyncStatus();
+  if (["disabled", "offline", "active", "current", "failed"].includes(status)) {
+    return status as SyncStatusValue;
+  }
+  throw new Error(`unknown synchronization status: ${status}`);
 }
 
 /**

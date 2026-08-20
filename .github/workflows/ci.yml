@@ -49,13 +49,26 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
 
+      - name: Install NSIS
+        shell: powershell
+        run: choco install nsis --yes --no-progress
+
       - name: Verify and package
         shell: cmd
         run: build.cmd verify
+
+      - name: Smoke-test installer in disposable runner profile
+        shell: cmd
+        env:
+          BERESTA_INSTALLER_SMOKE_DISPOSABLE_PROFILE: "1"
+        run: build.cmd installer-smoke
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: beresta-windows-amd64
-          path: build/output/beresta.exe
+          path: |
+            build/output/beresta.exe
+            build/output/beresta-updater.exe
+            build/output/Beresta-amd64-installer.exe
           if-no-files-found: error

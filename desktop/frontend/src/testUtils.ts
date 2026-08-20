@@ -41,6 +41,10 @@ export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
   return settings;
 }
 
+export function mockSyncStatus(status = "disabled") {
+  appMock.SyncStatus.mockResolvedValue(status);
+}
+
 export function mockAutostartStatus(overrides: Partial<main.AutostartStatusDTO> = {}) {
   const status: main.AutostartStatusDTO = { enabled: false, conflict_path: "", ...overrides };
   appMock.AutostartStatus.mockResolvedValue(status);

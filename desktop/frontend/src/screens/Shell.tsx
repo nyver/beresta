@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   ensureDailyBackup,
@@ -24,6 +24,7 @@ import { NoteList } from "../shell/NoteList";
 import { QuickNotePanel } from "../shell/QuickNotePanel";
 import { SearchBar, type SearchBarHandle } from "../shell/SearchBar";
 import { ShellIntegrationPanel } from "../shell/ShellIntegrationPanel";
+import { SyncPanel } from "../shell/SyncPanel";
 import { TagList } from "../shell/TagList";
 
 // Matches desktop/events.go's EventQuickNoteOpen.
@@ -43,6 +44,7 @@ type Selection = { kind: "all" } | { kind: "notebook"; id: string } | { kind: "t
  */
 export function Shell({ account, onLocked }: ShellProps) {
   const { t, errorMessage, ready } = useI18n();
+  const shellTitleId = useId();
   const [locking, setLocking] = useState(false);
   const editorPaneRef = useRef<NoteEditorPaneHandle>(null);
   const searchBarRef = useRef<SearchBarHandle>(null);
@@ -68,6 +70,7 @@ export function Shell({ account, onLocked }: ShellProps) {
   const [searchResults, setSearchResults] = useState<main.SearchResultDTO[] | null>(null);
   const [highlightTerms, setHighlightTerms] = useState<string[]>([]);
   const [dataModalOpen, setDataModalOpen] = useState(false);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
   // Bumped on every quicknote:open so QuickNotePanel remounts (and thus
   // creates a fresh note) for each capture session instead of reusing
   // whatever note the previous session left mounted.
@@ -249,9 +252,9 @@ export function Shell({ account, onLocked }: ShellProps) {
   }
 
   return (
-    <div className="screen shell">
+    <main className="screen shell" aria-labelledby={shellTitleId}>
       <header className="shell-topbar">
-        <h1>{t("shell.title")}</h1>
+        <h1 id={shellTitleId}>{t("shell.title")}</h1>
         <div className="shell-topbar-actions">
           {account.key_protection ? (
             <span className="key-protection-badge">
@@ -277,6 +280,9 @@ export function Shell({ account, onLocked }: ShellProps) {
           <button type="button" onClick={() => setDataModalOpen(true)}>
             {t("data.title")}
           </button>
+          <button type="button" onClick={() => setSyncModalOpen(true)}>
+            {t("sync.open_button")}
+          </button>
           <button type="button" onClick={() => void handleLock()} disabled={locking}>
             {t("shell.lock_button")}
           </button>
@@ -288,6 +294,12 @@ export function Shell({ account, onLocked }: ShellProps) {
           <BackupsPanel onRestored={loadAll} />
           <ImportExportPanel onImported={loadAll} />
           <ShellIntegrationPanel />
+        </Modal>
+      ) : null}
+
+      {syncModalOpen ? (
+        <Modal title={t("sync.title")} onClose={() => setSyncModalOpen(false)}>
+          <SyncPanel deviceId={account.device_id} />
         </Modal>
       ) : null}
 
@@ -364,6 +376,6 @@ export function Shell({ account, onLocked }: ShellProps) {
           </section>
         </div>
       )}
-    </div>
+    </main>
   );
 }

@@ -18,6 +18,7 @@ export const appMock = {
   CreateAccount: vi.fn(),
   UnlockAccount: vi.fn(),
   LockAccount: vi.fn(),
+  SyncStatus: vi.fn(),
   PickSaveDestination: vi.fn(),
   ListNotebooks: vi.fn(),
   ListTags: vi.fn(),

@@ -4,11 +4,12 @@ Beresta is an offline-first encrypted notes application for Windows and Android 
 
 ## Project Status
 
-Beresta has completed phase 3 (complete local-only product core). Phases 1
-and 2A delivered the architecture baseline and cryptographic core; phase 2B
-added the encrypted client store; phase 3 adds the complete offline note
-application surface on top of them, entirely through `core/account` — still
-with no desktop or mobile screen wired to it yet:
+Beresta has completed phase 4 (Windows desktop local-only application). Phases
+1 and 2A delivered the architecture baseline and cryptographic core; phase 2B
+added the encrypted client store; phase 3 added the complete offline note
+application surface through `core/account`; phase 4 wires that surface into a
+packaged, tested Windows application while remote synchronization remains a
+later phase:
 
 - a buildable Wails v2 Windows host with a React/TypeScript frontend;
 - a generated Flutter Android wrapper project with an analyzed and tested mobile shell;
@@ -30,7 +31,7 @@ with no desktop or mobile screen wired to it yet:
 - architecture, threat-model, crypto, synchronization, and ADR documentation;
 - one root verification command and a Windows CI workflow.
 
-Phase 4 (Windows desktop application) is in progress. The coarse Wails
+The completed Phase 4 Windows desktop application uses a coarse Wails
 application service layer is implemented (`desktop/app.go` and its sibling
 files): account lifecycle, note/notebook/tag commands, search and saved
 searches, revision history, attachments (via native file pickers, since the
@@ -124,9 +125,19 @@ the per-user Windows Run key, with a UI warning when a stale entry from a
 different install path is detected. Closing the main window hides it to
 the tray instead of exiting whenever the tray started successfully; the
 tray menu's "Quit" (or a failed tray/hotkey startup, logged to the
-console) is what actually ends the process. The installer and the
-remaining sync-status UI are the remaining phase-4 work (tasks 5.10
-onward).
+console) is what actually ends the process. A separate Synchronization
+entry now renders the shared disabled/offline/active/current/failed state
+model and listens for `sync:status` events without blocking local editing.
+In the current local-only phase it truthfully shows the active local device,
+an empty conflict/quarantine journal, and disabled server/device-management
+controls rather than fabricating remote state. Windows packaging now produces
+a per-user NSIS installer with explicit preserve/delete-local-data uninstall
+choices, a branded application icon, and a fail-closed updater that verifies
+the pinned release signature, SHA-256 digest, Authenticode publisher trust, and
+the installed executable before retaining or restoring the prior version.
+Desktop component/accessibility/Wails-boundary tests, an offline end-to-end
+scenario, installer/update tests, the 20,000-note search benchmark, and the
+ten-launch cold-start gate now cover the phase-available behavior.
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
@@ -135,9 +146,11 @@ Cryptographic/platform protection verification is recorded in
 local store is recorded in
 [the phase-2B delivery report](docs/phase-2b-report.md), and the complete
 local-only product core is recorded in
-[the phase-3 delivery report](docs/phase-3-report.md).
+[the phase-3 delivery report](docs/phase-3-report.md), and the packaged Windows
+application is recorded in
+[the phase-4 delivery report](docs/phase-4-report.md).
 
-The current shell does not yet store real notes through a user interface or provide synchronization. Those capabilities are implemented and accepted in the ordered OpenSpec phases; do not use this revision for sensitive data.
+The desktop UI stores real local notes but does not yet provide remote synchronization. Remote capabilities are implemented and accepted in the ordered OpenSpec phases; do not use this revision for multi-device workflows.
 
 ## Security Model
 
@@ -170,6 +183,7 @@ The phase-1 reference environment is:
 - Go 1.26.3;
 - Node.js 24 and npm 11;
 - Wails CLI 2.14.0;
+- NSIS 3.12 (`makensis.exe`) for Windows installer packaging;
 - Flutter 3.47.0 with Dart 3.13.0;
 - `gomobile`/`gobind` from `golang.org/x/mobile` revision `1960c775504c` for native core bindings;
 - a Windows amd64 GCC toolchain for the CGo SQLCipher build (w64devkit 2.9.0 is the reference toolchain);
@@ -226,6 +240,8 @@ build.cmd lint
 build.cmd test
 build.cmd build
 build.cmd package
+build.cmd cold-start
+build.cmd installer-smoke
 build.cmd mobile-check
 build.cmd mobile-bind-android
 build.cmd mobile-build-android
@@ -244,14 +260,20 @@ The commands mean:
 | `lint` | Validate localization catalogs, run `go vet`, TypeScript type checking, and Flutter analysis |
 | `test` | Run Go, Vitest, and Flutter tests |
 | `build` | Build the React bundle and Windows Wails executable |
-| `package` | Build and copy `beresta.exe` to ignored `build/output/` |
+| `package` | Build the app, fail-closed updater, and per-user NSIS installer under ignored `build/output/` |
+| `cold-start` | Measure ten fresh-profile launches to the first responsive Windows main window and enforce a five-second nearest-rank p95 budget |
+| `installer-smoke` | Exercise install, update preservation, default data retention, and explicit purge in a disposable Windows profile |
 | `mobile-check` | Generate and validate the gomobile Java binding surface |
 | `mobile-bind-android` | Produce `build/output/beresta-core.aar`; requires Android SDK/NDK |
 | `mobile-build-android` | Produce the Android AAR and a Flutter debug APK with native SQLCipher linkage |
 | `mobile-test-android` | Run the SQLCipher instrumentation round trip on a connected `arm64-v8a` Android device |
 | `verify` | Run format checks, lint, tests, and package the phase-available artifacts |
 
-The Windows executable is generated at `desktop/build/bin/beresta.exe` and copied to `build/output/beresta.exe`. Both locations are generated and ignored.
+The Windows executable, updater, and installer are copied to
+`build/output/beresta.exe`, `build/output/beresta-updater.exe`, and
+`build/output/Beresta-amd64-installer.exe`. Generated output is ignored. See
+[desktop update and installer operations](docs/desktop-updates.md) for release
+signing and Windows 10/11 smoke-test requirements.
 
 ## Module-Specific Commands
 
@@ -319,11 +341,12 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 
 ## Current Limitations
 
-- The mobile application is still a phase-1 shell; the desktop application now has onboarding, unlock, a main shell (notebook tree, tags, note list), a working Quill/Yjs body editor, an attachment panel (drag-and-drop, clipboard image paste, inline image preview, save-as), a search box (instant filtered/full-text search, saved-query management, highlighted results), a note history panel (revision list, diff, restore), a Backups & Data dialog (backup directory setting, catalog/preview/dry-run/restore, plaintext export, Beresta/Evernote import, and the quick-note hotkey/autostart controls), lock handling (configurable auto-lock, an immediate content-hiding overlay while locking, and a typed-confirmation local-wipe workflow), and Windows shell integration (a system-tray icon, a configurable global quick-note hotkey with a focused capture surface, close-to-tray, and opt-in launch-at-sign-in) wired to the real local-only product core, but has no installer yet, and the complete phase-3 core is otherwise exercised only through Go tests. The local-wipe workflow is a manually-triggered stand-in for the windows-desktop-client spec's revocation response: nothing can deliver an actual revocation signal yet since no sync transport exists (see below). Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
+- The Windows cold-start gate is reference-host-sensitive: one run immediately after packaging failed because a single native WebView2 initialization took 6569 ms, while the repeated acceptance run on the idle reference host passed at p95 3755 ms. The ten-sample method, measured constraint, and revision from the original 1.5-second budget are recorded in [ADR 0007](docs/adr/0007-desktop-cold-start-budget.md); hosted CI timing does not substitute for this gate.
+- The mobile application is still a phase-1 shell. The desktop local-wipe workflow is a manually-triggered stand-in for the windows-desktop-client spec's revocation response: nothing can deliver an actual revocation signal yet since no sync transport exists (see below). Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
 - `quill@2.0.3` (the current stable release) has an open low-severity XSS advisory in its HTML-export feature ([GHSA-v3m3-f69x-jf25](https://github.com/advisories/GHSA-v3m3-f69x-jf25)); Beresta never calls that feature (`getSemanticHTML`/HTML clipboard export), relying only on the Delta model and the Go core's own Markdown projection, so it is not reachable through anything this app does.
 - The optional synchronization server has not been implemented; `core/transport`'s `SyncTransport` currently has only the default local no-op implementation.
 - `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.
 - Revision rollback and portable/Evernote import recreate content as plain text; rich-text formatting is not round-tripped through either path (see [ASSUMPTIONS.md](ASSUMPTIONS.md)).
 - The SQLCipher encrypted round trip passes on Windows amd64 and on an Android arm64 device through the packaged AAR and Flutter application linkage.
 - The Go mobile binding, SQLCipher-linked Android AAR, and Flutter debug APK builds pass on Windows.
-- Release signing, installers, automatic updates, and store packaging are implemented in later phases.
+- Development packages are intentionally unsigned unless release signing is configured. Production publishing, update-manifest generation, automatic update discovery/download, and store packaging remain later-phase work; the current updater only verifies and applies a pre-downloaded signed package.

@@ -17,7 +17,13 @@ build/.go-cache/
 build/.flutter/
 build/.pub-cache/
 build/.gradle/
-desktop/build/
+# Wails build sources below desktop/build/windows are tracked; generated
+# binaries, icons, bootstrapper payloads, and resolved NSIS helpers are not.
+desktop/build/bin/
+desktop/build/appicon.png
+desktop/build/windows/icon.ico
+desktop/build/windows/installer/wails_tools.nsh
+desktop/build/windows/installer/tmp/
 desktop/frontend/dist/
 desktop/frontend/node_modules/
 # Wails writes a default icon.png to the repo root during some build/doctor

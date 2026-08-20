@@ -14,6 +14,7 @@ import {
   mockLocaleCatalog,
   mockSavedSearches,
   mockSettings,
+  mockSyncStatus,
 } from "../testUtils";
 import { Shell } from "./Shell";
 import { main } from "../../wailsjs/go/models";
@@ -51,6 +52,7 @@ describe("Shell", () => {
     renderShell();
 
     expect(await screen.findByText("Grocery list")).toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveAccessibleName("shell.title");
   });
 
   it("excludes tombstoned notes from every view", async () => {
@@ -210,6 +212,20 @@ describe("Shell", () => {
     renderShell({ account: fakeAccountInfo({ key_protection: "windows-hello" }) });
 
     expect(await screen.findByText("shell.key_protection_hello")).toBeInTheDocument();
+  });
+
+  it("opens synchronization settings with the current local device", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    mockSyncStatus();
+    renderShell({ account: fakeAccountInfo({ device_id: "device-local" }) });
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "sync.open_button" }));
+
+    expect(await screen.findByRole("dialog", { name: "sync.title" })).toBeInTheDocument();
+    expect(screen.getByText("device-local")).toBeInTheDocument();
+    expect(screen.getByText("sync.status_disabled")).toBeInTheDocument();
   });
 
   it("changes the auto-lock duration through the topbar control and persists it", async () => {

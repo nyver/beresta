@@ -57,7 +57,7 @@ This file records implementation decisions that fill gaps without changing the f
 4. Windows is authoritative for Wails and Android builds. The Android binding gate uses SDK platform 36, build-tools 36.0.0, and NDK 28.2.13676358; runtime acceptance requires an online `arm64-v8a` device.
 5. AndroidX Biometric 1.1.0 is the stable compatibility layer used by the Flutter host for `BiometricPrompt.CryptoObject`; alpha APIs are not required.
 6. The project-local `build/tools`, `build/.go`, and `build/.go-cache` directories are ignored developer conveniences. Clean builds must also work with documented tools installed on `PATH`.
-7. Reference performance hardware and exact percentile methodology are recorded before performance acceptance gates run; measurements from unspecified hardware do not close those tasks.
+7. Desktop cold-start acceptance uses the Windows 11 Pro 25H2 build 26200 reference host with an Intel Core i7-11700K (16 logical processors), amd64, and Microsoft Edge WebView2 Runtime 151.0.4129.93 preinstalled. It measures nearest-rank p95 across ten consecutive launches, each with a fresh Beresta AppData profile; measurements from unspecified hardware or shortened diagnostic runs do not close the gate. See ADR 0007.
 
 ## User Experience
 
@@ -66,4 +66,4 @@ This file records implementation decisions that fill gaps without changing the f
 3. Mobile operating systems may delay background work indefinitely; foreground entry always resumes durable pending synchronization.
 4. Revocation confirmation explicitly states that Beresta cannot erase data already copied by a formerly authorized device.
 5. English and Russian are complete supported UI languages from the first user-facing implementation phase.
-6. The desktop tray/taskbar icon is the generic Windows application icon (`IDI_APPLICATION`) until the installer task (5.11) supplies a branded `.ico`; an accidental quick-note hotkey press that is closed without typing anything is accepted to leave one empty note in the workspace rather than adding emptiness-detection logic to discard it.
+6. The desktop tray, taskbar, executable, and installer derive their branded icon from `desktop/assets/appicon.png`; an accidental quick-note hotkey press that is closed without typing anything is accepted to leave one empty note in the workspace rather than adding emptiness-detection logic to discard it.

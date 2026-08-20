@@ -912,3 +912,88 @@ button:disabled {
   height: calc(100vh - 3.5rem);
   color: #5a5148;
 }
+
+.sync-panel,
+.sync-panel section,
+.sync-status-error {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sync-panel section + section {
+  padding-top: 1rem;
+  border-top: 1px solid #d8d1c4;
+}
+
+.sync-panel h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #5a5148;
+}
+
+.sync-panel section > button,
+.sync-status-error button {
+  align-self: flex-start;
+}
+
+.sync-status-card,
+.sync-device-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #d8d1c4;
+  border-radius: 0.35rem;
+  background: #fff;
+}
+
+.sync-status-card > div,
+.sync-device-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.sync-status-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  border-radius: 50%;
+  background: #7d7469;
+}
+
+.sync-status-active .sync-status-dot {
+  background: #2f6f9f;
+}
+
+.sync-status-current .sync-status-dot {
+  background: #3a6b2a;
+}
+
+.sync-status-offline .sync-status-dot {
+  background: #b36a20;
+}
+
+.sync-status-failed .sync-status-dot {
+  background: #8a2c1f;
+}
+
+.sync-device-row {
+  justify-content: space-between;
+}
+
+.sync-device-row code {
+  overflow-wrap: anywhere;
+}
+
+.sync-device-row > span {
+  flex: none;
+  padding: 0.2rem 0.5rem;
+  border-radius: 1rem;
+  background: #eee2d0;
+  color: #5a5148;
+  font-size: 0.75rem;
+}

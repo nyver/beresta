@@ -4,7 +4,8 @@ Beresta is an offline-first encrypted notes application for Windows and Android 
 
 ## Project Status
 
-Beresta has completed phase 4 (Windows desktop local-only application). Phases
+Beresta has completed phase 4 (Windows desktop local-only application) and has
+completed the phase-5 home synchronization server. Phases
 1 and 2A delivered the architecture baseline and cryptographic core; phase 2B
 added the encrypted client store; phase 3 added the complete offline note
 application surface through `core/account`; phase 4 wires that surface into a
@@ -29,7 +30,14 @@ later phase:
 - schema-migration safety backups taken automatically before a pending migration runs, an FTS index rebuild primitive, and a tested backup/restore round trip as the forward-fix recovery path;
 - build-time validation for source English and Russian localization catalogs;
 - architecture, threat-model, crypto, synchronization, and ADR documentation;
-- one root verification command and a Windows CI workflow.
+- one root verification command and a Windows CI workflow;
+- a `beresta-server` executable with strict configuration defaults, a
+  private single-directory data lifecycle, embedded transactional migrations,
+  and an atomically generated self-signed TLS identity with a stable SHA-256
+  fingerprint; invite-only registration, server-bound Ed25519 challenge
+  sessions, resource-scoped `/v1` APIs, opaque operation/blob/snapshot storage,
+  bounded WebSocket hints, verified seven-day backups, and the administration
+  CLI are implemented without an external service or cgo dependency.
 
 The completed Phase 4 Windows desktop application uses a coarse Wails
 application service layer is implemented (`desktop/app.go` and its sibling
@@ -239,6 +247,9 @@ build.cmd locale-check
 build.cmd lint
 build.cmd test
 build.cmd build
+build.cmd server-build
+build.cmd server-cross-build
+build.cmd server-smoke
 build.cmd package
 build.cmd cold-start
 build.cmd installer-smoke
@@ -259,7 +270,10 @@ The commands mean:
 | `locale-check` | Reject missing, duplicate, empty, or untranslated English/Russian catalog entries |
 | `lint` | Validate localization catalogs, run `go vet`, TypeScript type checking, and Flutter analysis |
 | `test` | Run Go, Vitest, and Flutter tests |
-| `build` | Build the React bundle and Windows Wails executable |
+| `build` | Build the server, React bundle, and Windows Wails executable |
+| `server-build` | Build `build/output/beresta-server.exe` for the current host |
+| `server-cross-build` | Build static Windows amd64, Linux amd64, and Linux arm64 server binaries under `build/output/server/` |
+| `server-smoke` | Cross-build all server targets and smoke-test Windows first start plus live-state verification |
 | `package` | Build the app, fail-closed updater, and per-user NSIS installer under ignored `build/output/` |
 | `cold-start` | Measure ten fresh-profile launches to the first responsive Windows main window and enforce a five-second nearest-rank p95 budget |
 | `installer-smoke` | Exercise install, update preservation, default data retention, and explicit purge in a disposable Windows profile |
@@ -269,7 +283,8 @@ The commands mean:
 | `mobile-test-android` | Run the SQLCipher instrumentation round trip on a connected `arm64-v8a` Android device |
 | `verify` | Run format checks, lint, tests, and package the phase-available artifacts |
 
-The Windows executable, updater, and installer are copied to
+The server, Windows executable, updater, and installer are copied to
+`build/output/beresta-server.exe`,
 `build/output/beresta.exe`, `build/output/beresta-updater.exe`, and
 `build/output/Beresta-amd64-installer.exe`. Generated output is ignored. See
 [desktop update and installer operations](docs/desktop-updates.md) for release
@@ -283,6 +298,17 @@ signing and Windows 10/11 smoke-test requirements.
 go test ./...
 go vet ./...
 ```
+
+Initialize the optional server data directory without starting its listener:
+
+```powershell
+go run ./cmd/beresta-server --data ./data --init-only
+```
+
+Remove `--init-only` to listen on the configured HTTPS address. See the
+[server API](docs/server-api.md) and [operations guide](docs/server-operations.md)
+for enrollment, administration, backup/restore, service, container, and
+Raspberry Pi commands.
 
 ### Desktop frontend
 
@@ -327,7 +353,25 @@ The optional server will run with safe defaults and no configuration file:
 beresta-server --data ./data
 ```
 
-Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when changing defaults. `config.yaml` is intentionally ignored because it may contain local paths or deployment-specific certificate information. The server is implemented in phase 5; the example currently defines its reviewed configuration contract.
+Copy [config.example.yaml](config.example.yaml) to `<data>/config.yaml` only when
+changing defaults, or pass an explicit file with `--config`. The `--data` value
+always overrides `server.data_dir`. `config.yaml` is intentionally ignored
+because it may contain local paths or deployment-specific certificate
+information. On first initialization the server creates `beresta.db`, `blobs/`,
+`backups/`, and an atomically published `tls/` identity beneath the private data
+root. Record the printed SHA-256 fingerprint through a trusted channel before
+clients pin it.
+
+Create the first single-use invite after initialization:
+
+```powershell
+beresta-server --data ./data invite --name Alice
+```
+
+Global flags precede administrative commands. Restore and garbage collection
+are dry runs unless `--confirm` is supplied. Daily server backups contain a
+verified SQLite snapshot and immutable encrypted blob view; exactly the newest
+seven valid daily backups are retained.
 
 ## Development Rules
 
@@ -344,7 +388,12 @@ Copy [config.example.yaml](config.example.yaml) to `config.yaml` only when chang
 - The Windows cold-start gate is reference-host-sensitive: one run immediately after packaging failed because a single native WebView2 initialization took 6569 ms, while the repeated acceptance run on the idle reference host passed at p95 3755 ms. The ten-sample method, measured constraint, and revision from the original 1.5-second budget are recorded in [ADR 0007](docs/adr/0007-desktop-cold-start-budget.md); hosted CI timing does not substitute for this gate.
 - The mobile application is still a phase-1 shell. The desktop local-wipe workflow is a manually-triggered stand-in for the windows-desktop-client spec's revocation response: nothing can deliver an actual revocation signal yet since no sync transport exists (see below). Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
 - `quill@2.0.3` (the current stable release) has an open low-severity XSS advisory in its HTML-export feature ([GHSA-v3m3-f69x-jf25](https://github.com/advisories/GHSA-v3m3-f69x-jf25)); Beresta never calls that feature (`getSemanticHTML`/HTML clipboard export), relying only on the Delta model and the Go core's own Markdown projection, so it is not reachable through anything this app does.
-- The optional synchronization server has not been implemented; `core/transport`'s `SyncTransport` currently has only the default local no-op implementation.
+- The optional server `/v1` API is complete, but `core/transport` still has only
+  the default local no-op implementation. Desktop/mobile server connection UI
+  and background synchronization therefore remain disabled until the client
+  transport phase. Raspberry Pi idle acceptance runs only on the opt-in
+  `beresta-pi` reference runner; ordinary hosted CI cross-builds Linux arm64 but
+  cannot substitute for the physical RSS/CPU measurement.
 - `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.
 - Revision rollback and portable/Evernote import recreate content as plain text; rich-text formatting is not round-tripped through either path (see [ASSUMPTIONS.md](ASSUMPTIONS.md)).
 - The SQLCipher encrypted round trip passes on Windows amd64 and on an Android arm64 device through the packaged AAR and Flutter application linkage.

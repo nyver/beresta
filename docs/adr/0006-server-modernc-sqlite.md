@@ -9,15 +9,26 @@ The optional home server must run as one static binary on Windows amd64, Linux a
 
 ## Decision
 
-Use `modernc.org/sqlite` with embedded goose migrations, WAL, `busy_timeout=5000`, `synchronous=NORMAL`, foreign keys, one serialized writer, and short read transactions. Store users, devices, memberships, envelopes, operation metadata/ciphertext, blob references, and snapshots in `beresta.db`.
+Use `modernc.org/sqlite` with embedded checksum-verified transactional
+migrations, WAL, `busy_timeout=5000`, `synchronous=NORMAL`, foreign keys, one
+serialized writer, and short read transactions. Store users, devices,
+memberships, envelopes, operation metadata/ciphertext, blob references, and
+snapshots in `beresta.db`.
 
-Store encrypted blob chunks as ordinary immutable files under `blobs/<aa>/<bb>/<blob_id>`. Use temporary write, flush, atomic rename, and transactional metadata publication. Use bounded in-process Go channels for WebSocket cursor hints and a bounded in-memory rate limiter.
+Store encrypted blob chunks as ordinary immutable files under
+`blobs/<aa>/<bb>/<blob_id>/<workspace_id>/`. The workspace leaf prevents an
+untrusted client from making equal caller-supplied blob IDs in two workspaces
+alias the same files; clients still derive legitimate blob IDs with a
+workspace-private HMAC key. Use temporary write, flush, atomic rename, and
+transactional metadata publication. Use bounded in-process Go channels for
+WebSocket cursor hints and a bounded in-memory rate limiter.
 
 All persistent server state lives under one configured data directory. Direct binary execution is the primary deployment path. Systemd, Windows Task Scheduler, and a minimal container are optional wrappers around the same binary and directory.
 
 ## Consequences
 
 - The server cross-compiles without cgo or a runtime database installation.
+- Applied migration names and SHA-256 checksums are recorded; an edited applied migration fails closed.
 - One household-sized SQLite writer is simpler than a distributed consistency system and has ample capacity for the target load.
 - The server cannot scale horizontally and intentionally provides no high-availability database layer.
 - Database and blob backup consistency needs verified manifests and hardlink-or-copy snapshot behavior.

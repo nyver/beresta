@@ -120,3 +120,21 @@ func TestManifestRejectsDirectoriesLinksAndCancellation(t *testing.T) {
 		t.Fatalf("cancelled generation error = %v", err)
 	}
 }
+
+func TestManifestRejectsSymlinkRootWhenSupported(t *testing.T) {
+	parent := t.TempDir()
+	realRoot := filepath.Join(parent, "real")
+	if err := os.Mkdir(realRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realRoot, "snapshot"), []byte("value"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkedRoot := filepath.Join(parent, "linked")
+	if err := os.Symlink(realRoot, linkedRoot); err != nil {
+		t.Skipf("directory symlinks are unavailable: %v", err)
+	}
+	if _, err := GenerateManifest(context.Background(), linkedRoot, []string{"snapshot"}); !errors.Is(err, ErrUnsafeManifestPath) {
+		t.Fatalf("symlink root error = %v", err)
+	}
+}

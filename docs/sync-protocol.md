@@ -180,7 +180,14 @@ cursor = {
 
 `last_seq=0` means no sequenced operation has been applied. `epoch` changes only when a protocol-compatible server maintenance action invalidates previous cursor interpretation; ordinary compaction does not renumber sequences.
 
-The HTTP representation is URL-safe base64 of canonical CBOR. Clients treat a received cursor as untrusted until its workspace/epoch and response ordering are validated. A response cursor must equal the highest contiguous sequence represented by the response or a documented empty-page boundary.
+The HTTP API uses strict JSON containers and standard JSON base64 for byte
+strings. UUIDs are canonical text only at this transport boundary. Before any
+signature operation, clients and the server decode identifiers to raw bytes and
+reconstruct the closed deterministic-CBOR structure defined under `schema/v1`;
+JSON bytes are never signed directly. Clients treat a received cursor as
+untrusted until its workspace/epoch and response ordering are validated. A
+response cursor must equal the highest contiguous sequence represented by the
+response or a documented empty-page boundary.
 
 The client never advances its durable cursor before all operations through that cursor have authenticated and committed. A poison operation blocks contiguous progress and enters quarantine with an explicit recovery path; it is never silently skipped.
 
@@ -201,6 +208,8 @@ Paths are rooted at `/v1`. Exact request and response schemas live under `schema
 | `POST /blobs/{blob_id}/complete` | Verify uploaded chunk set and atomically publish blob |
 | `GET /blobs/{blob_id}` | Fetch encrypted manifest and available chunk state |
 | `GET /blobs/{blob_id}/chunks/{index}` | Download one encrypted chunk |
+| `PUT /blobs/{blob_id}/references/{reference_id}` | Idempotently add an opaque live reference |
+| `DELETE /blobs/{blob_id}/references/{reference_id}` | Idempotently remove an opaque live reference |
 | `POST /snapshots` | Publish a signed encrypted workspace snapshot |
 | `GET /snapshots/latest?workspace_id=` | Fetch latest eligible snapshot metadata/ciphertext |
 | `POST /snapshots/{snapshot_id}/ack` | Record active-device validation acknowledgement |
@@ -339,8 +348,9 @@ The client first encrypts and verifies the attachment locally according to `cryp
 
 1. `init` authenticates/authorizes, validates limits, reserves quota, and returns already present chunk indexes.
 2. The client uploads missing chunks by stable index. Repeating an identical chunk is successful; conflicting bytes for an existing index are rejected.
-3. `complete` verifies the declared chunk set, sizes, encrypted hashes, quota reservation, and atomically publishes the blob/reference metadata.
-4. Expired incomplete uploads are garbage collected and release quota.
+3. `complete` verifies the declared chunk set, sizes, encrypted hashes, quota reservation, and atomically publishes the blob metadata.
+4. The client adds an opaque UUIDv7 reference after the local referencing operation is durable; retries are idempotent. It removes that same reference after the local tombstone/retention policy permits release.
+5. Expired incomplete uploads are garbage collected and release quota.
 
 The server validates encrypted hashes for transport integrity but cannot perform AEAD or plaintext blob-ID verification. The uploading client verifies those before upload, and every downloading client verifies them after download.
 

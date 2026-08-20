@@ -236,7 +236,12 @@ sig = Ed25519.Sign(device_private_key, signature_input)
 
 Clients and the server reject non-canonical input, unknown mandatory fields, invalid key sizes, invalid signatures, revoked devices, unacceptable HLC windows, and duplicate `op_id` values before applying or sequencing an operation.
 
-Snapshot, membership, device authorization, revocation, and key-transition records use distinct signature domain strings and their own canonical schemas. A signature valid for one record class is invalid for every other class.
+Snapshot, snapshot-acknowledgement, membership, device authorization,
+revocation, and key-transition records use distinct signature domain strings
+and their own canonical schemas. Snapshot records use
+`beresta.snapshot.signature.v1`; acknowledgements use
+`beresta.snapshot-ack.signature.v1`. A signature valid for one record class is
+invalid for every other class.
 
 ## Workspace-Key Envelopes
 

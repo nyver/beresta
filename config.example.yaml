@@ -1,5 +1,6 @@
 # Beresta home synchronization server example configuration.
 # The server runs with safe defaults when this file is absent.
+# By default place this file at <data>/config.yaml; --config selects another path.
 # Client CRDT/mobile binding, secure-buffer lifetimes, Argon2id/HKDF/XChaCha20, 4 MiB attachment, encrypted-backup profiles, X25519/Ed25519 identities, SQLCipher keys, Windows DPAPI/Hello policy, Android Keystore/biometric policy, Windows tray/global-hotkey/autostart integration, desktop cold-start acceptance, installer/update signing policy, the shared client sync-status UI, and localization catalogs are local platform contracts and have no server option.
 
 server:
@@ -11,9 +12,10 @@ server:
   shutdown_timeout: "15s"
 
 tls:
-  # Supported values: self_signed or files. ACME support is configured separately when enabled.
+  # Supported values: self_signed or files. ACME fields are reserved and enabled mode fails closed.
   mode: "self_signed"
   # File paths are required only when mode is files.
+  # Relative paths are resolved from the server process working directory.
   certificate_file: ""
   private_key_file: ""
   acme:
@@ -37,13 +39,15 @@ limits:
   max_blob_bytes: 2147483648
   # Fixed encrypted attachment chunk size: 4 MiB.
   blob_chunk_bytes: 4194304
-  # Per-user server quota: 20 GiB, matching the supported product ceiling.
+  # Per-user server quota: 20 GiB. A restart applies changes to existing users.
   user_quota_bytes: 21474836480
   # Maximum number of operations returned or accepted in one bounded batch.
   max_operations_per_batch: 1000
   # Maximum accepted future Hybrid Logical Clock skew.
   max_hlc_future_skew: "5m"
-  # Per-device request limiter. WebSocket cursor hints do not contain operation bodies.
+  # Reject signed envelopes older than this replay/retention window.
+  max_hlc_past_age: "8760h"
+  # Bounded per-IP and per-device request limiters. WebSocket hints contain no operation bodies.
   requests_per_second: 20
   request_burst: 40
 
@@ -55,6 +59,7 @@ sqlite:
 
 backups:
   enabled: true
+  # The default follows --data; a custom relative path uses the process working directory.
   directory: "./data/backups"
   # Keep exactly the newest seven valid daily server backups after rotation.
   keep_daily: 7
@@ -68,6 +73,6 @@ logging:
   format: "json"
 
 metrics:
-  # Metrics are optional and disabled by default.
+  # Metrics are optional, aggregate-only, contain no resource labels, and are disabled by default.
   enabled: false
   listen: "127.0.0.1:9090"

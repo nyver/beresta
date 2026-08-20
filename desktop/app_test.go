@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/beresta-app/beresta/locales"
 )
@@ -15,7 +17,12 @@ func newTestApp(t *testing.T) *App {
 	// Keep every bound-method test inside its own disposable profile so the
 	// suite neither reads/writes the developer's real Beresta settings nor
 	// depends on sandbox access to AppData.
-	t.Setenv("AppData", t.TempDir())
+	profileDir, err := os.MkdirTemp("", "beresta-desktop-profile-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AppData", profileDir)
+	t.Cleanup(func() { removeDesktopTestDirectory(t, profileDir) })
 	a := newApp()
 	// Tests never call startup(ctx): a.ready stays false, so emit and
 	// runtimeContext behave as they would before the Wails window exists,
@@ -31,15 +38,38 @@ func newTestApp(t *testing.T) *App {
 	return a
 }
 
-// testDatabasePath returns a fresh temp-directory database path for a and
-// registers a's Lock as a cleanup *after* that directory's own removal
-// cleanup, so t.Cleanup's LIFO order closes the open SQLite file handle
-// before Windows tries to delete the directory containing it.
+// testDatabasePath returns a fresh temp-directory database path for a. Its
+// cleanup closes SQLite first and retries removal because Windows endpoint
+// protection can briefly retain a newly closed WAL or database file.
 func testDatabasePath(t *testing.T, a *App) string {
 	t.Helper()
-	dir := t.TempDir()
-	t.Cleanup(func() { _ = a.lockAccount() })
+	dir, err := os.MkdirTemp("", "beresta-desktop-db-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = a.lockAccount()
+		removeDesktopTestDirectory(t, dir)
+	})
 	return filepath.Join(dir, "beresta.db")
+}
+
+func removeDesktopTestDirectory(t *testing.T, dir string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		err := os.RemoveAll(dir)
+		if err == nil {
+			if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("remove desktop test directory %s: %v", dir, err)
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 func TestCreateAccountThenStatusThenLock(t *testing.T) {

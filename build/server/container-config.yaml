@@ -1,0 +1,6 @@
+server:
+  # Container networking requires a non-loopback bind inside the namespace.
+  listen: "0.0.0.0:8443"
+
+backups:
+  directory: "/data/backups"

@@ -9,6 +9,8 @@ CLAUDE.md
 
 # Local configuration and generated artifacts
 config.yaml
+/data/
+/cmd/beresta-server/data/
 bin/
 build/output/
 build/tools/

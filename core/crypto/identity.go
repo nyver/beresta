@@ -28,6 +28,7 @@ const (
 	SignatureDomainChallenge           SignatureDomain = "beresta.challenge.signature.v1"
 	SignatureDomainOperation           SignatureDomain = "beresta.operation.signature.v1"
 	SignatureDomainSnapshot            SignatureDomain = "beresta.snapshot.signature.v1"
+	SignatureDomainSnapshotAck         SignatureDomain = "beresta.snapshot-ack.signature.v1"
 	SignatureDomainMembership          SignatureDomain = "beresta.membership.signature.v1"
 	SignatureDomainDeviceAuthorization SignatureDomain = "beresta.device-authorization.signature.v1"
 	SignatureDomainRevocation          SignatureDomain = "beresta.revocation.signature.v1"
@@ -232,7 +233,7 @@ func validateSignatureInput(profile string, domain SignatureDomain, canonicalPay
 	if profile != CryptoProfileV1 {
 		return ErrUnsupportedCryptoProfile
 	}
-	if !validSignatureDomain(domain) || len(canonicalPayload) == 0 || len(canonicalPayload) > MaxSecretBytes {
+	if !validSignatureDomain(domain) || len(canonicalPayload) == 0 || len(canonicalPayload) > MaxSnapshotCiphertextBytes+4096 {
 		return ErrInvalidSignatureInput
 	}
 	return nil
@@ -243,6 +244,7 @@ func validSignatureDomain(domain SignatureDomain) bool {
 	case SignatureDomainChallenge,
 		SignatureDomainOperation,
 		SignatureDomainSnapshot,
+		SignatureDomainSnapshotAck,
 		SignatureDomainMembership,
 		SignatureDomainDeviceAuthorization,
 		SignatureDomainRevocation,

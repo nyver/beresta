@@ -125,7 +125,7 @@ func (a *Account) CreateBackup(ctx context.Context, destRoot string, kind int, n
 
 	accountRow, err := loadAccountRow(ctx, db)
 	if err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: load account for backup: %w", err)
 	}
 	kdfParams := corecrypto.Argon2idParams{
 		CryptoProfile:   corecrypto.CryptoProfileV1,
@@ -162,12 +162,12 @@ func (a *Account) CreateBackup(ctx context.Context, destRoot string, kind int, n
 
 	noteCount, err := store.CountNotes(ctx, db)
 	if err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: count notes for backup: %w", err)
 	}
 
 	plaintextPath := filepath.Join(stagingDir, "plaintext.db")
 	if err := store.ExportPlaintextSnapshot(ctx, db, plaintextPath); err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: create plaintext backup snapshot: %w", err)
 	}
 	plaintext, err := os.ReadFile(plaintextPath)
 	os.Remove(plaintextPath)
@@ -178,40 +178,40 @@ func (a *Account) CreateBackup(ctx context.Context, destRoot string, kind int, n
 	compressed, err := zstdCompress(plaintext)
 	clear(plaintext)
 	if err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: compress backup snapshot: %w", err)
 	}
 
 	nowUnixMS := uint64(now.UnixMilli())
 	metadata, err := corecrypto.NewBackupMetadata(accountID.Bytes(), backupID, nowUnixMS, kdfParams)
 	if err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: create backup metadata: %w", err)
 	}
 	envelope, err := corecrypto.EncryptBackup(rootKey, metadata, compressed)
 	clear(compressed)
 	if err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: encrypt backup snapshot: %w", err)
 	}
 
 	if err := writeBackupFile(filepath.Join(stagingDir, backupSnapshotFile), envelope); err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: write encrypted backup snapshot: %w", err)
 	}
 
 	blobIDs, err := store.ListAllAttachmentBlobIDs(ctx, db)
 	if err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: list backup blobs: %w", err)
 	}
 	relativePaths := []string{backupSnapshotFile}
 	if len(blobIDs) > 0 {
 		blobPaths, err := stageBackupBlobs(blobs, stagingDir, blobIDs)
 		if err != nil {
-			return store.Backup{}, err
+			return store.Backup{}, fmt.Errorf("account: stage backup blobs: %w", err)
 		}
 		relativePaths = append(relativePaths, blobPaths...)
 	}
 
 	manifest, err := corebackup.GenerateManifest(ctx, stagingDir, relativePaths)
 	if err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: generate backup manifest: %w", err)
 	}
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
@@ -249,7 +249,7 @@ func (a *Account) CreateBackup(ctx context.Context, destRoot string, kind int, n
 	// row before the set exists would let a restore or rotation reference a
 	// set that is not actually there yet.
 	if err := store.InsertBackup(ctx, db, record); err != nil {
-		return store.Backup{}, err
+		return store.Backup{}, fmt.Errorf("account: record backup catalog entry: %w", err)
 	}
 	return record, nil
 }

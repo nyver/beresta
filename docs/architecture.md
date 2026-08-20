@@ -144,7 +144,8 @@ The optional server data root is intentionally simple:
 ```text
 data/
 ├── beresta.db
-├── blobs/<aa>/<bb>/<id>
+├── blobs/<aa>/<bb>/<blob-id>/<workspace-id>/<chunk>.chunk
+├── backups/server-<timestamp>-<id>/
 ├── config.yaml                # optional
 └── tls/                       # generated or configured certificate material
 ```
@@ -179,7 +180,13 @@ Whole restore validates in a temporary location before atomic replacement: the b
 
 Garbage collection permanently deletes an orphaned attachment blob or a tombstoned note only once at least 30 days have passed, matching the tombstone retention window above. It never depends on or is gated by backup state: a backup set is a self-contained copy of everything it referenced at creation time, so live collection cannot make an existing backup unrestorable.
 
-Server backups protect availability of opaque synchronization state only. They cannot recover user content without a client keybag and passphrase.
+Server backups checkpoint SQLite with `VACUUM INTO`, snapshot immutable complete
+blob chunks through a hardlink-or-verified-copy view, and publish a strict
+SHA-256 manifest. Daily rotation retains exactly seven valid sets; manual and
+pre-restore safety sets are separate. Restore verifies file hashes and SQLite
+integrity before swapping database/blob paths with rollback names. These
+backups protect availability of opaque synchronization state only. They cannot
+recover user content without a client keybag and passphrase.
 
 ## Runtime and Deployment Model
 

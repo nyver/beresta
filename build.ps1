@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("bootstrap", "format", "format-check", "locale-check", "lint", "test", "build", "package", "cold-start", "installer-smoke", "mobile-check", "mobile-bind-android", "mobile-build-android", "mobile-test-android", "verify")]
+    [ValidateSet("bootstrap", "format", "format-check", "locale-check", "lint", "test", "build", "server-build", "server-cross-build", "server-smoke", "package", "cold-start", "installer-smoke", "mobile-check", "mobile-bind-android", "mobile-build-android", "mobile-test-android", "verify")]
     [string]$Task = "verify"
 )
 
@@ -119,11 +119,19 @@ function Get-GoFmtExecutable {
 }
 
 function Get-FlutterExecutable {
-    return Resolve-Executable -Name "flutter.bat" -Fallbacks @("build\tools\flutter-sdk\bin\flutter.bat")
+    $projectFlutter = Join-Path $projectRoot "build\tools\flutter-sdk\bin\flutter.bat"
+    if (Test-Path -LiteralPath $projectFlutter -PathType Leaf) {
+        return $projectFlutter
+    }
+    return Resolve-Executable -Name "flutter.bat"
 }
 
 function Get-DartExecutable {
-    return Resolve-Executable -Name "dart.bat" -Fallbacks @("build\tools\flutter-sdk\bin\dart.bat")
+    $projectDart = Join-Path $projectRoot "build\tools\flutter-sdk\bin\dart.bat"
+    if (Test-Path -LiteralPath $projectDart -PathType Leaf) {
+        return $projectDart
+    }
+    return Resolve-Executable -Name "dart.bat"
 }
 
 function Get-WailsExecutable {
@@ -288,14 +296,27 @@ function Invoke-GoTests {
     $localePackage = "github.com/beresta-app/beresta/locales"
     $regularPackages = @($packages | Where-Object { $_ -ne $localePackage })
     if ($regularPackages.Count -gt 0) {
-        Invoke-Checked -FilePath $go -Arguments (@("test") + $regularPackages)
+        # Serial package execution avoids Windows endpoint-protection races
+        # against test temp-directory cleanup and SQLCipher backup files.
+        Invoke-Checked -FilePath $go -Arguments (@("test", "-p=1") + $regularPackages)
     }
 
     $outputDirectory = Join-Path $projectRoot "build\output"
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     $localeTest = Join-Path $outputDirectory "locales-check.exe"
     Invoke-Checked -FilePath $go -Arguments @("test", "-c", "-o", $localeTest, "./locales")
-    Invoke-Checked -FilePath $localeTest -Arguments @("-test.v")
+    for ($attempt = 0; ; $attempt++) {
+        try {
+            Invoke-Checked -FilePath $localeTest -Arguments @("-test.v")
+            break
+        }
+        catch {
+            if ($attempt -ge 30 -or $_.Exception.Message -notmatch "failed to run|being used by another process|access") {
+                throw
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
 }
 
 function Invoke-Tests {
@@ -306,6 +327,7 @@ function Invoke-Tests {
 
 function Invoke-Build {
     Invoke-LocaleCheck
+    Invoke-ServerBuild
     $desktopBuild = Join-Path $projectRoot "desktop\build"
     $desktopWindows = Join-Path $desktopBuild "windows"
     New-Item -ItemType Directory -Force -Path $desktopBuild, $desktopWindows | Out-Null
@@ -318,8 +340,49 @@ function Invoke-Build {
     Invoke-Checked -FilePath (Get-WailsExecutable) -Arguments @("build", "-clean", "-tags", "sqlite_fts5") -WorkingDirectory (Join-Path $projectRoot "desktop")
 }
 
+function Invoke-ServerBuild {
+    $outputDirectory = Join-Path $projectRoot "build\output"
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+    Invoke-Checked -FilePath (Get-GoExecutable) -Arguments @("build", "-trimpath", "-o", (Join-Path $outputDirectory "beresta-server.exe"), "./cmd/beresta-server")
+}
+
+function Invoke-ServerCrossBuild {
+    $go = Get-GoExecutable
+    $outputDirectory = Join-Path $projectRoot "build\output\server"
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+    $savedCGO = $env:CGO_ENABLED
+    $savedGOOS = $env:GOOS
+    $savedGOARCH = $env:GOARCH
+    $savedGOFLAGS = $env:GOFLAGS
+    try {
+        $env:CGO_ENABLED = "0"
+        $env:GOFLAGS = ""
+        foreach ($target in @(
+            @{ OS = "windows"; Arch = "amd64"; File = "beresta-server-windows-amd64.exe" },
+            @{ OS = "linux"; Arch = "amd64"; File = "beresta-server-linux-amd64" },
+            @{ OS = "linux"; Arch = "arm64"; File = "beresta-server-linux-arm64" }
+        )) {
+            $env:GOOS = $target.OS
+            $env:GOARCH = $target.Arch
+            Invoke-Checked -FilePath $go -Arguments @("build", "-trimpath", "-ldflags=-s -w", "-o", (Join-Path $outputDirectory $target.File), "./cmd/beresta-server")
+        }
+    }
+    finally {
+        $env:CGO_ENABLED = $savedCGO
+        $env:GOOS = $savedGOOS
+        $env:GOARCH = $savedGOARCH
+        $env:GOFLAGS = $savedGOFLAGS
+    }
+}
+
+function Invoke-ServerSmoke {
+    Invoke-ServerCrossBuild
+    Invoke-Checked -FilePath "powershell.exe" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $projectRoot "build\server\smoke.ps1"), "-ApplicationPath", (Join-Path $projectRoot "build\output\server\beresta-server-windows-amd64.exe"))
+}
+
 function Invoke-Package {
     Invoke-LocaleCheck
+    Invoke-ServerBuild
     $desktopBuild = Join-Path $projectRoot "desktop\build"
     $desktopWindows = Join-Path $desktopBuild "windows"
     New-Item -ItemType Directory -Force -Path $desktopBuild, $desktopWindows | Out-Null
@@ -369,6 +432,9 @@ switch ($Task) {
     "lint" { Invoke-Lint }
     "test" { Invoke-Tests }
     "build" { Invoke-Build }
+    "server-build" { Invoke-ServerBuild }
+    "server-cross-build" { Invoke-ServerCrossBuild }
+    "server-smoke" { Invoke-ServerSmoke }
     "package" { Invoke-Package }
     "cold-start" { Invoke-ColdStart }
     "installer-smoke" { Invoke-InstallerSmoke }

@@ -20,6 +20,7 @@ const (
 	BackupIDBytes    = 16
 	DeviceIDBytes    = 16
 	OpIDBytes        = 16
+	SnapshotIDBytes  = 16
 	BlobIDBytes      = 32
 	TranscriptBytes  = 32
 

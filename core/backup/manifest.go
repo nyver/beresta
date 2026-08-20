@@ -46,7 +46,7 @@ func GenerateManifest(ctx context.Context, root string, relativePaths []string) 
 	}
 	resolvedRoot, err := resolveRoot(root)
 	if err != nil {
-		return Manifest{}, err
+		return Manifest{}, fmt.Errorf("backup: resolve manifest root: %w", err)
 	}
 	paths := append([]string(nil), relativePaths...)
 	sort.Strings(paths)
@@ -86,7 +86,7 @@ func VerifyManifest(ctx context.Context, root string, manifest Manifest) error {
 	}
 	resolvedRoot, err := resolveRoot(root)
 	if err != nil {
-		return err
+		return fmt.Errorf("backup: resolve manifest root: %w", err)
 	}
 	for _, expected := range manifest.Entries {
 		if err := contextError(ctx); err != nil {
@@ -135,7 +135,7 @@ func hashEntry(ctx context.Context, root, relative string) (ManifestEntry, error
 	}
 	target := filepath.Join(root, filepath.FromSlash(relative))
 	if err := rejectSymlinkComponents(root, relative); err != nil {
-		return ManifestEntry{}, err
+		return ManifestEntry{}, fmt.Errorf("backup: inspect %q: %w", relative, err)
 	}
 	relativeCheck, err := filepath.Rel(root, target)
 	if err != nil || relativeCheck == ".." || strings.HasPrefix(relativeCheck, ".."+string(filepath.Separator)) {
@@ -143,19 +143,19 @@ func hashEntry(ctx context.Context, root, relative string) (ManifestEntry, error
 	}
 	before, err := os.Lstat(target)
 	if err != nil {
-		return ManifestEntry{}, err
+		return ManifestEntry{}, fmt.Errorf("backup: inspect %q: %w", relative, err)
 	}
 	if !before.Mode().IsRegular() || before.Mode()&fs.ModeSymlink != 0 {
 		return ManifestEntry{}, ErrUnsafeManifestPath
 	}
 	file, err := os.Open(target)
 	if err != nil {
-		return ManifestEntry{}, err
+		return ManifestEntry{}, fmt.Errorf("backup: open %q: %w", relative, err)
 	}
 	defer file.Close()
 	opened, err := file.Stat()
 	if err != nil {
-		return ManifestEntry{}, err
+		return ManifestEntry{}, fmt.Errorf("backup: inspect opened %q: %w", relative, err)
 	}
 	if !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
 		return ManifestEntry{}, ErrUnsafeManifestPath
@@ -190,7 +190,7 @@ func hashEntry(ctx context.Context, root, relative string) (ManifestEntry, error
 	clear(buffer)
 	after, err := file.Stat()
 	if err != nil {
-		return ManifestEntry{}, err
+		return ManifestEntry{}, fmt.Errorf("backup: re-inspect %q: %w", relative, err)
 	}
 	if !os.SameFile(opened, after) || after.Size() < 0 || uint64(after.Size()) != size || after.ModTime() != opened.ModTime() {
 		return ManifestEntry{}, ErrManifestVerification
@@ -206,15 +206,12 @@ func resolveRoot(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(absolute)
+	resolved := filepath.Clean(absolute)
+	info, err := os.Lstat(resolved)
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
+	if !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
 		return "", ErrUnsafeManifestPath
 	}
 	return resolved, nil

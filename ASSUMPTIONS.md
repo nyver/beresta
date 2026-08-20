@@ -48,6 +48,12 @@ This file records implementation decisions that fill gaps without changing the f
 3. The server has one serialized SQLite writer. Parallel request parsing and reads do not imply parallel write transactions.
 4. Metrics are disabled by default and never use user/resource identifiers as labels.
 5. The default limits in `config.example.yaml` are sized for the documented household ceiling and are not promises of support above it.
+6. The generated TLS certificate and key are published as one staged directory. A partial pre-existing `tls/` identity is treated as operator-visible corruption and fails closed rather than rotating the pin implicitly.
+7. Device challenge signatures bind the displayed TLS certificate fingerprint, device, scope, challenge identifier, and nonce; changing the TLS identity requires explicit client trust reset.
+8. Blob quota is reserved at upload initialization so an over-quota upload fails before consuming staging space. Complete zero-reference blobs enter the 30-day garbage-collection grace period immediately.
+9. Daily server backups retain exactly seven valid daily sets. Manual and automatic pre-restore safety backups are operator-managed and do not consume daily slots.
+10. Direct binary execution is primary. The systemd, Windows scheduled-task, and scratch-container assets are optional wrappers around the same process and data directory.
+11. One OS-level exclusive lock covers each server data root. Serving and offline CLI mutation never run concurrently against the same SQLite/blob state.
 
 ## Build and Platform Validation
 

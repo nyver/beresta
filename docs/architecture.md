@@ -82,7 +82,7 @@ Exposes coarse, value-oriented methods and bounded event delivery that `gomobile
 
 ### `desktop`
 
-Contains the Wails process host, React/TypeScript UI, Windows Hello and DPAPI adapters, global hotkey, tray, autostart, clipboard, installer, and signed updater. Go core application services are the only persistence interface exposed to React.
+Contains the Wails process host, React/TypeScript UI, Windows DPAPI adapter, global hotkey, tray, autostart, clipboard, installer, and signed updater. Go core application services are the only persistence interface exposed to React.
 
 ### `mobile`
 

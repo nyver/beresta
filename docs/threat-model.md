@@ -143,7 +143,7 @@ Beresta does not provide legal-grade non-repudiation. Local users control their 
 
 An attacker obtains SQLCipher files, encrypted blobs, wrapped database key material, and encrypted keybags. Access requires defeating platform keystore policy and user authentication. The application must not store passphrases, Root Keys, decrypted FTS indexes, or plaintext attachment caches on disk.
 
-On Windows 11+, Beresta requests Windows Hello in the owner window before its DPAPI unwrap. This improves unattended and shoulder-surfing resistance inside the application but does not make user-scoped DPAPI ciphertext inaccessible to malware already executing as that Windows user. Windows 10 uses an explicitly labeled DPAPI-only fallback. Android biometric mode cryptographically authorizes each AES-GCM operation through Android Keystore and fails closed when the biometric key is unavailable or invalidated.
+Windows always uses explicit, user-scoped DPAPI (`CryptProtectData`/`CryptUnprotectData`, no OS UI); a prior Windows Hello-gated mode was removed after `RequestVerificationForWindowAsync` reliably crashed the process on verification (see README.md). DPAPI ciphertext is not made inaccessible to malware already executing as that Windows user. Android biometric mode cryptographically authorizes each AES-GCM operation through Android Keystore and fails closed when the biometric key is unavailable or invalidated.
 
 ### Unlocked device or process compromise
 
@@ -181,7 +181,7 @@ Metrics are aggregate and optional. Labels must not contain user, workspace, not
 - Self-signed certificate pinning relies on a trustworthy first QR transfer. A user who accepts a fingerprint through an attacked channel can pin the attacker.
 - Availability is not guaranteed against deletion by a malicious server, client ransomware, loss of all devices and backups, or catastrophic passphrase loss.
 - SQLCipher and platform keystores reduce offline risk but cannot protect a device with a compromised kernel, accessibility service, debugger, or unlocked administrative session.
-- Windows Hello gates Beresta's DPAPI unwrap path but cannot prevent same-user code from invoking DPAPI directly; it is not claimed as a defense against an already compromised Windows session.
+- Windows DPAPI does not prevent same-user code from invoking it directly; it is not claimed as a defense against an already compromised Windows session.
 
 ## Security Verification Gates
 

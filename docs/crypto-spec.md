@@ -143,11 +143,10 @@ U16BE(len(purpose)) || UTF8(purpose)
 
 Key IDs and purposes are bounded ASCII tokens. A protection, key-ID, purpose, version, length, or trailing-data substitution fails before OS unwrapping. Platform ciphertext is bounded to 64 KiB, and returned plaintext enters an owned mutable secret immediately.
 
-- Windows DPAPI uses current-user scope, forbids DPAPI-owned UI, and supplies the binding as optional entropy. Windows 10 uses this explicit fallback mode.
-- Windows 11 build 22000 and later selects Hello mode when `UserConsentVerifier` is available. The owner-window WinRT prompt must verify the user before DPAPI unwrap; a Hello envelope cannot be opened through the application's fallback adapter.
+- Windows DPAPI uses current-user scope, forbids DPAPI-owned UI, and supplies the binding as optional entropy. This is the only Windows protection mode.
 - Android uses a non-exportable 256-bit AES-GCM key in `AndroidKeyStore`. The binding is AEAD associated data. Biometric mode configures authentication for every use, passes the initialized cipher through `BiometricPrompt.CryptoObject`, permits only strong biometrics, and invalidates the key after biometric enrollment changes.
 
-Windows Hello in this profile is an application user-presence gate over current-user DPAPI, not a separate hardware-bound wrapping key. Code already executing as the same Windows user can invoke DPAPI outside Beresta and is covered by the endpoint-compromise limitation in the threat model. The UI must display the active protection mode and must not describe Hello-gated DPAPI as protection from same-user malware.
+A Windows Hello-gated mode (`UserConsentVerifier` as an application user-presence gate over current-user DPAPI) was evaluated but removed: `RequestVerificationForWindowAsync` reliably crashed the process the instant the user completed verification, reproduced with two independently correct native consumption patterns, pointing at a platform-level issue (see README.md). Code already executing as the same Windows user can invoke DPAPI outside Beresta and is covered by the endpoint-compromise limitation in the threat model. The UI must display the active protection mode and must not describe DPAPI as protection from same-user malware.
 
 ## Keybag Encryption
 

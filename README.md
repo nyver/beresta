@@ -15,7 +15,7 @@ home server, convergent client synchronization, and the Android application:
 - a buildable Wails v2 Windows host with a React/TypeScript frontend;
 - a Flutter Android application with local onboarding/unlock, notebook/tag navigation, virtualized notes, Markdown editing, attachments, search, revisions, secure lifecycle handling, background synchronization, encrypted SAF backups, share capture, and a private quick-note widget;
 - a Yjs V1/V2 adapter plus a SQLCipher 4.14 encrypted-database probe whose Android AAR is produced by `gomobile bind`;
-- owned mutable secret buffers, device-bounded Argon2id, domain-separated HKDF, X25519/Ed25519 identities, XChaCha20-Poly1305 keybag/object/attachment/backup encryption, and the shared Windows DPAPI/Hello and Android Keystore/biometric key-wrapping contract (phase 2A);
+- owned mutable secret buffers, device-bounded Argon2id, domain-separated HKDF, X25519/Ed25519 identities, XChaCha20-Poly1305 keybag/object/attachment/backup encryption, and the shared Windows DPAPI and Android Keystore/biometric key-wrapping contract (phase 2A);
 - validated UUIDv7 identifiers, Hybrid Logical Clock persistence, and deterministic last-writer-wins registers with device-ID and logical-counter tie breaks;
 - the complete embedded client schema (accounts, devices, workspaces, notebooks, tags, notes, CRDT state/updates, revisions, attachments, inbox/outbox, cursors, snapshots, backups, saved searches, FTS5) under SQLCipher with WAL, foreign keys, and transactional migrations;
 - account creation/unlock/lock services that derive every local key without network access, and the default local no-op `SyncTransport`;
@@ -115,7 +115,7 @@ Evernote `.enex` import. The topbar also carries a configurable auto-lock
 timeout (never/5/15/30/60 minutes, backed by `AppSettings.AutoLockMinutes`
 and reset by any keyboard/mouse activity) and a badge reflecting the
 account's actual key-protection mode (`AccountInfo.KeyProtection`, already
-DPAPI- or Hello-gated at the crypto layer since phase 2A - this badge and
+DPAPI-gated at the crypto layer since phase 2A - this badge and
 the timeout are what task 5.8 adds on top of that existing protection, not
 a new unlock mechanism). Locking - whether by the topbar button or the
 idle timeout - immediately swaps the note-bearing shell body for a neutral
@@ -383,7 +383,7 @@ Flutter Android packaging and native core binding commands are available at the 
 
 The shared Yjs adapter accepts official Yjs V1 and V2 updates behind `core/sync/yjsadapter`; `core/mobileapi` exposes only gomobile-safe values, request cancellation, and bounded event polling. `mobile-bind-android` normalizes ZIP/JAR metadata and writes `beresta-core.aar.sha256` beside the SQLCipher-linked AAR. The Flutter host calls the same account, search, revision, backup, and synchronization services as desktop rather than maintaining a second persistence model.
 
-Local database keys use the versioned `BKW1` envelope from `core/keystore`, with key ID and purpose bound to the OS protection operation. Windows 11 build 22000 and later selects Windows Hello only when `UserConsentVerifier` is available; the owner-window prompt gates a user-scoped DPAPI unwrap. Windows 10 and systems without configured Hello expose the explicit DPAPI protection mode. Android stores non-exportable AES-256-GCM wrapping keys in Android Keystore; biometric mode is authentication-per-use through `BiometricPrompt.CryptoObject` and fails closed if strong biometrics are unavailable or the key is invalidated by enrollment changes.
+Local database keys use the versioned `BKW1` envelope from `core/keystore`, with key ID and purpose bound to the OS protection operation. Windows always uses the explicit, user-scoped DPAPI protection mode (`CryptProtectData`/`CryptUnprotectData`, no OS UI). An earlier Windows Hello-gated mode (`UserConsentVerifier` via a small C shim) was removed after `RequestVerificationForWindowAsync` reliably crashed the process the instant the user completed verification - reproduced with two independently correct native consumption patterns (`get_Status` polling and `put_Completed`/`CoWaitForMultipleHandles`), pointing at a platform-level issue rather than something fixable in this codebase. Android stores non-exportable AES-256-GCM wrapping keys in Android Keystore; biometric mode is authentication-per-use through `BiometricPrompt.CryptoObject` and fails closed if strong biometrics are unavailable or the key is invalidated by enrollment changes.
 
 English and Russian source strings live in `locales/en.json` and `locales/ru.json`. The root build validates both catalogs before linting and building, including explicit duplicate-key detection that ordinary JSON decoding does not provide.
 

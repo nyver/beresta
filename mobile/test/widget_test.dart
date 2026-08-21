@@ -28,6 +28,12 @@ void main() {
     await tester.pumpAndSettle();
     final body = find.widgetWithText(TextField, "Markdown body");
     await tester.enterText(body, "Offline paragraph");
+    // The save button only enables once the body controller's listener
+    // marks the editor dirty (see _EditorScreenState.markDirty), which
+    // takes effect on the next frame rather than synchronously with
+    // enterText; without this pump the tap below hits a still-disabled
+    // button and silently does nothing.
+    await tester.pump();
     await tester.tap(find.byIcon(Icons.save_outlined));
     await tester.pumpAndSettle();
 

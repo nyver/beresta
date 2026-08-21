@@ -11,13 +11,18 @@
 
 typedef struct BerestaUserConsentVerifierInterop BerestaUserConsentVerifierInterop;
 
+// IUserConsentVerifierInterop derives from plain IUnknown, not IInspectable
+// (see windows.security.credentials.ui.interop.h): it is one of the
+// "…Interop" tear-off interfaces WinRT exposes specifically so classic Win32
+// callers can use it without the IInspectable machinery. A vtable that
+// inserts IInspectable's GetIids/GetRuntimeClassName/GetTrustLevel here would
+// push RequestVerificationForWindowAsync three slots past where it actually
+// lives, so a call through it reads past the real (4-entry) vtable and jumps
+// through unrelated memory.
 typedef struct BerestaUserConsentVerifierInteropVtbl {
     HRESULT (STDMETHODCALLTYPE *QueryInterface)(BerestaUserConsentVerifierInterop *, REFIID, void **);
     ULONG (STDMETHODCALLTYPE *AddRef)(BerestaUserConsentVerifierInterop *);
     ULONG (STDMETHODCALLTYPE *Release)(BerestaUserConsentVerifierInterop *);
-    HRESULT (STDMETHODCALLTYPE *GetIids)(BerestaUserConsentVerifierInterop *, ULONG *, IID **);
-    HRESULT (STDMETHODCALLTYPE *GetRuntimeClassName)(BerestaUserConsentVerifierInterop *, HSTRING *);
-    HRESULT (STDMETHODCALLTYPE *GetTrustLevel)(BerestaUserConsentVerifierInterop *, TrustLevel *);
     HRESULT (STDMETHODCALLTYPE *RequestVerificationForWindowAsync)(
         BerestaUserConsentVerifierInterop *, HWND, HSTRING, REFIID, void **);
 } BerestaUserConsentVerifierInteropVtbl;

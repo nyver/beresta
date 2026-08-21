@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
@@ -101,8 +100,10 @@ func (s *Storage) pushOperation(ctx context.Context, transaction *sql.Tx, princi
 	envelopeDigest := sha256.Sum256(append(append([]byte(nil), payload...), operation.Signature...))
 	var existingSequence int64
 	var existingHash []byte
-	err = transaction.QueryRowContext(ctx, `SELECT seq, envelope_hash FROM operations WHERE op_id = ?`, operation.OpID).
-		Scan(&existingSequence, &existingHash)
+	// Scoped to the workspace: sequences are per-workspace, so an unscoped
+	// match could return another workspace's sequence to this caller.
+	err = transaction.QueryRowContext(ctx, `SELECT seq, envelope_hash FROM operations WHERE op_id = ? AND workspace_id = ?`,
+		operation.OpID, operation.WorkspaceID).Scan(&existingSequence, &existingHash)
 	if err == nil {
 		if !equalBytes(existingHash, envelopeDigest[:]) {
 			return PushResult{}, fmt.Errorf("%w: operation identifier was reused with different content", ErrConflict)
@@ -233,23 +234,4 @@ func operationSignaturePayload(operation Operation) ([]byte, error) {
 		HLCPhysicalMS: uint64(operation.HLCPhysicalMS), HLCLogical: operation.HLCLogical, HLCDeviceID: deviceID,
 		KeyID: keyID, Nonce: operation.Nonce, Ciphertext: operation.Ciphertext,
 	})
-}
-
-func operationSignatureInput(operation Operation) []byte {
-	payload, err := operationSignaturePayload(operation)
-	if err != nil {
-		return nil
-	}
-	domain := []byte(corecrypto.SignatureDomainOperation)
-	result := binary.BigEndian.AppendUint32(nil, uint32(len(domain)))
-	result = append(result, domain...)
-	return append(result, payload...)
-}
-
-func appendLengthFields(destination []byte, fields ...[]byte) []byte {
-	for _, field := range fields {
-		destination = binary.BigEndian.AppendUint32(destination, uint32(len(field)))
-		destination = append(destination, field...)
-	}
-	return destination
 }

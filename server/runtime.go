@@ -166,6 +166,7 @@ func (r *Runtime) Serve(ctx context.Context) error {
 		}
 		go r.runBackupScheduler(ctx)
 	}
+	go r.runAuthGarbageCollector(ctx)
 	pair, err := tls.LoadX509KeyPair(r.TLSIdentity.CertificateFile, r.TLSIdentity.PrivateKeyFile)
 	if err != nil {
 		return fmt.Errorf("load TLS listener identity: %w", err)
@@ -240,6 +241,25 @@ func (r *Runtime) Serve(ctx context.Context) error {
 			}
 		}
 		return nil
+	}
+}
+
+// runAuthGarbageCollector deletes expired challenges and sessions. Both tables
+// are append-only during normal operation — a row is otherwise removed only
+// when its device is revoked — so without this sweep every login and every
+// (unauthenticated) challenge request grows the database permanently.
+func (r *Runtime) runAuthGarbageCollector(ctx context.Context) {
+	ticker := time.NewTicker(authGarbageCollectionInterval)
+	defer ticker.Stop()
+	for {
+		if err := r.Storage.PurgeExpiredAuthRecords(ctx, time.Now()); err != nil {
+			slog.Warn("expired authentication record sweep failed", "error_class", "auth_gc_failed")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	corecrypto "github.com/beresta-app/beresta/core/crypto"
 	"github.com/gorilla/websocket"
 )
 
@@ -632,4 +634,18 @@ func performAPIRequestWithRaw(t *testing.T, api http.Handler, token, method, pat
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	return response
+}
+
+// operationSignatureInput reproduces the domain-separated signing input a
+// client feeds to Ed25519, so tests can forge and tamper with envelopes the
+// way a real device would build them.
+func operationSignatureInput(operation Operation) []byte {
+	payload, err := operationSignaturePayload(operation)
+	if err != nil {
+		return nil
+	}
+	domain := []byte(corecrypto.SignatureDomainOperation)
+	result := binary.BigEndian.AppendUint32(nil, uint32(len(domain)))
+	result = append(result, domain...)
+	return append(result, payload...)
 }

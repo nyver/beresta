@@ -13,6 +13,11 @@ import (
 
 const authSignatureDomain = "beresta.auth.v1"
 
+// authGarbageCollectionInterval is how often expired challenges and sessions
+// are swept. Expired rows are already unusable, so the cadence only bounds how
+// much dead weight the database carries.
+const authGarbageCollectionInterval = time.Hour
+
 type Invite struct {
 	ID          string    `json:"invite_id"`
 	Code        string    `json:"code,omitempty"`
@@ -335,6 +340,29 @@ func (s *Storage) Authenticate(ctx context.Context, token string, now time.Time)
 	}
 	principal.TokenHash = digest[:]
 	return principal, nil
+}
+
+// PurgeExpiredAuthRecords removes challenges and sessions that can no longer
+// authenticate anything. Expired rows are already rejected by every lookup, so
+// deleting them changes no behaviour — it only stops the tables from growing
+// without bound as devices log in and request challenges.
+func (s *Storage) PurgeExpiredAuthRecords(ctx context.Context, now time.Time) error {
+	_, err := withWriteTx(ctx, s, func(transaction *sql.Tx) (struct{}, error) {
+		// Consumed challenges are swept alongside expired ones: verifyChallenge
+		// requires consumed_at IS NULL, so a replay against a deleted row and
+		// against a consumed row are both ErrUnauthorized.
+		if _, err := transaction.ExecContext(ctx,
+			`DELETE FROM challenges WHERE expires_at <= ? OR consumed_at IS NOT NULL`, unixNow(now)); err != nil {
+			return struct{}{}, err
+		}
+		if _, err := transaction.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= ?`, unixNow(now)); err != nil {
+			return struct{}{}, err
+		}
+		// Invites are not swept: only an administrator can create one, so
+		// that table is bounded by operator action rather than by traffic.
+		return struct{}{}, nil
+	})
+	return err
 }
 
 func (s *Storage) DeleteSession(ctx context.Context, tokenHash []byte) error {

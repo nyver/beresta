@@ -148,10 +148,36 @@ administrator elevation. Until then it blocks any `go` invocation using a
 build/vet/test command in this report instead targeted the real package
 list explicitly, which is unaffected by it.
 
-Rerunning the complete release pipeline (`build.cmd verify`, `coverage-gate`,
-`security-scan`) is recorded in this repository's commit history immediately
-following this report's commit, per the requested sequencing (implement
-9.1-9.16, commit, then run the full suite).
+**Rerunning the complete release pipeline** (implement 9.1-9.16, commit, then
+run the full suite, per the requested sequencing):
+
+- **Full test suite**: every package passes. (Two packages first reported
+  "Access is denied" launching their compiled test binary - this
+  environment's antivirus intercepting a freshly linked `.exe`, the same
+  class of flake `Invoke-GoTests` already works around for the locale test;
+  recompiling to a stable path and running directly confirmed both pass.)
+- **`security-scan` (`govulncheck` + OSV)**: found 9 reachable Go
+  standard-library CVEs, all fixed in Go 1.26.4-1.26.6, and 2 CVEs in the
+  indirect `golang.org/x/mod` build-tooling dependency, fixed in 0.40.0.
+  Fixed by bumping `go.mod`'s `go` directive to 1.26.6 (Go auto-selected and
+  downloaded the patched toolchain) and `golang.org/x/mod` to 0.40.0; both
+  scans now report zero reachable or fixable findings. One report remains
+  and is accepted: `golang.org/x/crypto`'s unmaintained `openpgp` package
+  (GO-2026-5932, no fix available) - govulncheck's own call-graph analysis
+  confirms this code never calls it.
+- **`coverage-gate`**: core statement coverage measured 63.1% (up from
+  59.2% before this phase's `core/mobileapi` and transport test additions),
+  against the release-quality spec's 80% floor. This gate does not pass yet.
+  Lowest-covered packages: `core/transport` 39.7% (most HTTP-transport
+  paths are exercised only indirectly, through `server`'s end-to-end tests,
+  which do not count toward `core/transport`'s own number), `core/mobileapi`
+  55.7%, `core/store` 56.0%, `core/sync` 61.7%, `core/account` 63.1%. The
+  threshold was left at the spec's real value rather than lowered to pass
+  artificially; closing it is follow-on work, not a regression introduced
+  by this phase (this phase's own new files - `sharing.go`, `keyrotation.go`,
+  `revocation.go`, `hardening.go`, `oplog_gc.go`, `folder.go`,
+  `membership.go` - are each exercised by dedicated tests and are not
+  where the remaining gap concentrates).
 
 ## Known limitations
 

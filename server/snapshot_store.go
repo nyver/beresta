@@ -226,6 +226,40 @@ func (s *Storage) GetSnapshot(ctx context.Context, principal Principal, snapshot
 	return item, nil
 }
 
+// LatestSnapshot returns the newest snapshot for workspaceID, ciphertext
+// included. It orders inside SQL rather than relying on a list helper's
+// ordering, so the "latest" contract does not silently change if that
+// helper's ORDER BY ever does.
+func (s *Storage) LatestSnapshot(ctx context.Context, principal Principal, workspaceID string) (Snapshot, error) {
+	if err := validateID(workspaceID, "workspace_id"); err != nil {
+		return Snapshot{}, err
+	}
+	member, err := s.isActiveMember(ctx, s.db, principal.UserID, workspaceID)
+	if err != nil || !member {
+		if err == nil {
+			err = ErrForbidden
+		}
+		return Snapshot{}, err
+	}
+	item := Snapshot{Protocol: "beresta.sync.v1", SchemaVersion: 1, WorkspaceID: workspaceID}
+	var eligible sql.NullInt64
+	err = s.db.QueryRowContext(ctx, `
+		SELECT snapshot_id, base_seq, cursor_epoch, key_id, creator_device_id,
+		       hlc_physical_ms, hlc_logical, nonce, ciphertext_hash, ciphertext, signature, eligible_at
+		FROM snapshots WHERE workspace_id = ?
+		ORDER BY base_seq DESC, created_at DESC LIMIT 1`, workspaceID).Scan(&item.ID, &item.BaseSequence,
+		&item.CursorEpoch, &item.KeyID, &item.CreatorDeviceID, &item.HLCPhysicalMS, &item.HLCLogical,
+		&item.Nonce, &item.CiphertextHash, &item.Ciphertext, &item.Signature, &eligible)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Snapshot{}, ErrNotFound
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	item.EligibleAt = nullableTime(eligible)
+	return item, nil
+}
+
 func validateSnapshot(cfg Config, snapshot Snapshot, now time.Time) error {
 	if snapshot.Protocol != "beresta.sync.v1" || snapshot.SchemaVersion != 1 {
 		return fmt.Errorf("%w: unsupported snapshot version", ErrInvalid)

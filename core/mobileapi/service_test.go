@@ -206,4 +206,3 @@ func TestServiceCreateAccountFailsClosedOnWrongDeviceSecretLength(t *testing.T) 
 		t.Fatal("expected a non-32-byte device secret to be rejected")
 	}
 }
-

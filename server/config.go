@@ -17,6 +17,16 @@ import (
 const (
 	defaultDataDirectory = "./data"
 	defaultListenAddress = "127.0.0.1:8443"
+
+	// BlobChunkBytes is the attachment chunk size mandated by the sync
+	// protocol. It must stay equal to core/transport.BlobChunkBytes; the two
+	// are separate constants only to keep the server free of a client
+	// dependency.
+	BlobChunkBytes = 4 << 20
+
+	// MinKeepDailyBackups and MaxKeepDailyBackups bound backups.keep_daily.
+	MinKeepDailyBackups = 1
+	MaxKeepDailyBackups = 365
 )
 
 // Duration is a YAML duration with the same syntax as time.ParseDuration.
@@ -84,9 +94,14 @@ type AuthConfig struct {
 }
 
 type LimitsConfig struct {
-	MaxOperationBytes     int64    `yaml:"max_operation_bytes"`
-	MaxBlobBytes          int64    `yaml:"max_blob_bytes"`
-	BlobChunkBytes        int64    `yaml:"blob_chunk_bytes"`
+	MaxOperationBytes int64 `yaml:"max_operation_bytes"`
+	MaxBlobBytes      int64 `yaml:"max_blob_bytes"`
+	// BlobChunkBytes is fixed by the sync protocol and is not configurable:
+	// clients chunk uploads against the same constant (core/transport.
+	// BlobChunkBytes), so a server-side change would corrupt transfers rather
+	// than tune them. It is populated from BlobChunkBytes for the call sites
+	// that read it through the config.
+	BlobChunkBytes        int64    `yaml:"-"`
 	UserQuotaBytes        int64    `yaml:"user_quota_bytes"`
 	MaxOperationsPerBatch int      `yaml:"max_operations_per_batch"`
 	MaxHLCFutureSkew      Duration `yaml:"max_hlc_future_skew"`
@@ -138,7 +153,7 @@ func DefaultConfig() Config {
 		Limits: LimitsConfig{
 			MaxOperationBytes:     1 << 20,
 			MaxBlobBytes:          2 << 30,
-			BlobChunkBytes:        4 << 20,
+			BlobChunkBytes:        BlobChunkBytes,
 			UserQuotaBytes:        20 << 30,
 			MaxOperationsPerBatch: 1000,
 			MaxHLCFutureSkew:      duration(5 * time.Minute),
@@ -240,8 +255,11 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("unsupported tls.mode %q", c.TLS.Mode)
 	}
-	if c.Limits.BlobChunkBytes != 4<<20 {
-		return errors.New("limits.blob_chunk_bytes must be exactly 4194304")
+	// Not operator-settable (see LimitsConfig.BlobChunkBytes); checked so a
+	// directly constructed Config cannot reach the blob handlers with a zero
+	// chunk size.
+	if c.Limits.BlobChunkBytes != BlobChunkBytes {
+		return fmt.Errorf("limits.blob_chunk_bytes is protocol-fixed at %d", BlobChunkBytes)
 	}
 	if c.Limits.MaxOperationBytes <= 0 || c.Limits.MaxOperationBytes > corecrypto.MaxOperationCiphertextBytes ||
 		c.Limits.MaxBlobBytes <= 0 || c.Limits.UserQuotaBytes <= 0 {
@@ -264,8 +282,8 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("unsupported sqlite.synchronous %q", c.SQLite.Synchronous)
 	}
-	if c.Backups.KeepDaily != 7 {
-		return errors.New("backups.keep_daily must be exactly 7")
+	if c.Backups.KeepDaily < MinKeepDailyBackups || c.Backups.KeepDaily > MaxKeepDailyBackups {
+		return fmt.Errorf("backups.keep_daily must be between %d and %d", MinKeepDailyBackups, MaxKeepDailyBackups)
 	}
 	if _, err := time.Parse("15:04", c.Backups.DailyAt); err != nil {
 		return fmt.Errorf("backups.daily_at must use 24-hour HH:MM format: %w", err)

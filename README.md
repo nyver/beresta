@@ -309,10 +309,28 @@ signing and Windows 10/11 smoke-test requirements.
 
 ### Go
 
+The client storage layer links the vendored SQLCipher amalgamation, whose FTS5
+support is only compiled when the `sqlite_fts5` build tag is set. Bare
+`go test ./...` therefore fails with `no such module: fts5`. `build.ps1` exports
+the required environment for you, so prefer:
+
 ```powershell
-go test ./...
-go vet ./...
+.\build.ps1 test
 ```
+
+To run the Go tools directly, export the same settings first:
+
+```powershell
+$env:CGO_ENABLED = "1"
+$env:GOFLAGS = "-tags=sqlite_fts5"
+go test ./core/... ./server/... ./internal/...
+go vet ./core/... ./server/... ./internal/...
+```
+
+A C compiler must be on `PATH`; `.\build.ps1 bootstrap` provisions a portable
+one into `build/tools/w64devkit`. Package patterns are listed explicitly because
+a populated server data directory under `cmd/` is created with restrictive ACLs
+and makes `./...` expansion fail with `Access is denied`.
 
 Initialize the optional server data directory without starting its listener:
 
@@ -421,11 +439,12 @@ seven valid daily backups are retained.
   Pi idle acceptance runs only on the opt-in `beresta-pi` reference runner;
   ordinary hosted CI cross-builds Linux arm64 but cannot substitute for the
   physical RSS/CPU measurement.
-- Core statement coverage is below the release-quality spec's 80% target as
-  measured in this development environment; `build.cmd coverage-gate` fails
-  the build below that threshold and is a required release gate. See the
-  phase-8/9 delivery report for the last measured figure and the
-  lowest-coverage packages.
+- Core statement coverage measured 63.1% in this development environment,
+  below the release-quality spec's 80% target; `build.cmd coverage-gate`
+  fails below that threshold and is a required release gate. `core/transport`
+  (39.7%), `core/mobileapi` (55.7%), and `core/store` (56.0%) are the
+  lowest-covered packages - see [the phase-8 delivery report](docs/phase-8-report.md)
+  for detail.
 - Revision rollback and portable/Evernote import recreate content as plain text; rich-text formatting is not round-tripped through either path (see [ASSUMPTIONS.md](ASSUMPTIONS.md)).
 - The SQLCipher encrypted round trip passes on Windows amd64 and on an Android arm64 device through the packaged AAR and Flutter application linkage.
 - The Go mobile binding, SQLCipher-linked Android AAR, and Flutter debug APK builds pass on Windows.

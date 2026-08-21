@@ -210,7 +210,12 @@ func TestFolderTransportAbandonedLockIsRecovered(t *testing.T) {
 func TestFolderTransportPruneAbandonedTemp(t *testing.T) {
 	root := t.TempDir()
 	deviceID := folderTestID(1)
-	folder, err := NewFolder(FolderConfig{RootDirectory: root, DeviceID: deviceID, TempStaleAfter: time.Millisecond})
+	// The threshold must be far larger than the time this test needs to create
+	// the fresh file below: with a millisecond window any scheduling delay made
+	// the "in-progress" file stale too, and the prune count flaked between 1
+	// and 2. Staleness is decided from mtime, so a wide window still leaves the
+	// backdated file unambiguously stale.
+	folder, err := NewFolder(FolderConfig{RootDirectory: root, DeviceID: deviceID, TempStaleAfter: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

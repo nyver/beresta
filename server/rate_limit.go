@@ -37,14 +37,7 @@ func (l *RateLimiter) Allow(key string, now time.Time) bool {
 	bucket, exists := l.buckets[key]
 	if !exists {
 		if len(l.buckets) >= l.maxKeys {
-			var oldestKey string
-			var oldest time.Time
-			for candidate, existing := range l.buckets {
-				if oldestKey == "" || existing.last.Before(oldest) {
-					oldestKey, oldest = candidate, existing.last
-				}
-			}
-			delete(l.buckets, oldestKey)
+			l.evictLocked(now)
 		}
 		bucket = rateBucket{tokens: l.burst, last: now}
 	}
@@ -58,4 +51,35 @@ func (l *RateLimiter) Allow(key string, now time.Time) bool {
 	bucket.tokens--
 	l.buckets[key] = bucket
 	return true
+}
+
+// evictionSampleSize is how many buckets are inspected when the table is full.
+// Sampling keeps admission O(1) under a key-flooding attack; an exact LRU scan
+// would make every new key cost O(maxKeys) while holding the shared mutex.
+const evictionSampleSize = 8
+
+// evictLocked drops the least recently used bucket among a small random sample.
+// Go randomizes map iteration order, so the sample is unbiased. The caller must
+// hold l.mu.
+func (l *RateLimiter) evictLocked(now time.Time) {
+	var victim string
+	var oldest time.Time
+	inspected := 0
+	for candidate, bucket := range l.buckets {
+		// An idle bucket has already refilled to full burst, so evicting it
+		// grants the next caller nothing it would not have had anyway.
+		if now.Sub(bucket.last) > 5*time.Minute {
+			delete(l.buckets, candidate)
+			return
+		}
+		if victim == "" || bucket.last.Before(oldest) {
+			victim, oldest = candidate, bucket.last
+		}
+		if inspected++; inspected >= evictionSampleSize {
+			break
+		}
+	}
+	if victim != "" {
+		delete(l.buckets, victim)
+	}
 }

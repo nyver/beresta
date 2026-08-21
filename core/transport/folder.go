@@ -43,12 +43,12 @@ import (
 // update, and reports it as a transient error so the caller's normal retry
 // behavior (see core/sync.Worker) resolves it on the next attempt.
 type Folder struct {
-	root       string
-	deviceID   model.ID
-	lockStale  time.Duration
-	tempStale  time.Duration
-	lockRetry  time.Duration
-	lockWait   time.Duration
+	root      string
+	deviceID  model.ID
+	lockStale time.Duration
+	tempStale time.Duration
+	lockRetry time.Duration
+	lockWait  time.Duration
 }
 
 // FolderConfig configures a Folder transport.

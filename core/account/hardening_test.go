@@ -74,4 +74,3 @@ func TestHardenWorkspaceKeyReencryptsUntouchedNotesUnderCurrentKey(t *testing.T)
 		t.Fatalf("reading the hardened note should still succeed: %v", err)
 	}
 }
-

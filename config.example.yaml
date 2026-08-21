@@ -37,8 +37,6 @@ limits:
   max_operation_bytes: 1048576
   # Maximum plaintext-equivalent attachment size accepted for one blob.
   max_blob_bytes: 2147483648
-  # Fixed encrypted attachment chunk size: 4 MiB.
-  blob_chunk_bytes: 4194304
   # Per-user server quota: 20 GiB. A restart applies changes to existing users.
   user_quota_bytes: 21474836480
   # Maximum number of operations returned or accepted in one bounded batch.
@@ -61,7 +59,7 @@ backups:
   enabled: true
   # The default follows --data; a custom relative path uses the process working directory.
   directory: "./data/backups"
-  # Keep exactly the newest seven valid daily server backups after rotation.
+  # How many of the newest valid daily server backups to keep after rotation (1-365).
   keep_daily: 7
   # Local server time in 24-hour HH:MM form.
   daily_at: "02:00"

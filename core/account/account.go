@@ -85,7 +85,7 @@ type Account struct {
 	// (*Account).workspaceKeyByID.
 	historicalWorkspaceKeys map[model.ID][]workspaceKeyEntry
 	clock                   *model.Clock
-	blobs         *store.BlobStore
+	blobs                   *store.BlobStore
 	// databasePath and wrapper are retained (neither is secret material)
 	// because whole-database restore (see core/account/restore.go) must
 	// generate and wrap a brand-new device database key and replace the
@@ -711,16 +711,16 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 	}
 
 	return &Account{
-		ID:                 accountRow.id,
-		DeviceID:           deviceRow.id,
-		IdentityPublicKey:  payload.IdentityPublicKey,
-		AuthorityPublicKey: payload.AuthorityPublicKey,
-		DevicePublicKey:    deviceRow.publicKey,
-		db:                 db,
-		identityPrivate:    payload.IdentityPrivateKey,
-		authorityPrivate:   payload.AuthorityPrivateKey,
-		devicePrivate:      devicePrivate,
-		rootKey:            rootKey,
+		ID:                      accountRow.id,
+		DeviceID:                deviceRow.id,
+		IdentityPublicKey:       payload.IdentityPublicKey,
+		AuthorityPublicKey:      payload.AuthorityPublicKey,
+		DevicePublicKey:         deviceRow.publicKey,
+		db:                      db,
+		identityPrivate:         payload.IdentityPrivateKey,
+		authorityPrivate:        payload.AuthorityPrivateKey,
+		devicePrivate:           devicePrivate,
+		rootKey:                 rootKey,
 		workspaceKeys:           workspaceKeys,
 		historicalWorkspaceKeys: historicalWorkspaceKeys,
 		clock:                   clock,

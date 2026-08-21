@@ -25,6 +25,16 @@ import (
 type principalContextKey struct{}
 type requestIDContextKey struct{}
 
+const (
+	// streamPingInterval is how often the cursor stream pings an idle peer.
+	streamPingInterval = 30 * time.Second
+	// streamPongWait must exceed streamPingInterval so a healthy peer always
+	// refreshes its read deadline before the previous one expires.
+	streamPongWait = 70 * time.Second
+	// streamWriteWait bounds a single frame write to a stalled peer.
+	streamWriteWait = 5 * time.Second
+)
+
 type API struct {
 	storage       *Storage
 	config        Config
@@ -33,6 +43,12 @@ type API struct {
 	deviceLimiter *RateLimiter
 	metrics       *Metrics
 	router        http.Handler
+
+	// Stream keepalive timings. Fields rather than constants so tests can
+	// compress them; production always uses the stream* defaults.
+	pingInterval time.Duration
+	pongWait     time.Duration
+	writeWait    time.Duration
 }
 
 func NewAPI(storage *Storage, cfg Config) *API {
@@ -43,6 +59,9 @@ func NewAPI(storage *Storage, cfg Config) *API {
 		ipLimiter:     NewRateLimiter(cfg.Limits.RequestsPerSecond, cfg.Limits.RequestBurst, 4096),
 		deviceLimiter: NewRateLimiter(cfg.Limits.RequestsPerSecond, cfg.Limits.RequestBurst, 256),
 		metrics:       &Metrics{},
+		pingInterval:  streamPingInterval,
+		pongWait:      streamPongWait,
+		writeWait:     streamWriteWait,
 	}
 	api.router = api.routes()
 	return api
@@ -323,7 +342,13 @@ func (a *API) addDevice(writer http.ResponseWriter, request *http.Request) {
 
 func (a *API) revokeDevice(writer http.ResponseWriter, request *http.Request) {
 	principal := principalFrom(request.Context())
-	workspaces, _ := a.storage.ListWorkspaces(request.Context(), principal)
+	// Collected before the revocation so the hint can still reach every
+	// workspace the device belonged to. A lookup failure must not abort the
+	// revocation itself, but it does cost peers their prompt notification.
+	workspaces, err := a.storage.ListWorkspaces(request.Context(), principal)
+	if err != nil {
+		slog.Warn("revocation hints unavailable", "request_id", requestIDFrom(request.Context()), "error_class", "workspace_lookup_failed")
+	}
 	if err := a.storage.RevokeDevice(request.Context(), principal, chi.URLParam(request, "deviceID"), time.Now()); err != nil {
 		writeAPIError(writer, err)
 		return
@@ -442,7 +467,9 @@ func (a *API) getBlobChunk(writer http.ResponseWriter, request *http.Request) {
 	}
 	writer.Header().Set("Content-Type", "application/octet-stream")
 	writer.Header().Set("Content-Length", strconv.Itoa(len(contents)))
-	writer.Write(contents)
+	if _, err := writer.Write(contents); err != nil {
+		slog.Warn("blob chunk response truncated", "request_id", requestIDFrom(request.Context()), "error_class", "write_failed")
+	}
 }
 
 func (a *API) addBlobReference(writer http.ResponseWriter, request *http.Request) {
@@ -488,21 +515,12 @@ func (a *API) listSnapshots(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (a *API) latestSnapshot(writer http.ResponseWriter, request *http.Request) {
-	list, err := a.storage.ListSnapshots(request.Context(), principalFrom(request.Context()), request.URL.Query().Get("workspace_id"))
+	result, err := a.storage.LatestSnapshot(request.Context(), principalFrom(request.Context()), request.URL.Query().Get("workspace_id"))
 	if err != nil {
 		writeAPIError(writer, err)
 		return
 	}
-	if len(list) != 0 {
-		full, err := a.storage.GetSnapshot(request.Context(), principalFrom(request.Context()), list[0].ID)
-		if err != nil {
-			writeAPIError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusOK, full)
-		return
-	}
-	writeAPIError(writer, ErrNotFound)
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func (a *API) getSnapshot(writer http.ResponseWriter, request *http.Request) {
@@ -532,12 +550,20 @@ func (a *API) acknowledgeSnapshot(writer http.ResponseWriter, request *http.Requ
 	writeJSON(writer, http.StatusOK, map[string]any{"eligible_for_compaction": eligible})
 }
 
+// publishWorkspace fans out a cursor hint after a committed write. It detaches
+// from the request's cancellation: the write already succeeded, so a client
+// that disconnected mid-response must not suppress the notification other
+// devices depend on for live sync.
 func (a *API) publishWorkspace(ctx context.Context, workspaceID string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), a.writeWait)
+	defer cancel()
 	var latest, epoch int64
 	if err := a.storage.db.QueryRowContext(ctx, `SELECT latest_seq, cursor_epoch FROM workspaces WHERE workspace_id = ?`, workspaceID).
-		Scan(&latest, &epoch); err == nil {
-		a.pubsub.Publish(CursorHint{Protocol: "beresta.sync.v1", WorkspaceID: workspaceID, LatestSeq: latest, CursorEpoch: epoch})
+		Scan(&latest, &epoch); err != nil {
+		slog.Warn("cursor hint not published", "request_id", requestIDFrom(ctx), "error_class", "publish_failed")
+		return
 	}
+	a.pubsub.Publish(CursorHint{Protocol: "beresta.sync.v1", WorkspaceID: workspaceID, LatestSeq: latest, CursorEpoch: epoch})
 }
 
 func (a *API) streamChanges(writer http.ResponseWriter, request *http.Request) {
@@ -552,7 +578,7 @@ func (a *API) streamChanges(writer http.ResponseWriter, request *http.Request) {
 		writeAPIError(writer, ErrForbidden)
 		return
 	}
-	subscription, err := a.pubsub.Subscribe(workspaceID)
+	subscription, err := a.pubsub.Subscribe(workspaceID, principal.UserID)
 	if err != nil {
 		writeAPIError(writer, err)
 		return
@@ -577,8 +603,13 @@ func (a *API) streamChanges(writer http.ResponseWriter, request *http.Request) {
 	a.metrics.activeWS.Add(1)
 	defer a.metrics.activeWS.Add(-1)
 	connection.SetReadLimit(1024)
-	_ = connection.SetReadDeadline(time.Time{})
-	_ = connection.SetWriteDeadline(time.Time{})
+	// Liveness depends on the peer answering pings: every pong pushes the read
+	// deadline forward, so a peer that stops responding is dropped after
+	// streamPongWait instead of holding a subscription slot indefinitely.
+	_ = connection.SetReadDeadline(time.Now().Add(a.pongWait))
+	connection.SetPongHandler(func(string) error {
+		return connection.SetReadDeadline(time.Now().Add(a.pongWait))
+	})
 	disconnected := make(chan struct{})
 	go func() {
 		defer close(disconnected)
@@ -588,7 +619,7 @@ func (a *API) streamChanges(writer http.ResponseWriter, request *http.Request) {
 			}
 		}
 	}()
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(a.pingInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -596,17 +627,14 @@ func (a *API) streamChanges(writer http.ResponseWriter, request *http.Request) {
 			if !ok {
 				return
 			}
-			connection.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			_ = connection.SetWriteDeadline(time.Now().Add(a.writeWait))
 			if err := connection.WriteJSON(hint); err != nil {
 				return
 			}
-			_ = connection.SetWriteDeadline(time.Time{})
 		case <-ticker.C:
-			connection.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if err := connection.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+			if err := connection.WriteControl(websocket.PingMessage, nil, time.Now().Add(a.writeWait)); err != nil {
 				return
 			}
-			_ = connection.SetWriteDeadline(time.Time{})
 		case <-disconnected:
 			return
 		case <-request.Context().Done():

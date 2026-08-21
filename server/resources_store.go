@@ -22,10 +22,12 @@ type Workspace struct {
 }
 
 type Member struct {
-	UserID      string     `json:"user_id"`
-	DisplayName string     `json:"display_name"`
-	Role        string     `json:"role"`
-	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
+	UserID          string     `json:"user_id"`
+	DisplayName     string     `json:"display_name"`
+	Role            string     `json:"role"`
+	IdentityPublic  []byte     `json:"identity_public"`
+	AuthorityPublic []byte     `json:"authority_public"`
+	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
 }
 
 type Device struct {
@@ -157,7 +159,7 @@ func (s *Storage) ListMembers(ctx context.Context, principal Principal, workspac
 		return nil, ErrForbidden
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.user_id, u.display_name, m.role, m.revoked_at
+		SELECT m.user_id, u.display_name, m.role, u.identity_public, u.authority_public, m.revoked_at
 		FROM memberships m JOIN users u ON u.user_id = m.user_id
 		WHERE m.workspace_id = ? ORDER BY m.user_id`, workspaceID)
 	if err != nil {
@@ -168,7 +170,7 @@ func (s *Storage) ListMembers(ctx context.Context, principal Principal, workspac
 	for rows.Next() {
 		var item Member
 		var revoked sql.NullInt64
-		if err := rows.Scan(&item.UserID, &item.DisplayName, &item.Role, &revoked); err != nil {
+		if err := rows.Scan(&item.UserID, &item.DisplayName, &item.Role, &item.IdentityPublic, &item.AuthorityPublic, &revoked); err != nil {
 			return nil, err
 		}
 		item.RevokedAt = nullableTime(revoked)
@@ -313,6 +315,47 @@ func (s *Storage) RotateWorkspaceKey(ctx context.Context, principal Principal, w
 		return struct{}{}, nil
 	})
 	return err
+}
+
+// ListWorkspaceMemberDevices returns every device - including revoked ones,
+// so a client can still verify the signature on history authenticated
+// before a revocation boundary - belonging to any current or former member
+// of workspaceID. A client's own signature-verification pass needs this to
+// authenticate operations from a fellow workspace member's device, which is
+// otherwise information the server never has a reason to reveal outside an
+// authorized fellow member (see docs/threat-model.md).
+func (s *Storage) ListWorkspaceMemberDevices(ctx context.Context, principal Principal, workspaceID string) ([]Device, error) {
+	if err := validateID(workspaceID, "workspace_id"); err != nil {
+		return nil, err
+	}
+	member, err := s.isActiveMember(ctx, s.db, principal.UserID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if !member {
+		return nil, ErrForbidden
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT d.device_id, d.user_id, d.display_name, d.signing_public, d.created_at, d.revoked_at
+		FROM devices d JOIN memberships m ON m.user_id = d.user_id
+		WHERE m.workspace_id = ? ORDER BY d.user_id, d.device_id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Device
+	for rows.Next() {
+		var item Device
+		var created int64
+		var revoked sql.NullInt64
+		if err := rows.Scan(&item.ID, &item.UserID, &item.DisplayName, &item.PublicKey, &created, &revoked); err != nil {
+			return nil, err
+		}
+		item.CreatedAt = time.Unix(created, 0).UTC()
+		item.RevokedAt = nullableTime(revoked)
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func (s *Storage) ListDevices(ctx context.Context, principal Principal) ([]Device, error) {

@@ -109,6 +109,7 @@ Beresta does not provide legal-grade non-repudiation. Local users control their 
 | Logs or crash reports contain secrets | Persistent accidental disclosure | Allow-listed structured fields; no arbitrary DTO/object logging; content-free errors; seeded-secret scanner in CI | Log/crash corpus scan |
 | Attachment hash reveals known plaintext | Cross-user equality oracle | Per-workspace `HMAC(BlobIDKey, plaintext)` identifiers, encrypted independently authenticated chunks | Equal-file tests across independent workspaces |
 | Android recent-apps overview or screenshot captures notes | Shoulder surfing or OS snapshot disclosure | Secure-screen flags, redacted recent-apps surface, lock on configured lifecycle boundary | Android UI automation and manual release test |
+| Android share target or widget persists plaintext while locked | Plaintext capture disclosure outside SQLCipher | Validate bounded text/image input, encrypt a private no-backup handoff with an Android-Keystore AES-GCM key, import only after core unlock, and never render note content in the widget | Ciphertext inspection, locked-widget, tamper, and offline-import tests |
 | Clipboard, temp file, or plaintext export persists | Local plaintext residue | Avoid clipboard use for keys; bounded clipboard content policy; safe temp directory and cleanup; explicit export location and warning | Termination and cleanup tests |
 | Backup destination is copied | Offline disclosure | Backups encrypted under a derived backup key and self-contained encrypted blob set | Backup-directory inspection without keybag/passphrase |
 
@@ -124,6 +125,7 @@ Beresta does not provide legal-grade non-repudiation. Local users control their 
 | Corrupt operation blocks cursor forever | Permanent sync outage | Quarantine with explicit user-visible diagnostics and safe retry/recovery workflow; never silently skip authenticated history | Poison-operation end-to-end test |
 | Argon2 parameters exhaust mobile memory | Crash during unlock | Device calibration toward one second with a hard 128 MiB ceiling and bounded parallelism; validate stored parameters before allocation | Malicious-profile and low-memory-device tests |
 | Backup rotation consumes all storage | Client outage or history loss | Preflight capacity, external destinations, content-addressed reuse where safe, warn without deleting valid history | Low-space rotation tests |
+| Mobile cache eviction removes an unsynchronized original | Irrecoverable attachment loss | Encrypted cache ledger distinguishes redundant synchronized downloads from originals; LRU may select only unpinned synchronized copies | Cache-limit, pinning, retention-mode, and unsynchronized-original tests |
 
 ### Elevation of Privilege
 

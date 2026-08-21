@@ -7,6 +7,8 @@ import (
 	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/keystore"
 	"github.com/beresta-app/beresta/core/model"
+	"github.com/beresta-app/beresta/core/store"
+	coresync "github.com/beresta-app/beresta/core/sync"
 	"github.com/beresta-app/beresta/core/transport"
 )
 
@@ -20,10 +22,13 @@ type App struct {
 	ctx   context.Context
 	ready bool // set once startup(ctx) has wired the Wails runtime dispatcher
 
-	account       *account.Account
-	keyProtection string // keystore.Protection.String() for the active account, "" when locked
-	transport     transport.SyncTransport
-	settings      AppSettings
+	account         *account.Account
+	keyProtection   string // keystore.Protection.String() for the active account, "" when locked
+	transport       transport.SyncTransport
+	httpTransport   *transport.HTTP
+	syncCoordinator *coresync.Coordinator
+	syncRepository  *store.SyncRepository
+	settings        AppSettings
 
 	// keyWrapperFactory builds the platform keystore.Wrapper used to
 	// wrap/unwrap the local device database key. It defaults to
@@ -264,6 +269,17 @@ func (a *App) activate(acc *account.Account, protection, databasePath string) (A
 		return AccountInfo{}, mapError(err)
 	}
 	a.emit(EventAccountUnlocked, info)
+	// Reattach a previously configured server without making unlock depend on
+	// network availability. ConnectServer performs authentication and leaves
+	// the complete local collection usable if the attempt fails.
+	if settings.SyncEnabled {
+		go func(config AppSettings) {
+			_, _ = a.ConnectServer(ConnectServerRequest{
+				URL: config.SyncServerURL, SecurityMode: config.SyncSecurityMode,
+				Fingerprint: config.SyncFingerprint, DeviceName: "Windows desktop",
+			})
+		}(settings)
+	}
 	return info, nil
 }
 
@@ -276,9 +292,17 @@ func (a *App) LockAccount() error {
 func (a *App) lockAccount() error {
 	a.mu.Lock()
 	acc := a.account
+	coordinator := a.syncCoordinator
 	a.account = nil
 	a.keyProtection = ""
+	a.transport = transport.NewLocal()
+	a.httpTransport = nil
+	a.syncCoordinator = nil
+	a.syncRepository = nil
 	a.mu.Unlock()
+	if coordinator != nil {
+		coordinator.Detach()
+	}
 	if acc == nil {
 		return nil
 	}

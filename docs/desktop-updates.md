@@ -29,17 +29,32 @@ Development packages may be unsigned. A release environment must set:
 - optionally, `BERESTA_SIGNTOOL` to an explicit `signtool.exe` path.
 
 The private Ed25519 release key and code-signing private key must remain outside
-the repository and CI logs. `sign-artifact.ps1` signs the application, updater,
-uninstaller, and final installer using SHA-256 plus an RFC 3161 timestamp.
+the repository and CI logs. Authenticode-sign the application, updater,
+uninstaller, and final installer with `signtool.exe` (SHA-256 plus an RFC 3161
+timestamp) using the certificate identified by `BERESTA_SIGN_CERT_SHA1`.
 
 The pre-downloaded update manifest follows
 [`schema/update-manifest-v1.schema.json`](../schema/update-manifest-v1.schema.json).
 Its Ed25519 signature covers deterministic compact JSON containing the fields
 in this order: `format_version`, `version`, `platform`, `artifact`,
 `size_bytes`, and lowercase `sha256`. The `signature` field itself is excluded.
-Manifest publication and automatic discovery/download belong to the release
-pipeline phase; the current helper deliberately fails closed without a pinned
-public key.
+
+`cmd/beresta-release-sign` publishes that manifest for one already-built,
+already-Authenticode-signed artifact:
+
+```powershell
+$env:BERESTA_RELEASE_PRIVATE_KEY_BASE64 = "<base64 64-byte Ed25519 private key>"
+go run ./cmd/beresta-release-sign -artifact build/output/Beresta-amd64-installer.exe -version 1.2.0
+```
+
+It hashes the artifact, builds and signs the canonical payload, writes
+`<artifact>.manifest.json`, and re-verifies its own output with the same
+strict decoder `beresta-updater` uses before printing the paired public key to
+pin into `BERESTA_UPDATE_PUBLIC_KEY_BASE64`. Automatic discovery/download of a
+published manifest by a running client belongs to a future phase; the current
+updater only applies a manifest and artifact already staged on disk (see
+`beresta-updater apply -manifest <path> -installed <path>`), and it
+deliberately fails closed without a pinned public key.
 
 Before replacing the installed executable, the updater verifies the manifest
 signature, exact version policy, artifact basename, byte length, SHA-256 hash,

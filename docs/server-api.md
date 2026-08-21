@@ -69,11 +69,21 @@ closed.
 ## Errors and notifications
 
 Errors are JSON objects with a stable `code`: `invalid_request`, `unauthorized`,
-`not_found`, `conflict`, `quota_exceeded`, `rate_limited`, `timeout`, or
+`not_found`, `conflict`, `snapshot_required`, `quota_exceeded`, `rate_limited`, `timeout`, or
 `internal_error`. Keybag compare-and-swap conflicts also return the current
 opaque keybag version. WebSocket messages contain only `protocol`,
 `workspace_id`, `latest_seq`, and `cursor_epoch`; clients must pull changes and
 continue polling if the socket is unavailable.
+
+`snapshot_required` is returned only when a requested change cursor precedes
+the server's recorded compacted boundary. Clients must not skip directly to
+that boundary: they authenticate/decrypt/replay the latest valid snapshot at
+or beyond the compacted base,
+commit its cursor, and then retry the ordinary change pull.
+
+`GET /v1/snapshots/latest` returns the newest uploaded snapshot, including one
+still collecting acknowledgements. A client verifies it before acknowledging;
+the endpoint does not assert compaction eligibility.
 
 Signed operation and snapshot field ordering is specified in
 [sync-protocol.md](sync-protocol.md). Server defaults and operator commands are

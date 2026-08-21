@@ -45,7 +45,7 @@ type NoteBodyCommand struct {
 // always noteSnapshotFormat; callers do not choose it, matching
 // CommitNoteBody's own fixed canonical encoding for stored state.
 func (a *Account) NoteDocumentState(ctx context.Context, workspaceID, noteID model.ID) ([]byte, yjsadapter.Format, error) {
-	db, entry, _, _, err := a.workspaceSession(workspaceID)
+	db, _, _, _, err := a.workspaceSession(workspaceID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -53,7 +53,7 @@ func (a *Account) NoteDocumentState(ctx context.Context, workspaceID, noteID mod
 		return nil, 0, err
 	}
 
-	doc, err := loadNoteDocument(ctx, db, entry, workspaceID, noteID)
+	doc, err := loadNoteDocument(ctx, db, a, workspaceID, noteID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -100,7 +100,7 @@ func (a *Account) CommitNoteBody(ctx context.Context, cmd NoteBodyCommand) error
 		return store.ErrWrongWorkspace
 	}
 
-	doc, err := loadNoteDocument(ctx, tx, entry, cmd.WorkspaceID, cmd.NoteID)
+	doc, err := loadNoteDocument(ctx, tx, a, cmd.WorkspaceID, cmd.NoteID)
 	if err != nil {
 		return err
 	}
@@ -170,14 +170,25 @@ func (a *Account) CommitNoteBody(ctx context.Context, cmd NoteBodyCommand) error
 
 // loadNoteDocument restores a note's CRDT document from its persisted
 // snapshot, or returns a fresh empty document for a note that has never had
-// a body command applied.
-func loadNoteDocument(ctx context.Context, exec store.Executor, entry workspaceKeyEntry, workspaceID, noteID model.ID) (*yjsadapter.Document, error) {
+// a body command applied. The snapshot may have been encrypted under any
+// key account still retains - current or historical - since a workspace
+// key rotation (see keyrotation.go) does not rewrite existing ciphertext;
+// the packed blob's own embedded key ID (see
+// corecrypto.EncryptAndPackObject) selects which one to use.
+func loadNoteDocument(ctx context.Context, exec store.Executor, account *Account, workspaceID, noteID model.ID) (*yjsadapter.Document, error) {
 	state, ok, err := store.LoadCRDTState(ctx, exec, noteID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return yjsadapter.New(), nil
+	}
+	if len(state.Snapshot) < corecrypto.KeyIDBytes {
+		return nil, fmt.Errorf("account: malformed note snapshot")
+	}
+	entry, ok := account.workspaceKeyByID(workspaceID, state.Snapshot[:corecrypto.KeyIDBytes])
+	if !ok {
+		return nil, fmt.Errorf("account: note snapshot uses an unavailable workspace key")
 	}
 
 	metadata := noteSnapshotMetadata(workspaceID, noteID)

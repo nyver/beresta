@@ -22,6 +22,10 @@ export function CommitNoteBody(arg1) {
   return window['go']['main']['App']['CommitNoteBody'](arg1);
 }
 
+export function ConnectServer(arg1) {
+  return window['go']['main']['App']['ConnectServer'](arg1);
+}
+
 export function CreateAccount(arg1) {
   return window['go']['main']['App']['CreateAccount'](arg1);
 }
@@ -58,8 +62,16 @@ export function DeleteSavedSearch(arg1) {
   return window['go']['main']['App']['DeleteSavedSearch'](arg1);
 }
 
+export function DiagnoseServer() {
+  return window['go']['main']['App']['DiagnoseServer']();
+}
+
 export function DiffRevisions(arg1, arg2, arg3) {
   return window['go']['main']['App']['DiffRevisions'](arg1, arg2, arg3);
+}
+
+export function DisableServer() {
+  return window['go']['main']['App']['DisableServer']();
 }
 
 export function EnsureDailyBackup(arg1) {
@@ -112,6 +124,14 @@ export function ListRevisions(arg1) {
 
 export function ListSavedSearches() {
   return window['go']['main']['App']['ListSavedSearches']();
+}
+
+export function ListSyncDevices() {
+  return window['go']['main']['App']['ListSyncDevices']();
+}
+
+export function ListSyncQuarantine() {
+  return window['go']['main']['App']['ListSyncQuarantine']();
 }
 
 export function ListTags() {
@@ -182,8 +202,16 @@ export function RestoreWhole(arg1, arg2) {
   return window['go']['main']['App']['RestoreWhole'](arg1, arg2);
 }
 
+export function RetrySyncQuarantine(arg1) {
+  return window['go']['main']['App']['RetrySyncQuarantine'](arg1);
+}
+
 export function RevisionMarkdown(arg1, arg2) {
   return window['go']['main']['App']['RevisionMarkdown'](arg1, arg2);
+}
+
+export function RevokeSyncDevice(arg1) {
+  return window['go']['main']['App']['RevokeSyncDevice'](arg1);
 }
 
 export function RunGarbageCollection(arg1) {

@@ -56,8 +56,13 @@ without client-held keys.
 
 The repository includes:
 
+- `build/server/run-server.bat` to start the Windows binary directly from a
+  data directory next to the script - the primary path on Windows, requiring
+  no installation or elevated privileges;
 - `build/server/beresta-server.service` for a dedicated Linux `beresta` user;
-- `build/server/install-scheduled-task.ps1` for a Windows LocalSystem startup task;
+- `build/server/install-scheduled-task.ps1` for an optional Windows
+  LocalSystem startup task, for hosts that should start the server
+  automatically without a signed-in user;
 - `build/server/Dockerfile` for an optional scratch container.
 
 Review paths, firewall policy, and the service account before installation.

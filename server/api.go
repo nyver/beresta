@@ -77,6 +77,7 @@ func (a *API) routes() http.Handler {
 			protected.Post("/workspaces/{workspaceID}/members", a.addMember)
 			protected.Delete("/workspaces/{workspaceID}/members/{userID}", a.revokeMember)
 			protected.Get("/workspaces/{workspaceID}/key-envelopes", a.getKeyEnvelopes)
+			protected.Get("/workspaces/{workspaceID}/member-devices", a.listWorkspaceMemberDevices)
 			protected.Put("/workspaces/{workspaceID}/key-envelopes", a.rotateWorkspaceKey)
 			protected.Get("/devices", a.listDevices)
 			protected.Post("/devices", a.addDevice)
@@ -267,6 +268,15 @@ func (a *API) getKeyEnvelopes(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"key_envelopes": result})
+}
+
+func (a *API) listWorkspaceMemberDevices(writer http.ResponseWriter, request *http.Request) {
+	result, err := a.storage.ListWorkspaceMemberDevices(request.Context(), principalFrom(request.Context()), chi.URLParam(request, "workspaceID"))
+	if err != nil {
+		writeAPIError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"devices": result})
 }
 
 func (a *API) rotateWorkspaceKey(writer http.ResponseWriter, request *http.Request) {
@@ -483,16 +493,14 @@ func (a *API) latestSnapshot(writer http.ResponseWriter, request *http.Request) 
 		writeAPIError(writer, err)
 		return
 	}
-	for _, item := range list {
-		if item.EligibleAt != nil {
-			full, err := a.storage.GetSnapshot(request.Context(), principalFrom(request.Context()), item.ID)
-			if err != nil {
-				writeAPIError(writer, err)
-				return
-			}
-			writeJSON(writer, http.StatusOK, full)
+	if len(list) != 0 {
+		full, err := a.storage.GetSnapshot(request.Context(), principalFrom(request.Context()), list[0].ID)
+		if err != nil {
+			writeAPIError(writer, err)
 			return
 		}
+		writeJSON(writer, http.StatusOK, full)
+		return
 	}
 	writeAPIError(writer, ErrNotFound)
 }
@@ -803,6 +811,8 @@ func writeAPIError(writer http.ResponseWriter, err error) {
 		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, ErrConflict):
 		status, code = http.StatusConflict, "conflict"
+	case errors.Is(err, ErrSnapshotRequired):
+		status, code = http.StatusConflict, "snapshot_required"
 	case errors.Is(err, ErrQuota):
 		status, code = http.StatusRequestEntityTooLarge, "quota_exceeded"
 	case errors.Is(err, ErrRateLimited):

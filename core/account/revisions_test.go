@@ -12,7 +12,7 @@ import (
 
 func commitInsert(t *testing.T, a *Account, workspaceID, noteID model.ID, text string) {
 	t.Helper()
-	doc, err := loadNoteDocument(context.Background(), a.db, a.workspaceKeys[workspaceID], workspaceID, noteID)
+	doc, err := loadNoteDocument(context.Background(), a.db, a, workspaceID, noteID)
 	if err != nil {
 		t.Fatalf("loadNoteDocument: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestRestoreRevisionCreatesNewRevisionWithoutErasingHistory(t *testing.T) {
 		t.Fatalf("RestoreRevision: %v", err)
 	}
 
-	doc, err := loadNoteDocument(ctx, created.db, created.workspaceKeys[workspaceID], workspaceID, note.ID)
+	doc, err := loadNoteDocument(ctx, created.db, created, workspaceID, note.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

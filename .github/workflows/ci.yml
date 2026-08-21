@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -64,9 +65,40 @@ jobs:
         shell: cmd
         run: build.cmd verify
 
+      - name: Core coverage gate (>= 80%)
+        shell: cmd
+        run: build.cmd coverage-gate
+
+      - name: Vulnerability and OSV dependency scan
+        shell: cmd
+        run: build.cmd security-scan
+
+      - name: Fuzz malformed-input decoders (30s each)
+        shell: cmd
+        env:
+          CGO_ENABLED: "1"
+          GOFLAGS: -tags=sqlite_fts5
+          PATH: ${{ github.workspace }}\build\tools\w64devkit\bin;${{ env.PATH }}
+        run: |
+          go test ./core/crypto/... -run=^$ -fuzz=FuzzOpenObjectMalformed -fuzztime=30s
+          go test ./core/crypto/... -run=^$ -fuzz=FuzzOpenKeybagMalformed -fuzztime=30s
+          go test ./core/crypto/... -run=^$ -fuzz=FuzzOpenWorkspaceKeyEnvelopeMalformed -fuzztime=30s
+          go test ./core/keystore/... -run=^$ -fuzz=FuzzOpenEnvelope -fuzztime=30s
+          go test ./core/sync/... -run=^$ -fuzz=FuzzDecodeOperationStrict -fuzztime=30s
+
       - name: Cross-build and smoke-test server
         shell: cmd
         run: build.cmd server-smoke
+
+      - name: Upload server release provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: beresta-server-provenance
+          path: |
+            build/output/server/SHA256SUMS
+            build/output/server/provenance.json
+            build/output/server/*.sbom.txt
+          if-no-files-found: error
 
       - name: Smoke-test installer in disposable runner profile
         shell: cmd
@@ -103,6 +135,83 @@ jobs:
         run: file build/output/beresta-server | grep -q 'statically linked'
       - name: Run first-start smoke
         run: sh build/server/smoke.sh build/output/beresta-server
+
+  release-publish:
+    name: Publish signed release artifacts
+    needs: [verify, server-linux-smoke]
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Bootstrap project dependencies
+        shell: cmd
+        run: build.cmd bootstrap
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
+
+      - name: Install NSIS
+        shell: powershell
+        run: choco install nsis --yes --no-progress
+
+      - name: Package desktop application and installer
+        shell: cmd
+        env:
+          BERESTA_REQUIRE_SIGNING: ${{ secrets.BERESTA_SIGN_CERT_SHA1 != '' && '1' || '0' }}
+          BERESTA_SIGN_CERT_SHA1: ${{ secrets.BERESTA_SIGN_CERT_SHA1 }}
+        run: build.cmd package
+
+      - name: Cross-build server release artifacts
+        shell: cmd
+        run: build.cmd server-cross-build
+        env:
+          BERESTA_RELEASE_PRIVATE_KEY_BASE64: ${{ secrets.BERESTA_RELEASE_PRIVATE_KEY_BASE64 }}
+
+      - name: Publish the signed desktop update manifest
+        if: ${{ secrets.BERESTA_RELEASE_PRIVATE_KEY_BASE64 != '' }}
+        shell: pwsh
+        env:
+          BERESTA_RELEASE_PRIVATE_KEY_BASE64: ${{ secrets.BERESTA_RELEASE_PRIVATE_KEY_BASE64 }}
+        run: |
+          # The tag carries a leading "v" (v1.2.0); the manifest schema
+          # requires the plain semver form (1.2.0).
+          $releaseVersion = "${{ github.ref_name }}" -replace '^v', ''
+          go run ./cmd/beresta-release-sign -artifact build/output/Beresta-amd64-installer.exe -version $releaseVersion
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: beresta-release-${{ github.ref_name }}
+          path: |
+            build/output/Beresta-amd64-installer.exe
+            build/output/Beresta-amd64-installer.exe.manifest.json
+            build/output/beresta-updater.exe
+            build/output/server/beresta-server-*.exe
+            build/output/server/beresta-server-linux-*
+            build/output/server/SHA256SUMS
+            build/output/server/SHA256SUMS.sig
+            build/output/server/provenance.json
+            build/output/server/*.sbom.txt
+          if-no-files-found: error
 
   server-pi-acceptance:
     name: Raspberry Pi idle acceptance

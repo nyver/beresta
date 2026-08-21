@@ -65,6 +65,32 @@ func ParseID(value []byte) (ID, error) {
 	return id, nil
 }
 
+// ParseIDString parses the canonical dashed hexadecimal text form produced
+// by String, round-tripping through it to reject any non-canonical
+// rendering (wrong case, missing dashes, extra characters) of an otherwise
+// valid identifier.
+func ParseIDString(value string) (ID, error) {
+	if len(value) != 36 {
+		return Nil, ErrInvalidID
+	}
+	raw := make([]byte, 0, idBytes)
+	for i, segment := range []struct{ start, end int }{{0, 8}, {9, 13}, {14, 18}, {19, 23}, {24, 36}} {
+		if i > 0 && value[segment.start-1] != '-' {
+			return Nil, ErrInvalidID
+		}
+		decoded, err := hex.DecodeString(value[segment.start:segment.end])
+		if err != nil {
+			return Nil, ErrInvalidID
+		}
+		raw = append(raw, decoded...)
+	}
+	id, err := ParseID(raw)
+	if err != nil || id.String() != value {
+		return Nil, ErrInvalidID
+	}
+	return id, nil
+}
+
 // Validate reports whether id carries the required UUIDv7 version and
 // variant bits and is not the all-zero value.
 func (id ID) Validate() error {

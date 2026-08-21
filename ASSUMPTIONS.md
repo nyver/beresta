@@ -40,6 +40,7 @@ This file records implementation decisions that fill gaps without changing the f
 4. An invalid operation blocks contiguous cursor progression and enters a visible quarantine workflow rather than being silently skipped.
 5. Server compaction requires acknowledgements from all active devices or explicit revocation plus the retention boundary because the server cannot validate snapshot plaintext.
 6. The transient LAN pairing transport can perform a complete on-demand peer synchronization but does not become a background home server.
+7. Protocol-v1 workspace snapshots are encrypted canonical operation-replay archives rather than a second serialized materialized schema. This keeps bootstrap on the same signature, AEAD, CRDT, LWW, quarantine, and exactly-once path as ordinary pull.
 
 ## Server Operation
 
@@ -70,6 +71,8 @@ This file records implementation decisions that fill gaps without changing the f
 1. Local-only onboarding is the selected default. Server connection remains available from settings.
 2. Synchronization-disabled, offline, active, current, and failed are distinct user-visible states.
 3. Mobile operating systems may delay background work indefinitely; foreground entry always resumes durable pending synchronization.
-4. Revocation confirmation explicitly states that Beresta cannot erase data already copied by a formerly authorized device.
-5. English and Russian are complete supported UI languages from the first user-facing implementation phase.
-6. The desktop tray, taskbar, executable, and installer derive their branded icon from `desktop/assets/appicon.png`; an accidental quick-note hotkey press that is closed without typing anything is accepted to leave one empty note in the workspace rather than adding emptiness-detection logic to discard it.
+4. Android share and widget captures are encrypted immediately into a private no-backup handoff and become notes only after the main account unlocks; the widget never displays note titles or bodies.
+5. Mobile attachment-cache eviction applies only to redundant downloaded ciphertext marked synchronized. Local originals, pinned items, and incomplete uploads are not eviction candidates.
+6. Revocation confirmation explicitly states that Beresta cannot erase data already copied by a formerly authorized device.
+7. English and Russian are complete supported UI languages from the first user-facing implementation phase.
+8. The desktop tray, taskbar, executable, and installer derive their branded icon from `desktop/assets/appicon.png`; an accidental quick-note hotkey press that is closed without typing anything is accepted to leave one empty note in the workspace rather than adding emptiness-detection logic to discard it.

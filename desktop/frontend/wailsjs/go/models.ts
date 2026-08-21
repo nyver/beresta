@@ -1,15 +1,15 @@
 export namespace main {
-	
+
 	export class AccountInfo {
 	    account_id: string;
 	    device_id: string;
 	    workspace_id: string;
 	    key_protection: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AccountInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.account_id = source["account_id"];
@@ -21,17 +21,17 @@ export namespace main {
 	export class AccountStatus {
 	    unlocked: boolean;
 	    account?: AccountInfo;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AccountStatus(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.unlocked = source["unlocked"];
 	        this.account = this.convertValues(source["account"], AccountInfo);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -57,11 +57,15 @@ export namespace main {
 	    backup_directory: string;
 	    quick_note_hotkey: string;
 	    autostart_enabled: boolean;
-	
+	    sync_enabled: boolean;
+	    sync_server_url: string;
+	    sync_security_mode: string;
+	    sync_fingerprint: string;
+
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.language = source["language"];
@@ -70,6 +74,10 @@ export namespace main {
 	        this.backup_directory = source["backup_directory"];
 	        this.quick_note_hotkey = source["quick_note_hotkey"];
 	        this.autostart_enabled = source["autostart_enabled"];
+	        this.sync_enabled = source["sync_enabled"];
+	        this.sync_server_url = source["sync_server_url"];
+	        this.sync_security_mode = source["sync_security_mode"];
+	        this.sync_fingerprint = source["sync_fingerprint"];
 	    }
 	}
 	export class AttachmentDTO {
@@ -78,11 +86,11 @@ export namespace main {
 	    display_name: string;
 	    media_type: string;
 	    size_bytes: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AttachmentDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.blob_id = source["blob_id"];
@@ -96,11 +104,11 @@ export namespace main {
 	    display_name: string;
 	    media_type: string;
 	    data_base64: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AttachmentPreviewDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.display_name = source["display_name"];
@@ -111,7 +119,7 @@ export namespace main {
 	export class AttachmentSaveResult {
 	    display_name: string;
 	    media_type: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AttachmentSaveResult(source);
 	    }
@@ -210,6 +218,28 @@ export namespace main {
 	        this.update_base64 = source["update_base64"];
 	        this.update_format = source["update_format"];
 	        this.title = source["title"];
+	    }
+	}
+	export class ConnectServerRequest {
+	    url: string;
+	    invite_code: string;
+	    fingerprint: string;
+	    security_mode: string;
+	    qr_code: string;
+	    device_name: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ConnectServerRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.url = source["url"];
+	        this.invite_code = source["invite_code"];
+	        this.fingerprint = source["fingerprint"];
+	        this.security_mode = source["security_mode"];
+	        this.qr_code = source["qr_code"];
+	        this.device_name = source["device_name"];
 	    }
 	}
 	export class CreateAccountRequest {
@@ -600,6 +630,62 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class ServerConnectionInfo {
+	    enabled: boolean;
+	    url: string;
+	    security_mode: string;
+	    fingerprint?: string;
+	    diagnostics: transport.Diagnostics;
+
+	    static createFrom(source: any = {}) {
+	        return new ServerConnectionInfo(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.url = source["url"];
+	        this.security_mode = source["security_mode"];
+	        this.fingerprint = source["fingerprint"];
+	        this.diagnostics = this.convertValues(source["diagnostics"], transport.Diagnostics);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SyncQuarantineDTO {
+	    operation_id: string;
+	    sequence: number;
+	    reason: string;
+	    received_unix_ms: number;
+
+	    static createFrom(source: any = {}) {
+	        return new SyncQuarantineDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.operation_id = source["operation_id"];
+	        this.sequence = source["sequence"];
+	        this.reason = source["reason"];
+	        this.received_unix_ms = source["received_unix_ms"];
+	    }
+	}
 	export class TagDTO {
 	    id: string;
 	    workspace_id: string;
@@ -635,3 +721,69 @@ export namespace main {
 
 }
 
+export namespace transport {
+
+	export class Diagnostics {
+	    reachable: boolean;
+	    tls_1_3: boolean;
+	    authenticated: boolean;
+	    latency_ms: number;
+	    error_class?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Diagnostics(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.reachable = source["reachable"];
+	        this.tls_1_3 = source["tls_1_3"];
+	        this.authenticated = source["authenticated"];
+	        this.latency_ms = source["latency_ms"];
+	        this.error_class = source["error_class"];
+	    }
+	}
+	export class RemoteDevice {
+	    device_id: string;
+	    user_id: string;
+	    display_name: string;
+	    signing_public: number[];
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    revoked_at?: any;
+
+	    static createFrom(source: any = {}) {
+	        return new RemoteDevice(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.device_id = source["device_id"];
+	        this.user_id = source["user_id"];
+	        this.display_name = source["display_name"];
+	        this.signing_public = source["signing_public"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.revoked_at = this.convertValues(source["revoked_at"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}

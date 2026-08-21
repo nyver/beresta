@@ -114,7 +114,7 @@ func (a *Account) ExportNotes(ctx context.Context, workspaceID model.ID, destDir
 		markdownName := uniqueExportName(usedPaths, filepath.Join(notebookPath...), sanitizeExportName(note.Title.Value), ".md")
 		markdownRelPath := filepath.Join(filepath.Join(sanitizedSegments(notebookPath)...), markdownName)
 
-		doc, err := loadNoteDocument(ctx, db, entry, workspaceID, note.ID)
+		doc, err := loadNoteDocument(ctx, db, a, workspaceID, note.ID)
 		if err != nil {
 			return ExportManifest{}, err
 		}

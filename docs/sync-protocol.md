@@ -211,7 +211,7 @@ Paths are rooted at `/v1`. Exact request and response schemas live under `schema
 | `PUT /blobs/{blob_id}/references/{reference_id}` | Idempotently add an opaque live reference |
 | `DELETE /blobs/{blob_id}/references/{reference_id}` | Idempotently remove an opaque live reference |
 | `POST /snapshots` | Publish a signed encrypted workspace snapshot |
-| `GET /snapshots/latest?workspace_id=` | Fetch latest eligible snapshot metadata/ciphertext |
+| `GET /snapshots/latest?workspace_id=` | Fetch the latest snapshot for client verification and acknowledgement |
 | `POST /snapshots/{snapshot_id}/ack` | Record active-device validation acknowledgement |
 
 Every non-public endpoint authenticates the session and authorizes the resource through ownership or current workspace membership. The server does not infer authorization from a caller-supplied user ID.
@@ -307,13 +307,26 @@ An authorized client creates a snapshot after applying a contiguous server curso
 }
 ```
 
-The encrypted snapshot contains full CRDT document states/state vectors, metadata registers, tombstones, and attachment references necessary to reconstruct the workspace at `base_seq`.
+The protocol-v1 encrypted snapshot contains a strict `BSN1` replay archive: a
+bounded count followed by length-delimited canonical operation envelopes for
+every sequence from 1 through `base_seq`. Replaying those authenticated
+operations reconstructs CRDT states, metadata registers, tombstones, and
+attachment references through the ordinary verify/apply path, avoiding a
+second materialized-state decoder. Gaps, non-contiguous sequences, trailing
+bytes, malformed envelopes, and a final sequence unequal to `base_seq` fail
+closed.
 
 ### Validation and acknowledgement
 
 The server verifies visible encoding, creator signature, current membership, key ID, size, and that `base_seq` exists, but cannot validate decrypted semantics. Another active authorized device downloads, decrypts, reconstructs, compares its state at `base_seq`, and signs an acknowledgement of `(snapshot_id, ciphertext_hash, base_seq)`.
 
 The creator also records its acknowledgement. An acknowledgement is invalid after that device's authorization boundary changes unless the compaction decision already committed.
+
+Clients review the latest snapshot after reaching the current operation
+cursor. The creator acknowledges immediately after publication; other active
+devices authenticate, decrypt, and replay-or-compare the archive before
+signing. The latest endpoint therefore includes snapshots still collecting
+acknowledgements; endpoint presence is not compaction eligibility.
 
 ### Compaction
 
@@ -323,7 +336,12 @@ The server marks a snapshot as the compaction base only when every active author
 - every operation with `seq > base_seq`;
 - operations and blobs still protected by tombstone, backup, audit, or incomplete-transition retention.
 
-Sequences are never renumbered. A fresh device fetches the accepted snapshot, validates it locally, restores state at `base_seq`, sets the corresponding cursor, and pulls later operations.
+Sequences are never renumbered. A pull cursor below the compacted boundary
+returns stable `snapshot_required`; the client refreshes authenticated device
+verification keys, fetches the accepted snapshot, verifies its creator
+signature and workspace-key AEAD, replays only operations newer than its local
+cursor in one transactional progression, signs an acknowledgement, sets the
+cursor to `base_seq`, and pulls later operations.
 
 ## WebSocket Cursor Hints
 
@@ -362,19 +380,25 @@ Mobile lazy-download policy affects when chunks are fetched, not note metadata a
 
 ## Folder Segment Format
 
-The folder transport writes paths derived only from encoded workspace and segment IDs:
+The implemented folder transport (`core/transport.Folder`) writes paths derived only from the hex-encoded workspace ID:
 
 ```text
-workspace/<workspace_id>/
-├── manifest.cbor
-├── ops/<segment_id>.cbor
-├── snapshots/<snapshot_id>.cbor
-└── blobs/<aa>/<bb>/<blob_id>/...
+workspaces/<workspace_id_hex>/
+├── manifest.json
+├── manifest.lock                          (transient)
+├── segments/
+│   ├── seg-<epoch>-<start_seq>-<end_seq>-<device_id_hex>.bin
+│   └── .tmp-<random>                      (transient, pre-rename)
+└── blobs/<aa>/<bb>/<blob_id_hex>/
+    ├── manifest.json
+    └── chunks/<index>.bin
 ```
 
-Each operation segment is immutable canonical CBOR containing a protocol version, writer device, segment ID, previous-writer segment reference, operations, and signature. Multiple writers may allocate independent segments concurrently; clients enumerate and apply all unseen `op_id` values. The manifest is an optimization and can be rebuilt from immutable files.
+Unlike the sketch this section originally described, the folder transport approximates the same server-assigned, strictly increasing per-workspace sequence the HTTP transport uses, rather than a pure op_id-merge model: a writer takes the manifest's short-lived lock file, reads `latest_seq`, claims the next contiguous range, and publishes one immutable segment (deterministic CBOR-encoded operations, length-framed, magic-prefixed) naming that exact range, via temp-write/fsync/rename. This keeps the same `coresync.Cursor`/`ApplyPage` machinery every transport shares, rather than requiring a separate order-independent apply path solely for this transport. Readers list finalized segment files (ignoring the `.tmp-` prefix), decode every operation whose sequence exceeds the caller's cursor, and sort by sequence.
 
-The lock file never encloses network-share reads or large blob copies. A stale lock has owner/session metadata and an expiry/recovery rule. Atomic rename support is tested for each documented destination; unsupported filesystems are rejected rather than assumed safe.
+This design trades a small liveness risk for that reuse: two writers whose view of the manifest is stale relative to each other (a filesystem with materially delayed cross-writer visibility, as an eventually-consistent cloud-synced folder might have) could both claim an overlapping range. `Folder.Push` detects that after the fact by rescanning for a colliding segment before trusting its own manifest update and reports `ErrFolderRace`, which the calling `sync.Worker`'s normal retry/backoff resolves on the next attempt; it is validated for directories with immediate, coherent visibility (a local disk or LAN share), which is this transport's documented target (see `core/transport/folder_test.go`'s two-writer convergence test).
+
+A stale lock (its own writer crashed or lost access before releasing it) is recovered by age: a later writer removes and retakes a lock file older than the configured staleness window rather than waiting indefinitely. `Folder.PruneAbandonedTemp` removes orphaned `.tmp-*` publication files - segments and blob chunks alike - past their own staleness window; a finalized file never carries that prefix, so this is safe to run from any device sharing the folder at any time. Blob exchange mirrors the same discipline: each chunk and the blob manifest publish independently via temp-write/fsync/rename, and a chunk already present and hash-verified is not re-uploaded.
 
 ## Protocol Versioning
 

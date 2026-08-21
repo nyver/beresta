@@ -117,11 +117,11 @@ func (a *Account) RestoreRevision(ctx context.Context, workspaceID, noteID, revi
 		return err
 	}
 
-	db, entry, _, _, err := a.workspaceSession(workspaceID)
+	db, _, _, _, err := a.workspaceSession(workspaceID)
 	if err != nil {
 		return err
 	}
-	workingDoc, err := loadNoteDocument(ctx, db, entry, workspaceID, noteID)
+	workingDoc, err := loadNoteDocument(ctx, db, a, workspaceID, noteID)
 	if err != nil {
 		return err
 	}

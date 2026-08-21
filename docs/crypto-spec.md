@@ -326,13 +326,14 @@ Each workspace key record has an opaque random `key_id`, activation HLC, and sta
 
 On member or device revocation:
 
-1. The account authority signs a revocation record with an explicit server enforcement boundary.
+1. The account authority signs a revocation record with an explicit server enforcement boundary and submits the boundary itself through the ordinary REST call that enforces it (`DELETE .../members/{userID}` or `DELETE .../devices/{deviceID}`), which the server applies immediately - not through the operation log.
 2. The client generates a new random Workspace Key and key ID.
-3. It seals the new key to every remaining recipient and signs the envelope set.
-4. It publishes an encrypted key-transition operation.
-5. New content uses the new key immediately; synchronization does not pause for bulk re-encryption.
-6. Authorized clients retain historical keys to read old content.
-7. An optional resumable hardening job re-encrypts live objects and snapshots under the new key and publishes ordinary idempotent operations.
+3. It seals the new key to every remaining active recipient (including itself) and signs the envelope set with a key-transition record.
+4. It publishes the sealed envelopes and the new current key ID directly (`PUT .../workspaces/{id}/key-envelopes`), atomically alongside the server's own check that every currently active member is covered. This is deliberately not an operation-log entry: key material distribution has different consistency and audience requirements than the CRDT operation stream, and the server already independently authorizes and orders it per workspace.
+5. Every authorized device (including the one that rotated) applies the same rotated key locally exactly like a recipient accepting a new share, by fetching its own sealed envelope and verifying the key-transition signature against the rotating account's authority public key.
+6. New content uses the new key immediately; synchronization does not pause for bulk re-encryption.
+7. Authorized clients retain historical keys to read old content already encrypted under a superseded key.
+8. An optional resumable hardening job re-encrypts a device's own locally stored live note snapshots under the new key. It is a purely local housekeeping operation - it does not synchronize, since the document content is unchanged and only its at-rest encryption on that one device narrows.
 
 Rotation cannot erase data or keys already copied by a previously authorized device. Retiring a key only removes it after no retained object, revision, backup policy, or supported device requires it.
 

@@ -49,6 +49,35 @@ func CreateNote(ctx context.Context, exec Executor, workspaceID, notebookID mode
 	return note, nil
 }
 
+// InsertReplicatedNote materializes the first body operation for a note whose
+// UUID was generated on another device. It never invents a replacement ID;
+// later operations therefore address the same object on every replica.
+func InsertReplicatedNote(ctx context.Context, exec Executor, noteID, workspaceID model.ID, title string, clock model.HLC) (model.Note, error) {
+	if err := noteID.Validate(); err != nil || len(title) > model.MaxNoteTitleBytes || clock.IsZero() {
+		return model.Note{}, fmt.Errorf("%w: replicated note", model.ErrInvalidNote)
+	}
+	result, err := exec.ExecContext(ctx,
+		`INSERT INTO notes (id, workspace_id, title, title_physical_ms, title_logical, title_device_id,
+		                     created_physical_ms, created_logical, created_device_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+		noteID.Bytes(), workspaceID.Bytes(), title, clock.PhysicalMS, clock.Logical, clock.DeviceID.Bytes(),
+		clock.PhysicalMS, clock.Logical, clock.DeviceID.Bytes())
+	if err != nil {
+		return model.Note{}, fmt.Errorf("store: insert replicated note: %w", err)
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		note, err := GetNote(ctx, exec, noteID)
+		if err != nil {
+			return model.Note{}, err
+		}
+		if note.WorkspaceID != workspaceID {
+			return model.Note{}, ErrWrongWorkspace
+		}
+		return note, nil
+	}
+	return model.Note{ID: noteID, WorkspaceID: workspaceID, Title: model.LWW[string]{Value: title, Clock: clock}, CreatedAt: clock}, nil
+}
+
 // SetNoteTitle applies an LWW update to a note's title. A stale clock is
 // silently superseded, not an error; only a missing note is.
 func SetNoteTitle(ctx context.Context, exec Executor, noteID model.ID, title string, clock model.HLC) error {

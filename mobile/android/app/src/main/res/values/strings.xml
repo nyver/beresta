@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Beresta</string>
+    <string name="widget_description">Private offline quick-note capture</string>
+    <string name="widget_private_status">Locked content stays hidden</string>
+    <string name="widget_quick_note">Quick note</string>
+    <string name="quick_note_hint">Write a private note</string>
+    <string name="quick_note_save">Save locally</string>
+    <string name="quick_note_saved">Encrypted capture saved</string>
+    <string name="quick_note_error">Could not save the encrypted capture</string>
+    <string name="biometric_unlock_title">Unlock Beresta</string>
+    <string name="biometric_cancel">Cancel</string>
+</resources>

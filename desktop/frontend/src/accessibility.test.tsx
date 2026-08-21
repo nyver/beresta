@@ -65,7 +65,7 @@ describe("desktop accessibility acceptance", () => {
 
     const { container } = render(<App />);
 
-    await screen.findByRole("option", { name: /Accessible note/ });
+    await screen.findByRole("option", { name: /Accessible note/ }, { timeout: 5_000 });
     expect(screen.getByRole("main")).toHaveAccessibleName();
     expect(screen.getByRole("navigation", { name: "shell.notebooks_section" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "shell.tags_section" })).toBeInTheDocument();

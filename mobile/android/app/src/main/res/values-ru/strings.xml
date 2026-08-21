@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Береста</string>
+    <string name="widget_description">Приватная офлайн-запись заметки</string>
+    <string name="widget_private_status">Содержимое скрыто до разблокировки</string>
+    <string name="widget_quick_note">Быстрая заметка</string>
+    <string name="quick_note_hint">Напишите приватную заметку</string>
+    <string name="quick_note_save">Сохранить локально</string>
+    <string name="quick_note_saved">Зашифрованная запись сохранена</string>
+    <string name="quick_note_error">Не удалось сохранить зашифрованную запись</string>
+    <string name="biometric_unlock_title">Разблокировать Бересту</string>
+    <string name="biometric_cancel">Отмена</string>
+</resources>

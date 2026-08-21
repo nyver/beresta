@@ -1,0 +1,850 @@
+package mobileapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/beresta-app/beresta/core/account"
+	"github.com/beresta-app/beresta/core/model"
+	"github.com/beresta-app/beresta/core/store"
+	coresync "github.com/beresta-app/beresta/core/sync"
+	"github.com/beresta-app/beresta/core/sync/yjsadapter"
+	"github.com/beresta-app/beresta/core/transport"
+)
+
+const maxMobileEvents = 128
+
+type mobileEvent struct {
+	Sequence uint64 `json:"sequence"`
+	Type     string `json:"type"`
+	Payload  any    `json:"payload,omitempty"`
+}
+
+// Service is the single value-oriented gomobile boundary. Every exported
+// method accepts and returns strings, byte slices, integers, booleans, or an
+// error. Long operations are canceled by request ID; UI events are polled in
+// bounded batches instead of invoking callbacks on foreign threads.
+type Service struct {
+	mu          sync.Mutex
+	root        context.Context
+	cancelRoot  context.CancelFunc
+	wrapper     *deviceWrapper
+	account     *account.Account
+	workspaceID model.ID
+	requests    map[string]context.CancelFunc
+	events      []mobileEvent
+	nextEvent   uint64
+	coordinator *coresync.Coordinator
+	remote      *transport.HTTP
+	repository  *store.SyncRepository
+}
+
+// NewService consumes deviceSecret. Android must generate it randomly and
+// persist it only as an Android-Keystore-wrapped ciphertext.
+func NewService(deviceSecret []byte) (*Service, error) {
+	wrapper, err := newDeviceWrapper(deviceSecret)
+	if err != nil {
+		return nil, err
+	}
+	root, cancel := context.WithCancel(context.Background())
+	return &Service{root: root, cancelRoot: cancel, wrapper: wrapper, requests: make(map[string]context.CancelFunc)}, nil
+}
+
+func (s *Service) begin(requestID string) (context.Context, func(), error) {
+	if requestID == "" || len(requestID) > 128 {
+		return nil, nil, errors.New("mobileapi: invalid request identifier")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.requests[requestID]; exists {
+		return nil, nil, errors.New("mobileapi: request identifier is already active")
+	}
+	ctx, cancel := context.WithCancel(s.root)
+	s.requests[requestID] = cancel
+	return ctx, func() {
+		cancel()
+		s.mu.Lock()
+		delete(s.requests, requestID)
+		s.mu.Unlock()
+	}, nil
+}
+
+// Cancel requests cooperative cancellation and is idempotent.
+func (s *Service) Cancel(requestID string) {
+	s.mu.Lock()
+	cancel := s.requests[requestID]
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Service) emit(kind string, payload any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextEvent++
+	s.events = append(s.events, mobileEvent{Sequence: s.nextEvent, Type: kind, Payload: payload})
+	if len(s.events) > maxMobileEvents {
+		copy(s.events, s.events[len(s.events)-maxMobileEvents:])
+		s.events = s.events[:maxMobileEvents]
+	}
+}
+
+// PollEvents returns at most limit events newer than afterSequence.
+func (s *Service) PollEvents(afterSequence int64, limit int) (string, error) {
+	if afterSequence < 0 || limit <= 0 || limit > maxMobileEvents {
+		return "", errors.New("mobileapi: invalid event cursor")
+	}
+	s.mu.Lock()
+	result := make([]mobileEvent, 0, limit)
+	for _, event := range s.events {
+		if event.Sequence > uint64(afterSequence) {
+			result = append(result, event)
+			if len(result) == limit {
+				break
+			}
+		}
+	}
+	s.mu.Unlock()
+	return marshal(result)
+}
+
+func (s *Service) CreateAccount(requestID, databasePath, passphrase string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	created, err := account.Create(ctx, account.CreateOptions{DatabasePath: databasePath, Passphrase: []byte(passphrase), Wrapper: s.wrapper})
+	if err != nil {
+		return "", err
+	}
+	return s.activate(created)
+}
+
+func (s *Service) UnlockAccount(requestID, databasePath, passphrase string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	unlocked, err := account.Unlock(ctx, account.UnlockOptions{DatabasePath: databasePath, Passphrase: []byte(passphrase), Wrapper: s.wrapper})
+	if err != nil {
+		return "", err
+	}
+	return s.activate(unlocked)
+}
+
+func (s *Service) activate(value *account.Account) (string, error) {
+	workspaces, err := value.Workspaces()
+	if err != nil || len(workspaces) == 0 {
+		value.Lock()
+		return "", errors.New("mobileapi: account has no workspace")
+	}
+	sort.Slice(workspaces, func(i, j int) bool { return workspaces[i].Compare(workspaces[j]) < 0 })
+	s.mu.Lock()
+	previous, coordinator := s.account, s.coordinator
+	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = value, workspaces[0], nil, nil, nil
+	s.mu.Unlock()
+	if coordinator != nil {
+		coordinator.Detach()
+	}
+	if previous != nil {
+		_ = previous.Lock()
+	}
+	result := map[string]any{"account_id": value.ID.String(), "device_id": value.DeviceID.String(), "workspace_id": workspaces[0].String()}
+	s.emit("account_unlocked", result)
+	return marshal(result)
+}
+
+func (s *Service) Lock() error {
+	s.mu.Lock()
+	value, coordinator := s.account, s.coordinator
+	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = nil, model.Nil, nil, nil, nil
+	s.mu.Unlock()
+	if coordinator != nil {
+		coordinator.Detach()
+	}
+	if value != nil {
+		if err := value.Lock(); err != nil {
+			return err
+		}
+	}
+	s.emit("account_locked", nil)
+	return nil
+}
+
+func (s *Service) accountState() (*account.Account, model.ID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.account == nil {
+		return nil, model.Nil, account.ErrAccountLocked
+	}
+	return s.account, s.workspaceID, nil
+}
+
+func (s *Service) Status() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.account == nil {
+		return `{"unlocked":false}`, nil
+	}
+	return marshal(map[string]any{"unlocked": true, "account_id": s.account.ID.String(), "device_id": s.account.DeviceID.String(), "workspace_id": s.workspaceID.String()})
+}
+
+type noteDTO struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	NotebookID  string `json:"notebook_id,omitempty"`
+	Title       string `json:"title"`
+	Pinned      bool   `json:"pinned"`
+	Archived    bool   `json:"archived"`
+	Deleted     bool   `json:"deleted"`
+	CreatedMS   uint64 `json:"created_unix_ms"`
+}
+
+func mobileNote(note model.Note) noteDTO {
+	return noteDTO{ID: note.ID.String(), WorkspaceID: note.WorkspaceID.String(), NotebookID: idString(note.NotebookID.Value), Title: note.Title.Value,
+		Pinned: note.Flags.Value&model.NoteFlagPinned != 0, Archived: note.Flags.Value&model.NoteFlagArchived != 0,
+		Deleted: note.Deleted.Value, CreatedMS: note.CreatedAt.PhysicalMS}
+}
+
+func (s *Service) ListNotes(requestID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	notes, err := value.ListNotes(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	result := make([]noteDTO, len(notes))
+	for i, note := range notes {
+		result[i] = mobileNote(note)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedMS > result[j].CreatedMS })
+	return marshal(result)
+}
+
+func (s *Service) CreateNote(requestID, notebookID, title string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	notebook, err := optionalID(notebookID)
+	if err != nil {
+		return "", err
+	}
+	note, err := value.CreateNote(ctx, workspaceID, notebook, title)
+	if err != nil {
+		return "", err
+	}
+	s.emit("notes_changed", map[string]string{"note_id": note.ID.String()})
+	return marshal(mobileNote(note))
+}
+
+func (s *Service) GetNote(requestID, noteID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return "", err
+	}
+	note, err := value.GetNote(ctx, id)
+	if err != nil || note.WorkspaceID != workspaceID {
+		return "", coalesce(err, store.ErrWrongWorkspace)
+	}
+	body, err := noteText(ctx, value, workspaceID, id)
+	if err != nil {
+		return "", err
+	}
+	return marshal(map[string]any{"note": mobileNote(note), "body": body})
+}
+
+func (s *Service) SaveNote(requestID, noteID, title, body string) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return err
+	}
+	state, format, err := value.NoteDocumentState(ctx, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	doc, err := yjsadapter.Restore(format, state)
+	if err != nil {
+		return err
+	}
+	defer doc.Close()
+	current, err := doc.Text("body")
+	if err != nil {
+		return err
+	}
+	if current != "" {
+		if err := doc.Delete("body", 0, len([]rune(current))); err != nil {
+			return err
+		}
+	}
+	if body != "" {
+		if err := doc.Insert("body", 0, body, nil); err != nil {
+			return err
+		}
+	}
+	update, err := doc.EncodeStateAsUpdate(yjsadapter.FormatV2)
+	if err != nil {
+		return err
+	}
+	if err := value.CommitNoteBody(ctx, account.NoteBodyCommand{WorkspaceID: workspaceID, NoteID: id, Update: update, UpdateFormat: yjsadapter.FormatV2, Title: &title}); err != nil {
+		return err
+	}
+	s.emit("notes_changed", map[string]string{"note_id": id.String()})
+	return nil
+}
+
+func (s *Service) DeleteNote(requestID, noteID string, deleted bool) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return err
+	}
+	if deleted {
+		err = value.DeleteNote(ctx, workspaceID, id)
+	} else {
+		err = value.RestoreNote(ctx, workspaceID, id)
+	}
+	if err == nil {
+		s.emit("notes_changed", map[string]string{"note_id": id.String()})
+	}
+	return err
+}
+
+// AddAttachmentData imports one bounded camera/document-provider result. The
+// Android host passes bytes directly from a content URI; no plaintext path or
+// shared-media cache is created.
+func (s *Service) AddAttachmentData(requestID, noteID, displayName, mediaType string, contents []byte) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		clear(contents)
+		return err
+	}
+	defer done()
+	defer clear(contents)
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return err
+	}
+	attachment, err := value.AddAttachment(ctx, workspaceID, id, displayName, mediaType, bytes.NewReader(contents))
+	if err != nil {
+		return err
+	}
+	s.emit("attachments_changed", map[string]any{"note_id": id.String(), "blob_id": hex.EncodeToString(attachment.BlobID[:])})
+	return nil
+}
+
+func (s *Service) Search(requestID, query string, limit int) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	parsed, err := value.ParseSearchQuery(ctx, workspaceID, query)
+	if err != nil {
+		return "", err
+	}
+	parsed.Limit = limit
+	rows, err := value.Search(ctx, workspaceID, parsed)
+	if err != nil {
+		return "", err
+	}
+	result := make([]noteDTO, len(rows))
+	for i, row := range rows {
+		result[i] = mobileNote(row.Note)
+	}
+	return marshal(result)
+}
+
+func (s *Service) ListNotebooks(requestID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	rows, err := value.ListNotebooks(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	result := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		result[i] = map[string]any{"id": row.ID.String(), "parent_id": idString(row.ParentID), "name": row.Name, "deleted": row.Deleted}
+	}
+	return marshal(result)
+}
+
+func (s *Service) ListTags(requestID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	rows, err := value.ListTags(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	result := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		result[i] = map[string]any{"id": row.ID.String(), "name": row.Name, "deleted": row.Deleted}
+	}
+	return marshal(result)
+}
+
+func (s *Service) ListRevisions(requestID, noteID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return "", err
+	}
+	rows, err := value.ListRevisions(ctx, workspaceID, id)
+	if err != nil {
+		return "", err
+	}
+	result := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		result[i] = map[string]any{"id": row.ID.String(), "kind": row.Kind, "created_unix_ms": row.CreatedUnixMS}
+	}
+	return marshal(result)
+}
+
+func (s *Service) RestoreRevision(requestID, noteID, revisionID string) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return err
+	}
+	revision, err := parseID(revisionID)
+	if err != nil {
+		return err
+	}
+	if err := value.RestoreRevision(ctx, workspaceID, id, revision); err != nil {
+		return err
+	}
+	s.emit("notes_changed", map[string]string{"note_id": id.String()})
+	return nil
+}
+
+func (s *Service) CreateBackup(requestID, destination string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, _, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	backup, err := value.CreateBackup(ctx, destination, store.BackupKindManual, time.Now())
+	if err != nil {
+		return "", err
+	}
+	s.emit("backup_completed", map[string]string{"backup_id": backup.ID.String()})
+	return marshal(map[string]any{"id": backup.ID.String(), "location": backup.Location, "created_unix_ms": backup.CreatedUnixMS})
+}
+
+func (s *Service) ListBackups(requestID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, _, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	var rows []store.Backup
+	for kind := store.BackupKindDaily; kind <= store.BackupKindManual; kind++ {
+		kindRows, err := value.ListBackups(ctx, kind)
+		if err != nil {
+			return "", err
+		}
+		rows = append(rows, kindRows...)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].CreatedUnixMS > rows[j].CreatedUnixMS })
+	result := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		result[i] = map[string]any{"id": row.ID.String(), "kind": row.Kind, "location": row.Location, "created_unix_ms": row.CreatedUnixMS, "corrupt": row.Corrupt}
+	}
+	return marshal(result)
+}
+
+func (s *Service) EnsureDailyBackup(requestID, destination string) (bool, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return false, err
+	}
+	defer done()
+	value, _, err := s.accountState()
+	if err != nil {
+		return false, err
+	}
+	created, err := value.EnsureDailyBackup(ctx, destination, time.Now())
+	if err == nil && created {
+		s.emit("backup_completed", map[string]string{"kind": "daily"})
+	}
+	return created, err
+}
+
+func (s *Service) PreviewBackup(requestID, backupID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	id, err := parseID(backupID)
+	if err != nil {
+		return "", err
+	}
+	value, _, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	preview, err := value.PreviewBackup(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return marshal(preview)
+}
+
+func (s *Service) RestoreWholeBackup(requestID, backupID, destination string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	id, err := parseID(backupID)
+	if err != nil {
+		return "", err
+	}
+	value, _, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	result, err := value.RestoreWhole(ctx, id, destination, time.Now())
+	if err != nil {
+		return "", err
+	}
+	s.emit("collection_restored", map[string]string{"backup_id": backupID})
+	return marshal(result)
+}
+
+func (s *Service) ImportBackupSet(requestID, location string, kind int) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, _, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	record, err := value.ImportBackupSet(ctx, location, kind, time.Now())
+	if err != nil {
+		return "", err
+	}
+	s.emit("backup_imported", map[string]string{"backup_id": record.ID.String()})
+	return marshal(map[string]any{"id": record.ID.String(), "created_unix_ms": record.CreatedUnixMS})
+}
+
+type connectConfig struct {
+	URL          string `json:"url"`
+	InviteCode   string `json:"invite_code"`
+	Fingerprint  string `json:"fingerprint"`
+	SecurityMode string `json:"security_mode"`
+	DeviceName   string `json:"device_name"`
+}
+
+func (s *Service) ConnectServer(requestID, encoded string) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	var config connectConfig
+	if err := strictJSON(encoded, &config); err != nil {
+		return err
+	}
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return err
+	}
+	remote, err := transport.NewHTTP(transport.HTTPConfig{BaseURL: config.URL, SecurityMode: transport.HTTPSecurityMode(config.SecurityMode), PinnedFingerprint: config.Fingerprint, DeviceID: value.DeviceID, SignChallenge: value.SignDeviceChallenge})
+	if err != nil {
+		return err
+	}
+	if config.InviteCode != "" {
+		registration, err := value.ServerRegistrationData(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		if err := remote.Register(ctx, transport.RegistrationRequest{InviteCode: config.InviteCode, DeviceName: config.DeviceName, Data: registration}); err != nil {
+			return err
+		}
+	}
+	if err := refreshMobileDevices(ctx, value, remote); err != nil {
+		return err
+	}
+	repository, err := store.NewSyncRepository(value.DB(), "http")
+	if err != nil {
+		return err
+	}
+	processor, err := account.NewSyncProcessor(value, account.SyncProcessorOptions{})
+	if err != nil {
+		return err
+	}
+	var lastSnapshot uint64
+	var lastReviewed model.ID
+	worker, err := coresync.NewWorker(workspaceID, repository, remote, processor, coresync.WorkerOptions{
+		Prepare: func(ctx context.Context) error { return refreshMobileDevices(ctx, value, remote) },
+		Bootstrap: func(ctx context.Context) error {
+			if err := refreshMobileDevices(ctx, value, remote); err != nil {
+				return err
+			}
+			snapshot, err := remote.LatestSnapshot(ctx, workspaceID)
+			if err != nil {
+				return err
+			}
+			ack, err := value.ApplyWorkspaceSnapshot(ctx, snapshot, repository, processor)
+			if err != nil {
+				return err
+			}
+			_, err = remote.AcknowledgeSnapshot(ctx, ack)
+			return err
+		},
+		ReviewSnapshot: func(ctx context.Context, cursor coresync.Cursor) error {
+			snapshot, err := remote.LatestSnapshot(ctx, workspaceID)
+			if errors.Is(err, transport.ErrNotFound) {
+				return nil
+			}
+			if err != nil || snapshot.ID == lastReviewed || snapshot.BaseSequence > cursor.LastSequence {
+				return err
+			}
+			ack, err := value.ApplyWorkspaceSnapshot(ctx, snapshot, repository, processor)
+			if err != nil {
+				return err
+			}
+			if _, err := remote.AcknowledgeSnapshot(ctx, ack); err != nil {
+				return err
+			}
+			lastReviewed = snapshot.ID
+			return nil
+		},
+		PublishSnapshot: func(ctx context.Context, cursor coresync.Cursor) error {
+			if cursor.LastSequence <= lastSnapshot || (lastSnapshot != 0 && cursor.LastSequence-lastSnapshot < 1000) {
+				return nil
+			}
+			snapshot, err := value.CreateWorkspaceSnapshot(ctx, workspaceID, repository)
+			if err != nil {
+				return err
+			}
+			if err := remote.PutSnapshot(ctx, snapshot); err != nil {
+				return err
+			}
+			ack, err := value.ApplyWorkspaceSnapshot(ctx, snapshot, repository, processor)
+			if err != nil {
+				return err
+			}
+			if _, err := remote.AcknowledgeSnapshot(ctx, ack); err != nil {
+				return err
+			}
+			lastSnapshot = cursor.LastSequence
+			lastReviewed = snapshot.ID
+			return nil
+		},
+		Progress: func(progress coresync.Progress) {
+			s.emit("sync_progress", map[string]any{"workspace_id": progress.WorkspaceID.String(), "phase": progress.Phase, "pulled": progress.Pulled, "pushed": progress.Pushed, "cursor": progress.Cursor, "retry_ms": progress.RetryIn.Milliseconds(), "error_class": progress.ErrorClass})
+		},
+	})
+	if err != nil {
+		return err
+	}
+	coordinator := coresync.NewCoordinator(s.root)
+	if err := coordinator.Attach(worker); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	previous := s.coordinator
+	s.coordinator, s.remote, s.repository = coordinator, remote, repository
+	s.mu.Unlock()
+	if previous != nil {
+		previous.Detach()
+	}
+	s.emit("sync_status", map[string]string{"status": "active"})
+	return nil
+}
+
+func (s *Service) SyncNow() error {
+	s.mu.Lock()
+	coordinator := s.coordinator
+	s.mu.Unlock()
+	if coordinator == nil {
+		return errors.New("mobileapi: server synchronization is disabled")
+	}
+	coordinator.Trigger()
+	return nil
+}
+
+func (s *Service) DisconnectServer() {
+	s.mu.Lock()
+	coordinator := s.coordinator
+	s.coordinator, s.remote, s.repository = nil, nil, nil
+	s.mu.Unlock()
+	if coordinator != nil {
+		coordinator.Detach()
+	}
+	s.emit("sync_status", map[string]string{"status": "disabled"})
+}
+
+func (s *Service) Close() {
+	s.cancelRoot()
+	_ = s.Lock()
+	s.wrapper.close()
+}
+
+func (s *Service) noteContext(raw string) (*account.Account, model.ID, model.ID, error) {
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return nil, model.Nil, model.Nil, err
+	}
+	id, err := parseID(raw)
+	return value, workspaceID, id, err
+}
+
+func noteText(ctx context.Context, value *account.Account, workspaceID, noteID model.ID) (string, error) {
+	state, format, err := value.NoteDocumentState(ctx, workspaceID, noteID)
+	if err != nil {
+		return "", err
+	}
+	doc, err := yjsadapter.Restore(format, state)
+	if err != nil {
+		return "", err
+	}
+	defer doc.Close()
+	return doc.Markdown("body")
+}
+
+func optionalID(raw string) (model.ID, error) {
+	if raw == "" {
+		return model.Nil, nil
+	}
+	return parseID(raw)
+}
+
+func parseID(raw string) (model.ID, error) {
+	if len(raw) != 36 || strings.ToLower(raw) != raw {
+		return model.Nil, errors.New("mobileapi: invalid identifier")
+	}
+	decoded, err := hex.DecodeString(strings.ReplaceAll(raw, "-", ""))
+	if err != nil {
+		return model.Nil, errors.New("mobileapi: invalid identifier")
+	}
+	id, err := model.ParseID(decoded)
+	if err != nil || id.String() != raw {
+		return model.Nil, errors.New("mobileapi: invalid identifier")
+	}
+	return id, nil
+}
+
+func idString(id model.ID) string {
+	if id.IsZero() {
+		return ""
+	}
+	return id.String()
+}
+
+func strictJSON(encoded string, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("mobileapi: invalid JSON request: %w", err)
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return errors.New("mobileapi: JSON request has trailing data")
+	}
+	return nil
+}
+
+func marshal(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	return string(encoded), err
+}
+
+func coalesce(actual, fallback error) error {
+	if actual != nil {
+		return actual
+	}
+	return fallback
+}
+
+func refreshMobileDevices(ctx context.Context, value *account.Account, remote *transport.HTTP) error {
+	rows, err := remote.ListDevices(ctx)
+	if err != nil {
+		return err
+	}
+	records := make([]account.RemoteDeviceRecord, 0, len(rows))
+	for _, row := range rows {
+		id, err := parseID(row.ID)
+		if err != nil {
+			return err
+		}
+		records = append(records, account.RemoteDeviceRecord{ID: id, PublicKey: row.SigningPublic, Active: row.RevokedAt == nil})
+	}
+	return value.UpsertRemoteDevices(ctx, records)
+}

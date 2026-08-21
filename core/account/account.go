@@ -76,7 +76,15 @@ type Account struct {
 	// fresh per-backup key from it on demand; see core/account/backup.go.
 	rootKey       *corecrypto.Secret
 	workspaceKeys map[model.ID]workspaceKeyEntry
-	clock         *model.Clock
+	// historicalWorkspaceKeys holds every non-current key this account
+	// retains for a workspace (state historical or retired), so content
+	// encrypted before a key rotation stays decryptable ("historical-key
+	// reads", see docs/crypto-spec.md key rotation). workspaceKeys above
+	// tracks only the single current key per workspace and is unaffected;
+	// this map is purely additive lookup support for
+	// (*Account).workspaceKeyByID.
+	historicalWorkspaceKeys map[model.ID][]workspaceKeyEntry
+	clock                   *model.Clock
 	blobs         *store.BlobStore
 	// databasePath and wrapper are retained (neither is secret material)
 	// because whole-database restore (see core/account/restore.go) must
@@ -150,6 +158,48 @@ func (a *Account) WorkspaceKey(workspaceID model.ID) (key *corecrypto.Secret, ke
 	return entry.Key, entry.KeyID, nil
 }
 
+// workspaceKeyByID looks up the key entry for workspaceID whose KeyID
+// matches candidate, checking the current key first and then every
+// retained historical/retired key. It supports decrypting content written
+// before a key rotation ("historical-key reads"); the returned entry must
+// not outlive the account's unlocked lifetime.
+func (a *Account) workspaceKeyByID(workspaceID model.ID, candidate []byte) (workspaceKeyEntry, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.locked {
+		return workspaceKeyEntry{}, false
+	}
+	if entry, ok := a.workspaceKeys[workspaceID]; ok && equalKeyID(entry, candidate) {
+		return entry, true
+	}
+	for _, entry := range a.historicalWorkspaceKeys[workspaceID] {
+		if equalKeyID(entry, candidate) {
+			return entry, true
+		}
+	}
+	return workspaceKeyEntry{}, false
+}
+
+// snapshotKeybagWorkspaceKeys returns every workspace key entry this
+// account currently holds - current and historical/retired alike - in the
+// keybag's on-disk record shape. Callers re-encrypting the keybag after
+// adding or rotating a key must start from this full snapshot rather than
+// just a.workspaceKeys, or a previously retained historical key for any
+// workspace would silently drop out of the keybag. The caller must hold
+// a.mu.
+func (a *Account) snapshotKeybagWorkspaceKeys() []keybagWorkspaceKey {
+	result := make([]keybagWorkspaceKey, 0, len(a.workspaceKeys))
+	for workspaceID, entry := range a.workspaceKeys {
+		result = append(result, keybagWorkspaceKey{WorkspaceID: workspaceID, KeyID: entry.KeyID, Key: entry.Key, State: entry.State})
+	}
+	for workspaceID, entries := range a.historicalWorkspaceKeys {
+		for _, entry := range entries {
+			result = append(result, keybagWorkspaceKey{WorkspaceID: workspaceID, KeyID: entry.KeyID, Key: entry.Key, State: entry.State})
+		}
+	}
+	return result
+}
+
 // Workspaces returns the IDs of every workspace this account currently
 // holds a key for, in no particular order. It performs no I/O and exposes
 // no key material.
@@ -182,6 +232,12 @@ func (a *Account) Lock() error {
 		entry.Key.Close()
 	}
 	a.workspaceKeys = nil
+	for _, entries := range a.historicalWorkspaceKeys {
+		for _, entry := range entries {
+			entry.Key.Close()
+		}
+	}
+	a.historicalWorkspaceKeys = nil
 
 	var closeErr error
 	if a.db != nil {
@@ -439,10 +495,11 @@ func createAccountContent(
 		workspaceKeys: map[model.ID]workspaceKeyEntry{
 			workspaceID: {KeyID: workspaceKeyID, Key: workspaceKey, State: workspaceKeyStateCurrent},
 		},
-		clock:        clock,
-		blobs:        newBlobStore(opts.DatabasePath),
-		databasePath: opts.DatabasePath,
-		wrapper:      opts.Wrapper,
+		historicalWorkspaceKeys: map[model.ID][]workspaceKeyEntry{},
+		clock:                   clock,
+		blobs:                   newBlobStore(opts.DatabasePath),
+		databasePath:            opts.DatabasePath,
+		wrapper:                 opts.Wrapper,
 	}, nil
 }
 
@@ -628,22 +685,28 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 	}
 
 	workspaceKeys := make(map[model.ID]workspaceKeyEntry, len(payload.WorkspaceKeys))
+	historicalWorkspaceKeys := make(map[model.ID][]workspaceKeyEntry)
 	for _, wk := range payload.WorkspaceKeys {
-		workspaceKeys[wk.WorkspaceID] = workspaceKeyEntry{KeyID: wk.KeyID, Key: wk.Key, State: wk.State}
+		entry := workspaceKeyEntry{KeyID: wk.KeyID, Key: wk.Key, State: wk.State}
+		if wk.State == workspaceKeyStateCurrent {
+			workspaceKeys[wk.WorkspaceID] = entry
+		} else {
+			historicalWorkspaceKeys[wk.WorkspaceID] = append(historicalWorkspaceKeys[wk.WorkspaceID], entry)
+		}
 	}
 
 	persistedClock, err := store.LoadDeviceClock(ctx, db, deviceRow.id)
 	if err != nil {
 		rootKey.Close()
 		devicePrivate.Close()
-		closeUnlockedSecrets(payload, workspaceKeys)
+		payload.close()
 		return nil, err
 	}
 	clock, err := model.NewClock(deviceRow.id, persistedClock, 0)
 	if err != nil {
 		rootKey.Close()
 		devicePrivate.Close()
-		closeUnlockedSecrets(payload, workspaceKeys)
+		payload.close()
 		return nil, err
 	}
 
@@ -658,24 +721,13 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 		authorityPrivate:   payload.AuthorityPrivateKey,
 		devicePrivate:      devicePrivate,
 		rootKey:            rootKey,
-		workspaceKeys:      workspaceKeys,
-		clock:              clock,
-		blobs:              newBlobStore(opts.DatabasePath),
-		databasePath:       opts.DatabasePath,
-		wrapper:            opts.Wrapper,
+		workspaceKeys:           workspaceKeys,
+		historicalWorkspaceKeys: historicalWorkspaceKeys,
+		clock:                   clock,
+		blobs:                   newBlobStore(opts.DatabasePath),
+		databasePath:            opts.DatabasePath,
+		wrapper:                 opts.Wrapper,
 	}, nil
-}
-
-// closeUnlockedSecrets wipes every secret decoded from the keybag. It is
-// used only on an unlockAccountContent failure path after the keybag has
-// already been opened, since Account.Lock is not reachable until a value is
-// returned.
-func closeUnlockedSecrets(payload keybagPlaintext, workspaceKeys map[model.ID]workspaceKeyEntry) {
-	payload.IdentityPrivateKey.Close()
-	payload.AuthorityPrivateKey.Close()
-	for _, entry := range workspaceKeys {
-		entry.Key.Close()
-	}
 }
 
 type accountRow struct {

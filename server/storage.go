@@ -20,13 +20,14 @@ import (
 var canonicalIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 var (
-	ErrNotFound     = errors.New("not found")
-	ErrForbidden    = errors.New("forbidden")
-	ErrConflict     = errors.New("conflict")
-	ErrInvalid      = errors.New("invalid input")
-	ErrUnauthorized = errors.New("unauthorized")
-	ErrQuota        = errors.New("quota exceeded")
-	ErrRateLimited  = errors.New("rate limited")
+	ErrNotFound         = errors.New("not found")
+	ErrForbidden        = errors.New("forbidden")
+	ErrConflict         = errors.New("conflict")
+	ErrInvalid          = errors.New("invalid input")
+	ErrUnauthorized     = errors.New("unauthorized")
+	ErrQuota            = errors.New("quota exceeded")
+	ErrRateLimited      = errors.New("rate limited")
+	ErrSnapshotRequired = errors.New("snapshot required")
 )
 
 // Storage owns all server-side opaque persistence. The single database

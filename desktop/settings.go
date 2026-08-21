@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +49,12 @@ type AppSettings struct {
 	// tray, at Windows sign-in (task 5.9). It is off by default: launch
 	// at sign-in is a deliberate per-install choice, never assumed.
 	AutostartEnabled bool `json:"autostart_enabled"`
+	// SyncEnabled attaches the optional HTTP transport. Disabling it never
+	// removes local notes, cursors, or queued operations.
+	SyncEnabled      bool   `json:"sync_enabled"`
+	SyncServerURL    string `json:"sync_server_url"`
+	SyncSecurityMode string `json:"sync_security_mode"`
+	SyncFingerprint  string `json:"sync_fingerprint"`
 }
 
 func defaultSettings() AppSettings {
@@ -102,6 +110,22 @@ func (s AppSettings) validate() error {
 	}
 	if _, _, err := parseHotkey(s.QuickNoteHotkey); err != nil {
 		return &AppError{Code: ErrCodeInvalidInput, Message: err.Error()}
+	}
+	if s.SyncEnabled {
+		parsed, err := url.Parse(s.SyncServerURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+			return &AppError{Code: ErrCodeInvalidInput, Message: "sync server must be an absolute HTTPS URL"}
+		}
+		if s.SyncSecurityMode != "pinned" && s.SyncSecurityMode != "trusted" {
+			return &AppError{Code: ErrCodeInvalidInput, Message: "sync security mode must be pinned or trusted"}
+		}
+		if s.SyncSecurityMode == "pinned" {
+			fingerprint := strings.ReplaceAll(strings.TrimSpace(s.SyncFingerprint), ":", "")
+			decoded, err := hex.DecodeString(fingerprint)
+			if err != nil || len(decoded) != 32 {
+				return &AppError{Code: ErrCodeInvalidInput, Message: "sync fingerprint must be a SHA-256 digest"}
+			}
+		}
 	}
 	return nil
 }

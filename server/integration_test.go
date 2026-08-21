@@ -323,6 +323,13 @@ func TestOperationValidationAndSnapshotCompactionBoundaries(t *testing.T) {
 	if err != nil || !eligible {
 		t.Fatalf("snapshot after revocation retention eligible=%v error=%v", eligible, err)
 	}
+	compacted, err := runtime.Storage.CompactWorkspace(context.Background(), actor.WorkspaceID, afterRetention, false)
+	if err != nil || compacted.RemovedOperations != 1 {
+		t.Fatalf("CompactWorkspace = %+v, %v", compacted, err)
+	}
+	if _, err := runtime.Storage.PullChanges(context.Background(), actor.Principal, actor.WorkspaceID, 0, 100); !errors.Is(err, ErrSnapshotRequired) {
+		t.Fatalf("pull before compacted boundary error = %v", err)
+	}
 }
 
 func TestMembershipKeyRotationAndRevocationBoundary(t *testing.T) {

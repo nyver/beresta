@@ -4,16 +4,16 @@ Beresta is an offline-first encrypted notes application for Windows and Android 
 
 ## Project Status
 
-Beresta has completed phase 4 (Windows desktop local-only application) and has
-completed the phase-5 home synchronization server. Phases
+Beresta has completed the Windows desktop, home-server, HTTP synchronization,
+and Android application phases. Phases
 1 and 2A delivered the architecture baseline and cryptographic core; phase 2B
 added the encrypted client store; phase 3 added the complete offline note
 application surface through `core/account`; phase 4 wires that surface into a
-packaged, tested Windows application while remote synchronization remains a
-later phase:
+packaged Windows application; the following phases added the optional opaque
+home server, convergent client synchronization, and the Android application:
 
 - a buildable Wails v2 Windows host with a React/TypeScript frontend;
-- a generated Flutter Android wrapper project with an analyzed and tested mobile shell;
+- a Flutter Android application with local onboarding/unlock, notebook/tag navigation, virtualized notes, Markdown editing, attachments, search, revisions, secure lifecycle handling, background synchronization, encrypted SAF backups, share capture, and a private quick-note widget;
 - a Yjs V1/V2 adapter plus a SQLCipher 4.14 encrypted-database probe whose Android AAR is produced by `gomobile bind`;
 - owned mutable secret buffers, device-bounded Argon2id, domain-separated HKDF, X25519/Ed25519 identities, XChaCha20-Poly1305 keybag/object/attachment/backup encryption, and the shared Windows DPAPI/Hello and Android Keystore/biometric key-wrapping contract (phase 2A);
 - validated UUIDv7 identifiers, Hybrid Logical Clock persistence, and deterministic last-writer-wins registers with device-ID and logical-counter tie breaks;
@@ -38,6 +38,10 @@ later phase:
   sessions, resource-scoped `/v1` APIs, opaque operation/blob/snapshot storage,
   bounded WebSocket hints, verified seven-day backups, and the administration
   CLI are implemented without an external service or cgo dependency.
+- deterministic-CBOR operation envelopes, durable pull-verify-apply-then-push workers, exactly-once application/quarantine recovery, TLS 1.3 pinning, resumable encrypted blobs, encrypted operation-replay snapshots, compaction bootstrap, and functional Windows server/device diagnostics;
+- a gomobile-safe value API with bounded event polling and cancellation, reproducibly normalized/checksummed Android AARs, Android Keystore and strong biometric unlock, constrained WorkManager jobs, SPAKE2-confirmed LAN frames, encrypted share/widget handoff, and attachment-cache retention controls;
+- workspace sharing (per-recipient sealed X25519 key envelopes with client-side membership signature verification), signed member/device revocation, no-downtime workspace-key rotation with historical-key reads and resumable local re-encryption hardening, and an optional shared-folder transport (immutable operation segments, a short-locked manifest, and content-addressed blob exchange) as an HTTP alternative;
+- local operation-log and snapshot garbage collection alongside the existing tombstone/blob collector; systemd, Windows batch/Task Scheduler, and optional Docker deployment assets; and a release pipeline covering signed update-manifest publication, Android release signing, server checksums/SBOM/provenance, a core coverage gate, and `govulncheck`/OSV dependency scanning.
 
 The completed Phase 4 Windows desktop application uses a coarse Wails
 application service layer is implemented (`desktop/app.go` and its sibling
@@ -55,8 +59,8 @@ matching English backend text.
 
 The first screens built on top of that layer are now in place: English/Russian
 onboarding with "Only on this computer" selected by default and a "Connect
-to server" card that explains it is not available yet without blocking local
-account creation, a returning-user unlock screen (chosen automatically when
+to server" path accepting an invite or trusted connection QR without blocking
+local account creation, a returning-user unlock screen (chosen automatically when
 a previous local account is on record), and a main shell with a keyboard-
 accessible notebook tree, tag navigation (via a dedicated `SearchByTag`
 binding that reuses the same search index as the search box, without its
@@ -157,8 +161,13 @@ local-only product core is recorded in
 [the phase-3 delivery report](docs/phase-3-report.md), and the packaged Windows
 application is recorded in
 [the phase-4 delivery report](docs/phase-4-report.md).
+HTTP synchronization is recorded in
+[the phase-6 delivery report](docs/phase-6-report.md), and Android delivery is
+recorded in [the phase-7 delivery report](docs/phase-7-report.md).
 
-The desktop UI stores real local notes but does not yet provide remote synchronization. Remote capabilities are implemented and accepted in the ordered OpenSpec phases; do not use this revision for multi-device workflows.
+The desktop and Android clients store complete local collections and can attach
+to the optional server without migrating data. Network failure changes only the
+visible synchronization state; local editing and queued operations remain available.
 
 ## Security Model
 
@@ -246,6 +255,8 @@ build.cmd format-check
 build.cmd locale-check
 build.cmd lint
 build.cmd test
+build.cmd coverage-gate
+build.cmd security-scan
 build.cmd build
 build.cmd server-build
 build.cmd server-cross-build
@@ -256,6 +267,7 @@ build.cmd installer-smoke
 build.cmd mobile-check
 build.cmd mobile-bind-android
 build.cmd mobile-build-android
+build.cmd mobile-package-android
 build.cmd mobile-test-android
 build.cmd verify
 ```
@@ -270,9 +282,11 @@ The commands mean:
 | `locale-check` | Reject missing, duplicate, empty, or untranslated English/Russian catalog entries |
 | `lint` | Validate localization catalogs, run `go vet`, TypeScript type checking, and Flutter analysis |
 | `test` | Run Go, Vitest, and Flutter tests |
+| `coverage-gate` | Run `core/...` tests with coverage and fail below the release-quality spec's 80% floor |
+| `security-scan` | Run `govulncheck` and an OSV dependency scan against `go.mod` |
 | `build` | Build the server, React bundle, and Windows Wails executable |
 | `server-build` | Build `build/output/beresta-server.exe` for the current host |
-| `server-cross-build` | Build static Windows amd64, Linux amd64, and Linux arm64 server binaries under `build/output/server/` |
+| `server-cross-build` | Build static Windows amd64, Linux amd64, and Linux arm64 server binaries under `build/output/server/`, plus `SHA256SUMS`, a per-binary module manifest, and `provenance.json` |
 | `server-smoke` | Cross-build all server targets and smoke-test Windows first start plus live-state verification |
 | `package` | Build the app, fail-closed updater, and per-user NSIS installer under ignored `build/output/` |
 | `cold-start` | Measure ten fresh-profile launches to the first responsive Windows main window and enforce a five-second nearest-rank p95 budget |
@@ -280,6 +294,7 @@ The commands mean:
 | `mobile-check` | Generate and validate the gomobile Java binding surface |
 | `mobile-bind-android` | Produce `build/output/beresta-core.aar`; requires Android SDK/NDK |
 | `mobile-build-android` | Produce the Android AAR and a Flutter debug APK with native SQLCipher linkage |
+| `mobile-package-android` | Produce a signed release APK and AAB (requires `BERESTA_ANDROID_KEYSTORE_*`; see [docs/android-build.md](docs/android-build.md)) |
 | `mobile-test-android` | Run the SQLCipher instrumentation round trip on a connected `arm64-v8a` Android device |
 | `verify` | Run format checks, lint, tests, and package the phase-available artifacts |
 
@@ -310,6 +325,15 @@ Remove `--init-only` to listen on the configured HTTPS address. See the
 for enrollment, administration, backup/restore, service, container, and
 Raspberry Pi commands.
 
+Publish a signed desktop update manifest, or a detached signature over any
+other release file (see [desktop update operations](docs/desktop-updates.md)):
+
+```powershell
+$env:BERESTA_RELEASE_PRIVATE_KEY_BASE64 = "<base64 64-byte Ed25519 private key>"
+go run ./cmd/beresta-release-sign -artifact build/output/Beresta-amd64-installer.exe -version 1.2.0
+go run ./cmd/beresta-release-sign -detached-file build/output/server/SHA256SUMS
+```
+
 ### Desktop frontend
 
 ```powershell
@@ -337,9 +361,9 @@ flutter analyze
 flutter test
 ```
 
-Flutter Android packaging and native core binding commands are available at the repository root. `mobile-test-android` requires an online physical `arm64-v8a` device with USB debugging enabled and exercises both SQLCipher and the non-biometric Android Keystore wrapping path.
+Flutter Android packaging and native core binding commands are available at the repository root. `mobile-test-android` requires an online physical `arm64-v8a` device with USB debugging enabled and exercises SQLCipher, Android Keystore/biometric wrapping, secure-window behavior, encrypted capture, and bounded background-work integration.
 
-The current Yjs feasibility adapter accepts official Yjs V1 and V2 updates behind `core/sync/yjsadapter`; `core/mobileapi` exposes only gomobile-safe values. The SQLCipher feasibility adapter performs a transactional encrypted round trip, verifies reopen behavior, rejects a wrong key, and checks that neither the SQLite header nor a plaintext marker is visible in the database file. The Android AAR contains this CGo implementation for all supported ABIs, and the Flutter APK links it through Kotlin. The Android runtime gate is closed by `mobile-test-android` on arm64 hardware.
+The shared Yjs adapter accepts official Yjs V1 and V2 updates behind `core/sync/yjsadapter`; `core/mobileapi` exposes only gomobile-safe values, request cancellation, and bounded event polling. `mobile-bind-android` normalizes ZIP/JAR metadata and writes `beresta-core.aar.sha256` beside the SQLCipher-linked AAR. The Flutter host calls the same account, search, revision, backup, and synchronization services as desktop rather than maintaining a second persistence model.
 
 Local database keys use the versioned `BKW1` envelope from `core/keystore`, with key ID and purpose bound to the OS protection operation. Windows 11 build 22000 and later selects Windows Hello only when `UserConsentVerifier` is available; the owner-window prompt gates a user-scoped DPAPI unwrap. Windows 10 and systems without configured Hello expose the explicit DPAPI protection mode. Android stores non-exportable AES-256-GCM wrapping keys in Android Keystore; biometric mode is authentication-per-use through `BiometricPrompt.CryptoObject` and fails closed if strong biometrics are unavailable or the key is invalidated by enrollment changes.
 
@@ -386,16 +410,24 @@ seven valid daily backups are retained.
 ## Current Limitations
 
 - The Windows cold-start gate is reference-host-sensitive: one run immediately after packaging failed because a single native WebView2 initialization took 6569 ms, while the repeated acceptance run on the idle reference host passed at p95 3755 ms. The ten-sample method, measured constraint, and revision from the original 1.5-second budget are recorded in [ADR 0007](docs/adr/0007-desktop-cold-start-budget.md); hosted CI timing does not substitute for this gate.
-- The mobile application is still a phase-1 shell. The desktop local-wipe workflow is a manually-triggered stand-in for the windows-desktop-client spec's revocation response: nothing can deliver an actual revocation signal yet since no sync transport exists (see below). Opening an attachment with an external application is deliberately out of scope for now: doing so safely would require writing decrypted plaintext to a temp file, which conflicts with the "no plaintext attachment caches on disk" rule in `docs/threat-model.md`; "Save as…" (an explicit, user-directed export) and the inline in-memory preview cover the same need without that residue.
+- Android camera/document attachments enter the core from a bounded content-URI stream and never use a plaintext cache path. External plaintext "open with" remains intentionally unavailable; an explicit export is required.
 - `quill@2.0.3` (the current stable release) has an open low-severity XSS advisory in its HTML-export feature ([GHSA-v3m3-f69x-jf25](https://github.com/advisories/GHSA-v3m3-f69x-jf25)); Beresta never calls that feature (`getSemanticHTML`/HTML clipboard export), relying only on the Delta model and the Go core's own Markdown projection, so it is not reachable through anything this app does.
-- The optional server `/v1` API is complete, but `core/transport` still has only
-  the default local no-op implementation. Desktop/mobile server connection UI
-  and background synchronization therefore remain disabled until the client
-  transport phase. Raspberry Pi idle acceptance runs only on the opt-in
-  `beresta-pi` reference runner; ordinary hosted CI cross-builds Linux arm64 but
-  cannot substitute for the physical RSS/CPU measurement.
-- `core/account` and `core/store` measure 71.3% and 64.9% statement coverage respectively — below the phase-3 80% target. The gap is almost entirely defensive cleanup-on-error branches (for example, account creation's cascading `Close()` calls on each intermediate failure step); closing it needs dedicated fault-injection test infrastructure (mock wrappers/filesystems that fail on a specific call), comparable in effort to what phase 2B built for the blob store alone. See [the phase-3 delivery report](docs/phase-3-report.md) for detail.
+- HTTP and folder synchronization, workspace sharing, member/device
+  revocation, and no-downtime workspace-key rotation are implemented and
+  covered by real end-to-end tests against a live server (see
+  `server/sharing_e2e_test.go`). Desktop/mobile UI for initiating a share or
+  rotation is not yet built; the underlying `core/account` and
+  `core/transport` APIs are complete and independently usable today. Raspberry
+  Pi idle acceptance runs only on the opt-in `beresta-pi` reference runner;
+  ordinary hosted CI cross-builds Linux arm64 but cannot substitute for the
+  physical RSS/CPU measurement.
+- Core statement coverage is below the release-quality spec's 80% target as
+  measured in this development environment; `build.cmd coverage-gate` fails
+  the build below that threshold and is a required release gate. See the
+  phase-8/9 delivery report for the last measured figure and the
+  lowest-coverage packages.
 - Revision rollback and portable/Evernote import recreate content as plain text; rich-text formatting is not round-tripped through either path (see [ASSUMPTIONS.md](ASSUMPTIONS.md)).
 - The SQLCipher encrypted round trip passes on Windows amd64 and on an Android arm64 device through the packaged AAR and Flutter application linkage.
 - The Go mobile binding, SQLCipher-linked Android AAR, and Flutter debug APK builds pass on Windows.
-- Development packages are intentionally unsigned unless release signing is configured. Production publishing, update-manifest generation, automatic update discovery/download, and store packaging remain later-phase work; the current updater only verifies and applies a pre-downloaded signed package.
+- Development packages are intentionally unsigned unless release signing is configured (`BERESTA_REQUIRE_SIGNING`, `BERESTA_SIGN_CERT_SHA1` for Windows Authenticode; `BERESTA_ANDROID_KEYSTORE_*` for Android release signing). `cmd/beresta-release-sign` publishes the signed desktop update manifest and can also produce a generic detached signature (for example, over a server release's `SHA256SUMS`); automatic update discovery/download by a running client and store packaging remain later-phase work. Server cross-builds additionally publish `SHA256SUMS`, a per-binary `go version -m` module manifest, and `provenance.json` (source commit, Go version, build timestamp) under `build/output/server/`.
+- Desktop cold start, mobile cache/background behavior on physical hardware, and Raspberry Pi idle measurement require reference hardware this development environment does not have; their acceptance harnesses (`build.cmd cold-start`, Android instrumentation tests, `build/server/measure-idle-pi.sh`) are implemented and were not re-run as part of this change. The 20,000-note search budget and the 1,000-operation LAN sync budget were both re-verified in this environment and pass with headroom.

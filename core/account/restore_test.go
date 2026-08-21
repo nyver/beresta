@@ -179,7 +179,7 @@ func TestRestoreSelectiveImportsAsNewNoteWithNotebookTagAndAttachment(t *testing
 		t.Fatalf("restored attachment name=%q content=%q err=%v", name, out.String(), err)
 	}
 
-	doc, err := loadNoteDocument(ctx, created.db, created.workspaceKeys[workspaceID], workspaceID, newNoteID)
+	doc, err := loadNoteDocument(ctx, created.db, created, workspaceID, newNoteID)
 	if err != nil {
 		t.Fatal(err)
 	}

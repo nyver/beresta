@@ -268,7 +268,7 @@ func (a *Account) RestoreSelective(ctx context.Context, backupID model.ID, noteI
 		}
 		result.NewNoteIDs = append(result.NewNoteIDs, newNote.ID)
 
-		doc, err := loadNoteDocument(ctx, sourceDB, entry, workspaceID, sourceNoteID)
+		doc, err := loadNoteDocument(ctx, sourceDB, a, workspaceID, sourceNoteID)
 		if err != nil {
 			return result, err
 		}

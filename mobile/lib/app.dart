@@ -1,0 +1,1233 @@
+import "dart:async";
+
+import "package:flutter/material.dart";
+
+import "core_gateway.dart";
+import "strings.dart";
+
+class BerestaApp extends StatefulWidget {
+  const BerestaApp({super.key, this.gateway});
+
+  final CoreGateway? gateway;
+
+  @override
+  State<BerestaApp> createState() => _BerestaAppState();
+}
+
+class _BerestaAppState extends State<BerestaApp> {
+  late final CoreGateway gateway = widget.gateway ?? MethodChannelCore();
+  String language = "en";
+  int sessionGeneration = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: "Beresta",
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF754C29)),
+        useMaterial3: true,
+      ),
+      home: AppLifecycleLock(
+        gateway: gateway,
+        onSessionLocked: () => setState(() => sessionGeneration += 1),
+        child: SessionRoot(
+          key: ValueKey(sessionGeneration),
+          gateway: gateway,
+          language: language,
+          onLanguageChanged: (value) => setState(() => language = value),
+        ),
+      ),
+    );
+  }
+}
+
+class AppLifecycleLock extends StatefulWidget {
+  const AppLifecycleLock({
+    required this.gateway,
+    required this.onSessionLocked,
+    required this.child,
+    super.key,
+  });
+
+  final CoreGateway gateway;
+  final VoidCallback onSessionLocked;
+  final Widget child;
+
+  @override
+  State<AppLifecycleLock> createState() => _AppLifecycleLockState();
+}
+
+class _AppLifecycleLockState extends State<AppLifecycleLock>
+    with WidgetsBindingObserver {
+  Timer? lockTimer;
+  bool obscured = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      if (!obscured) setState(() => obscured = true);
+      if (lockTimer?.isActive != true) {
+        lockTimer = Timer(const Duration(minutes: 5), () async {
+          await widget.gateway.lock();
+          if (mounted) widget.onSessionLocked();
+        });
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      lockTimer?.cancel();
+      unawaited(_resume());
+    } else if (!obscured) {
+      setState(() => obscured = true);
+    }
+  }
+
+  Future<void> _resume() async {
+    try {
+      final status = await widget.gateway.status();
+      if (status["unlocked"] == true) {
+        unawaited(widget.gateway.syncNow().catchError((_) {}));
+      } else {
+        widget.onSessionLocked();
+      }
+    } catch (_) {
+      widget.onSessionLocked();
+    }
+    if (mounted) setState(() => obscured = false);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    lockTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (obscured) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF2B2118),
+        body: SizedBox.expand(),
+      );
+    }
+    return widget.child;
+  }
+}
+
+class SessionRoot extends StatefulWidget {
+  const SessionRoot({
+    required this.gateway,
+    required this.language,
+    required this.onLanguageChanged,
+    super.key,
+  });
+
+  final CoreGateway gateway;
+  final String language;
+  final ValueChanged<String> onLanguageChanged;
+
+  @override
+  State<SessionRoot> createState() => _SessionRootState();
+}
+
+class _SessionRootState extends State<SessionRoot> {
+  bool? unlocked;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.gateway
+        .status()
+        .then((status) {
+          if (mounted) setState(() => unlocked = status["unlocked"] == true);
+        })
+        .catchError((_) {
+          if (mounted) setState(() => unlocked = false);
+        });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = Strings(widget.language);
+    if (unlocked == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (!unlocked!) {
+      return OnboardingScreen(
+        gateway: widget.gateway,
+        strings: strings,
+        language: widget.language,
+        onLanguageChanged: widget.onLanguageChanged,
+        onUnlocked: () => setState(() => unlocked = true),
+      );
+    }
+    return NotesShell(
+      gateway: widget.gateway,
+      strings: strings,
+      language: widget.language,
+      onLanguageChanged: widget.onLanguageChanged,
+      onLocked: () => setState(() => unlocked = false),
+    );
+  }
+}
+
+class OnboardingScreen extends StatefulWidget {
+  const OnboardingScreen({
+    required this.gateway,
+    required this.strings,
+    required this.language,
+    required this.onLanguageChanged,
+    required this.onUnlocked,
+    super.key,
+  });
+
+  final CoreGateway gateway;
+  final Strings strings;
+  final String language;
+  final ValueChanged<String> onLanguageChanged;
+  final VoidCallback onUnlocked;
+
+  @override
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
+}
+
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  final passphrase = TextEditingController();
+  bool busy = false;
+  String? error;
+
+  Future<void> submit(bool create) async {
+    if (passphrase.text.isEmpty) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      if (create) {
+        await widget.gateway.createAccount(passphrase.text);
+      } else {
+        await widget.gateway.unlockAccount(passphrase.text);
+      }
+      widget.onUnlocked();
+    } catch (_) {
+      if (mounted) setState(() => error = widget.strings("error"));
+    } finally {
+      passphrase.clear();
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    passphrase.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: ListView(
+              padding: const EdgeInsets.all(24),
+              shrinkWrap: true,
+              children: [
+                const Icon(Icons.eco_outlined, size: 64),
+                const SizedBox(height: 12),
+                Text(
+                  "Beresta",
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineLarge,
+                ),
+                Text(widget.strings("tagline"), textAlign: TextAlign.center),
+                const SizedBox(height: 24),
+                TextField(
+                  controller: passphrase,
+                  obscureText: true,
+                  autofillHints: const [AutofillHints.password],
+                  decoration: InputDecoration(
+                    labelText: widget.strings("passphrase"),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: busy ? null : () => submit(true),
+                  child: Text(widget.strings("create")),
+                ),
+                TextButton(
+                  onPressed: busy ? null : () => submit(false),
+                  child: Text(widget.strings("unlock")),
+                ),
+                Text(widget.strings("local_hint"), textAlign: TextAlign.center),
+                if (error != null)
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                _LanguageControl(
+                  language: widget.language,
+                  onChanged: widget.onLanguageChanged,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LanguageControl extends StatelessWidget {
+  const _LanguageControl({required this.language, required this.onChanged});
+
+  final String language;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      child: SegmentedButton<String>(
+        segments: const [
+          ButtonSegment(value: "en", label: Text("EN")),
+          ButtonSegment(value: "ru", label: Text("RU")),
+        ],
+        selected: {language},
+        onSelectionChanged: (value) => onChanged(value.first),
+      ),
+    );
+  }
+}
+
+class NotesShell extends StatefulWidget {
+  const NotesShell({
+    required this.gateway,
+    required this.strings,
+    required this.language,
+    required this.onLanguageChanged,
+    required this.onLocked,
+    super.key,
+  });
+
+  final CoreGateway gateway;
+  final Strings strings;
+  final String language;
+  final ValueChanged<String> onLanguageChanged;
+  final VoidCallback onLocked;
+
+  @override
+  State<NotesShell> createState() => _NotesShellState();
+}
+
+class _NotesShellState extends State<NotesShell> {
+  List<Map<String, dynamic>> notes = [];
+  List<Map<String, dynamic>> notebooks = [];
+  List<Map<String, dynamic>> tags = [];
+  bool loading = true;
+  String? selectedNotebook;
+  String? error;
+  Timer? searchDebounce;
+
+  @override
+  void initState() {
+    super.initState();
+    refresh();
+  }
+
+  Future<void> refresh() async {
+    try {
+      final values = await Future.wait([
+        widget.gateway.listNotes(),
+        widget.gateway.listNotebooks(),
+        widget.gateway.listTags(),
+      ]);
+      if (mounted) {
+        setState(() {
+          notes = values[0];
+          notebooks = values[1];
+          tags = values[2];
+          loading = false;
+          error = null;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          loading = false;
+          error = widget.strings("offline");
+        });
+      }
+    }
+  }
+
+  void runSearch(String value) {
+    searchDebounce?.cancel();
+    searchDebounce = Timer(const Duration(milliseconds: 250), () async {
+      if (value.trim().isEmpty) {
+        await refresh();
+        return;
+      }
+      try {
+        final result = await widget.gateway.search(value);
+        if (mounted) setState(() => notes = result);
+      } catch (_) {
+        if (mounted) setState(() => error = widget.strings("error"));
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    searchDebounce?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visible =
+        notes
+            .where(
+              (note) =>
+                  note["deleted"] != true &&
+                  (selectedNotebook == null ||
+                      note["notebook_id"] == selectedNotebook),
+            )
+            .toList();
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.strings("notes")),
+        actions: [
+          IconButton(
+            tooltip: widget.strings("sync"),
+            onPressed: () => widget.gateway.syncNow().catchError((_) {}),
+            icon: const Icon(Icons.sync),
+          ),
+          IconButton(
+            tooltip: widget.strings("server"),
+            onPressed: showServer,
+            icon: const Icon(Icons.cloud_outlined),
+          ),
+          IconButton(
+            tooltip: widget.strings("lock"),
+            onPressed: () async {
+              await widget.gateway.lock();
+              widget.onLocked();
+            },
+            icon: const Icon(Icons.lock_outline),
+          ),
+          IconButton(
+            tooltip: widget.strings("backup"),
+            onPressed: showBackups,
+            icon: const Icon(Icons.backup_outlined),
+          ),
+          IconButton(
+            tooltip: widget.strings("settings"),
+            onPressed: showSettings,
+            icon: const Icon(Icons.settings_outlined),
+          ),
+        ],
+      ),
+      drawer: NavigationDrawer(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              widget.strings("notebooks"),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+          NavigationDrawerDestination(
+            icon: const Icon(Icons.notes),
+            label: Text(widget.strings("notes")),
+          ),
+          ...notebooks
+              .where((item) => item["deleted"] != true)
+              .map(
+                (item) => ListTile(
+                  leading: const Icon(Icons.book_outlined),
+                  title: Text(item["name"] as String),
+                  selected: selectedNotebook == item["id"],
+                  onTap: () {
+                    setState(() => selectedNotebook = item["id"] as String);
+                    Navigator.pop(context);
+                  },
+                ),
+              ),
+          const Divider(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(widget.strings("tags")),
+          ),
+          ...tags
+              .where((item) => item["deleted"] != true)
+              .map(
+                (item) => ListTile(
+                  leading: const Icon(Icons.tag),
+                  title: Text(item["name"] as String),
+                ),
+              ),
+          ListTile(
+            title: _LanguageControl(
+              language: widget.language,
+              onChanged: widget.onLanguageChanged,
+            ),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SearchBar(
+              hintText: widget.strings("search"),
+              leading: const Icon(Icons.search),
+              onChanged: runSearch,
+            ),
+          ),
+          if (error != null)
+            MaterialBanner(
+              content: Text(error!),
+              actions: [
+                TextButton(onPressed: refresh, child: const Text("OK")),
+              ],
+            ),
+          Expanded(
+            child:
+                loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : visible.isEmpty
+                    ? Center(child: Text(widget.strings("empty")))
+                    : ListView.builder(
+                      itemCount: visible.length,
+                      itemBuilder: (context, index) {
+                        final note = visible[index];
+                        final title = note["title"] as String;
+                        return ListTile(
+                          leading: Icon(
+                            note["pinned"] == true
+                                ? Icons.push_pin
+                                : Icons.description_outlined,
+                          ),
+                          title: Text(
+                            title.isEmpty ? widget.strings("new_note") : title,
+                          ),
+                          subtitle: Text(
+                            DateTime.fromMillisecondsSinceEpoch(
+                              note["created_unix_ms"] as int,
+                            ).toLocal().toString(),
+                          ),
+                          onTap: () => openEditor(note["id"] as String),
+                        );
+                      },
+                    ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        tooltip: widget.strings("new_note"),
+        onPressed: () async {
+          final created = await widget.gateway.createNote(
+            widget.strings("new_note"),
+            notebookId: selectedNotebook ?? "",
+          );
+          await openEditor(created["id"] as String);
+        },
+        icon: const Icon(Icons.add),
+        label: Text(widget.strings("new_note")),
+      ),
+    );
+  }
+
+  Future<void> openEditor(String noteId) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder:
+            (_) => EditorScreen(
+              gateway: widget.gateway,
+              strings: widget.strings,
+              noteId: noteId,
+            ),
+      ),
+    );
+    await refresh();
+  }
+
+  Future<void> showBackups() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder:
+          (_) => BackupSheet(gateway: widget.gateway, strings: widget.strings),
+    );
+    await refresh();
+  }
+
+  Future<void> showSettings() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder:
+          (_) => SettingsSheet(
+            gateway: widget.gateway,
+            strings: widget.strings,
+            notebooks: notebooks,
+          ),
+    );
+  }
+
+  Future<void> showServer() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder:
+          (_) => ServerSheet(gateway: widget.gateway, strings: widget.strings),
+    );
+  }
+}
+
+class ServerSheet extends StatefulWidget {
+  const ServerSheet({required this.gateway, required this.strings, super.key});
+
+  final CoreGateway gateway;
+  final Strings strings;
+
+  @override
+  State<ServerSheet> createState() => _ServerSheetState();
+}
+
+class _ServerSheetState extends State<ServerSheet> {
+  final url = TextEditingController();
+  final invite = TextEditingController();
+  final fingerprint = TextEditingController();
+  String securityMode = "pinned";
+  String? error;
+  bool busy = false;
+
+  @override
+  void dispose() {
+    url.dispose();
+    invite.dispose();
+    fingerprint.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ListView(
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+        ),
+        shrinkWrap: true,
+        children: [
+          Text(
+            widget.strings("server"),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          Text(widget.strings("server_optional")),
+          TextField(
+            controller: url,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+              labelText: widget.strings("server_url"),
+            ),
+          ),
+          TextField(
+            controller: invite,
+            decoration: InputDecoration(
+              labelText: widget.strings("invite_code"),
+            ),
+          ),
+          SegmentedButton<String>(
+            segments: [
+              ButtonSegment(
+                value: "pinned",
+                label: Text(widget.strings("pinned")),
+              ),
+              ButtonSegment(
+                value: "trusted",
+                label: Text(widget.strings("trusted")),
+              ),
+            ],
+            selected: {securityMode},
+            onSelectionChanged:
+                (value) => setState(() => securityMode = value.first),
+          ),
+          if (securityMode == "pinned")
+            TextField(
+              controller: fingerprint,
+              decoration: InputDecoration(
+                labelText: widget.strings("fingerprint"),
+              ),
+            ),
+          if (error != null)
+            Text(
+              error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: busy ? null : connect,
+            child: Text(widget.strings("connect")),
+          ),
+          TextButton(
+            onPressed:
+                busy
+                    ? null
+                    : () async {
+                      await widget.gateway.disconnectServer();
+                      if (context.mounted) Navigator.pop(context);
+                    },
+            child: Text(widget.strings("disconnect")),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> connect() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await widget.gateway.connectServer({
+        "url": url.text.trim(),
+        "invite_code": invite.text.trim(),
+        "fingerprint": fingerprint.text.trim(),
+        "security_mode": securityMode,
+        "device_name": "Android",
+      });
+      if (mounted) Navigator.pop(context);
+    } catch (_) {
+      if (mounted) setState(() => error = widget.strings("error"));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+}
+
+class SettingsSheet extends StatefulWidget {
+  const SettingsSheet({
+    required this.gateway,
+    required this.strings,
+    required this.notebooks,
+    super.key,
+  });
+
+  final CoreGateway gateway;
+  final Strings strings;
+  final List<Map<String, dynamic>> notebooks;
+
+  @override
+  State<SettingsSheet> createState() => _SettingsSheetState();
+}
+
+class _SettingsSheetState extends State<SettingsSheet> {
+  Map<String, dynamic>? settings;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.gateway
+        .getSettings()
+        .then((value) {
+          if (mounted) setState(() => settings = value);
+        })
+        .catchError((_) {
+          if (mounted) setState(() => error = widget.strings("error"));
+        });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = settings;
+    if (current == null) {
+      return SizedBox(
+        height: 240,
+        child: Center(
+          child:
+              error == null ? const CircularProgressIndicator() : Text(error!),
+        ),
+      );
+    }
+    final selected = (current["selected_notebooks"] as List<dynamic>).toSet();
+    final autoLockOptions =
+        <int>{0, 1, 5, 15, 30, current["auto_lock_minutes"] as int}.toList()
+          ..sort();
+    return SafeArea(
+      child: ListView(
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+        ),
+        shrinkWrap: true,
+        children: [
+          Text(
+            widget.strings("settings"),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          DropdownButtonFormField<int>(
+            initialValue: current["auto_lock_minutes"] as int,
+            decoration: InputDecoration(labelText: widget.strings("auto_lock")),
+            items:
+                autoLockOptions
+                    .map(
+                      (value) => DropdownMenuItem(
+                        value: value,
+                        child: Text("$value min"),
+                      ),
+                    )
+                    .toList(),
+            onChanged:
+                (value) =>
+                    setState(() => current["auto_lock_minutes"] = value!),
+          ),
+          DropdownButtonFormField<String>(
+            initialValue: current["attachment_retention"] as String,
+            decoration: InputDecoration(
+              labelText: widget.strings("attachment_retention"),
+            ),
+            items: [
+              DropdownMenuItem(
+                value: "all",
+                child: Text(widget.strings("retention_all")),
+              ),
+              DropdownMenuItem(
+                value: "selected_notebooks",
+                child: Text(widget.strings("retention_selected")),
+              ),
+              DropdownMenuItem(
+                value: "metadata_only",
+                child: Text(widget.strings("retention_metadata")),
+              ),
+            ],
+            onChanged: (value) {
+              setState(() {
+                current["attachment_retention"] = value!;
+                if (value != "selected_notebooks") {
+                  current["selected_notebooks"] = <String>[];
+                }
+              });
+            },
+          ),
+          if (current["attachment_retention"] == "selected_notebooks")
+            ...widget.notebooks
+                .where((row) => row["deleted"] != true)
+                .map(
+                  (row) => CheckboxListTile(
+                    value: selected.contains(row["id"]),
+                    title: Text(row["name"] as String),
+                    onChanged: (checked) {
+                      final values = List<String>.from(
+                        current["selected_notebooks"] as List<dynamic>,
+                      );
+                      if (checked == true) {
+                        values.add(row["id"] as String);
+                      } else {
+                        values.remove(row["id"]);
+                      }
+                      setState(() {
+                        current["selected_notebooks"] =
+                            values.toSet().toList()..sort();
+                      });
+                    },
+                  ),
+                ),
+          TextFormField(
+            initialValue:
+                ((current["cache_limit_bytes"] as int) ~/ (1024 * 1024))
+                    .toString(),
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: widget.strings("cache_limit"),
+            ),
+            onChanged: (value) {
+              final mebibytes = int.tryParse(value);
+              if (mebibytes != null) {
+                current["cache_limit_bytes"] = mebibytes * 1024 * 1024;
+              }
+            },
+          ),
+          if (error != null)
+            Text(
+              error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: () async {
+              try {
+                await widget.gateway.updateSettings(current);
+                if (context.mounted) Navigator.pop(context);
+              } catch (_) {
+                if (mounted) {
+                  setState(() => error = widget.strings("error"));
+                }
+              }
+            },
+            child: Text(widget.strings("save")),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class BackupSheet extends StatefulWidget {
+  const BackupSheet({required this.gateway, required this.strings, super.key});
+
+  final CoreGateway gateway;
+  final Strings strings;
+
+  @override
+  State<BackupSheet> createState() => _BackupSheetState();
+}
+
+class _BackupSheetState extends State<BackupSheet> {
+  late Future<List<Map<String, dynamic>>> backups =
+      widget.gateway.listBackups();
+  String? error;
+
+  void reload() => setState(() => backups = widget.gateway.listBackups());
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Wrap(
+          spacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: widget.gateway.selectBackupDestination,
+              icon: const Icon(Icons.folder_open),
+              label: Text(widget.strings("backup_destination")),
+            ),
+            OutlinedButton.icon(
+              onPressed: () async {
+                try {
+                  await widget.gateway.importBackups();
+                  reload();
+                } catch (failure) {
+                  if (mounted) {
+                    setState(() {
+                      error =
+                          failure.toString().toLowerCase().contains("space")
+                              ? widget.strings("backup_capacity")
+                              : widget.strings("error");
+                    });
+                  }
+                }
+              },
+              icon: const Icon(Icons.cloud_download_outlined),
+              label: Text(widget.strings("backup_import")),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                try {
+                  await widget.gateway.createBackup();
+                  reload();
+                } catch (failure) {
+                  if (mounted) {
+                    setState(() {
+                      error =
+                          failure.toString().toLowerCase().contains("space")
+                              ? widget.strings("backup_capacity")
+                              : widget.strings("error");
+                    });
+                  }
+                }
+              },
+              icon: const Icon(Icons.backup),
+              label: Text(widget.strings("backup_now")),
+            ),
+          ],
+        ),
+        if (error != null)
+          Text(
+            error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        Expanded(
+          child: FutureBuilder<List<Map<String, dynamic>>>(
+            future: backups,
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.data!.isEmpty) {
+                return Center(child: Text(widget.strings("backup_empty")));
+              }
+              return ListView.builder(
+                itemCount: snapshot.data!.length,
+                itemBuilder: (context, index) {
+                  final backup = snapshot.data![index];
+                  return ListTile(
+                    enabled: backup["corrupt"] != true,
+                    leading: const Icon(Icons.shield_outlined),
+                    title: Text(
+                      DateTime.fromMillisecondsSinceEpoch(
+                        backup["created_unix_ms"] as int,
+                      ).toLocal().toString(),
+                    ),
+                    trailing: TextButton(
+                      onPressed: () => confirmRestore(backup["id"] as String),
+                      child: Text(widget.strings("restore")),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> confirmRestore(String backupId) async {
+    await widget.gateway.previewBackup(backupId);
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text(widget.strings("replace_restore")),
+            content: Text(widget.strings("restore_warning")),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(widget.strings("restore")),
+              ),
+            ],
+          ),
+    );
+    if (confirmed == true) {
+      await widget.gateway.restoreBackup(backupId);
+      reload();
+    }
+  }
+}
+
+class EditorScreen extends StatefulWidget {
+  const EditorScreen({
+    required this.gateway,
+    required this.strings,
+    required this.noteId,
+    super.key,
+  });
+
+  final CoreGateway gateway;
+  final Strings strings;
+  final String noteId;
+
+  @override
+  State<EditorScreen> createState() => _EditorScreenState();
+}
+
+class _EditorScreenState extends State<EditorScreen> {
+  final title = TextEditingController();
+  final body = TextEditingController();
+  bool loading = true;
+  bool preview = false;
+  bool dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.gateway.getNote(widget.noteId).then((value) {
+      if (!mounted) return;
+      final note = value["note"] as Map<String, dynamic>;
+      title.text = note["title"] as String;
+      body.text = value["body"] as String;
+      setState(() => loading = false);
+      title.addListener(markDirty);
+      body.addListener(markDirty);
+    });
+  }
+
+  void markDirty() {
+    if (!dirty && mounted) setState(() => dirty = true);
+  }
+
+  Future<void> save() async {
+    await widget.gateway.saveNote(widget.noteId, title.text, body.text);
+    if (mounted) setState(() => dirty = false);
+  }
+
+  @override
+  void dispose() {
+    title.dispose();
+    body.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !dirty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (!didPop && dirty) {
+          await save();
+          if (context.mounted) Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: TextField(
+            controller: title,
+            decoration: InputDecoration(
+              hintText: widget.strings("title"),
+              border: InputBorder.none,
+            ),
+          ),
+          actions: [
+            IconButton(
+              tooltip:
+                  preview ? widget.strings("edit") : widget.strings("preview"),
+              onPressed: () => setState(() => preview = !preview),
+              icon: Icon(preview ? Icons.edit : Icons.visibility),
+            ),
+            IconButton(
+              tooltip: widget.strings("save"),
+              onPressed: dirty ? save : null,
+              icon: const Icon(Icons.save_outlined),
+            ),
+          ],
+        ),
+        body:
+            loading
+                ? const Center(child: CircularProgressIndicator())
+                : preview
+                ? SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: SelectableText(
+                    body.text,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                )
+                : TextField(
+                  controller: body,
+                  expands: true,
+                  maxLines: null,
+                  minLines: null,
+                  textAlignVertical: TextAlignVertical.top,
+                  decoration: InputDecoration(
+                    hintText: widget.strings("body"),
+                    contentPadding: const EdgeInsets.all(20),
+                    border: InputBorder.none,
+                  ),
+                ),
+        bottomNavigationBar: SafeArea(
+          child: Row(
+            children: [
+              TextButton.icon(
+                onPressed: () => widget.gateway.capturePhoto(widget.noteId),
+                icon: const Icon(Icons.photo_camera),
+                label: Text(widget.strings("photo")),
+              ),
+              TextButton.icon(
+                onPressed: showRevisions,
+                icon: const Icon(Icons.history),
+                label: Text(widget.strings("revisions")),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> showRevisions() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder:
+          (sheetContext) => RevisionSheet(
+            gateway: widget.gateway,
+            strings: widget.strings,
+            noteId: widget.noteId,
+            onRestored: () async {
+              Navigator.pop(sheetContext);
+              final value = await widget.gateway.getNote(widget.noteId);
+              body.text = value["body"] as String;
+            },
+          ),
+    );
+  }
+}
+
+class RevisionSheet extends StatelessWidget {
+  const RevisionSheet({
+    required this.gateway,
+    required this.strings,
+    required this.noteId,
+    required this.onRestored,
+    super.key,
+  });
+
+  final CoreGateway gateway;
+  final Strings strings;
+  final String noteId;
+  final Future<void> Function() onRestored;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: gateway.listRevisions(noteId),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return ListView.builder(
+          itemCount: snapshot.data!.length,
+          itemBuilder: (context, index) {
+            final revision = snapshot.data![index];
+            return ListTile(
+              leading: const Icon(Icons.history),
+              title: Text(
+                DateTime.fromMillisecondsSinceEpoch(
+                  revision["created_unix_ms"] as int,
+                ).toLocal().toString(),
+              ),
+              trailing: TextButton(
+                onPressed: () async {
+                  await gateway.restoreRevision(
+                    noteId,
+                    revision["id"] as String,
+                  );
+                  await onRestored();
+                },
+                child: Text(strings("restore")),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}

@@ -83,7 +83,7 @@ func TestImportBerestaArchiveRecreatesExportedContent(t *testing.T) {
 		t.Fatalf("tag IDs = %v, err = %v", tagIDs, err)
 	}
 
-	doc, err := loadNoteDocument(ctx, target.db, target.workspaceKeys[targetWorkspace], targetWorkspace, imported.ID)
+	doc, err := loadNoteDocument(ctx, target.db, target, targetWorkspace, imported.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestImportEvernoteArchiveParsesNotesTagsAndResources(t *testing.T) {
 		t.Fatalf("note = %+v, err = %v", note, err)
 	}
 
-	doc, err := loadNoteDocument(ctx, created.db, created.workspaceKeys[workspaceID], workspaceID, note.ID)
+	doc, err := loadNoteDocument(ctx, created.db, created, workspaceID, note.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

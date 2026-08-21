@@ -173,9 +173,12 @@ func (s *Storage) PullChanges(ctx context.Context, principal Principal, workspac
 		}
 		return Changes{}, err
 	}
-	var latest, epoch int64
-	if err := s.db.QueryRowContext(ctx, `SELECT latest_seq, cursor_epoch FROM workspaces WHERE workspace_id = ?`, workspaceID).Scan(&latest, &epoch); err != nil {
+	var latest, epoch, compactedThrough int64
+	if err := s.db.QueryRowContext(ctx, `SELECT latest_seq, cursor_epoch, compacted_through_seq FROM workspaces WHERE workspace_id = ?`, workspaceID).Scan(&latest, &epoch, &compactedThrough); err != nil {
 		return Changes{}, err
+	}
+	if cursor < compactedThrough {
+		return Changes{}, ErrSnapshotRequired
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT op_id, device_id, seq, hlc_physical_ms, hlc_logical, key_id, nonce, ciphertext, signature

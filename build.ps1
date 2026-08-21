@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("bootstrap", "format", "format-check", "locale-check", "lint", "test", "build", "server-build", "server-cross-build", "server-smoke", "package", "cold-start", "installer-smoke", "mobile-check", "mobile-bind-android", "mobile-build-android", "mobile-test-android", "verify")]
+    [ValidateSet("bootstrap", "format", "format-check", "locale-check", "lint", "test", "coverage-gate", "security-scan", "build", "server-build", "server-cross-build", "server-smoke", "package", "cold-start", "installer-smoke", "mobile-check", "mobile-bind-android", "mobile-build-android", "mobile-package-android", "mobile-test-android", "verify")]
     [string]$Task = "verify"
 )
 
@@ -215,12 +215,42 @@ function Invoke-MobileBind {
     Invoke-Checked -FilePath $gomobile -Arguments @("init")
     $outputDirectory = Join-Path $projectRoot "build\output"
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    Invoke-Checked -FilePath $gomobile -Arguments @("bind", "-target=android", "-androidapi", "24", "-tags=sqlite_fts5", "-o", (Join-Path $outputDirectory "beresta-core.aar"), "./core/mobileapi")
+    $aarPath = Join-Path $outputDirectory "beresta-core.aar"
+    Invoke-Checked -FilePath $gomobile -Arguments @("bind", "-target=android", "-androidapi", "24", "-tags=sqlite_fts5", "-o", $aarPath, "./core/mobileapi")
+    Invoke-Checked -FilePath (Get-GoExecutable) -Arguments @("run", "./cmd/normalizezip", $aarPath)
+    $digest = (Get-FileHash -LiteralPath $aarPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath ($aarPath + ".sha256") -Value ($digest + "  beresta-core.aar") -Encoding ascii -NoNewline
 }
 
 function Invoke-MobileBuildAndroid {
     Invoke-MobileBind
     Invoke-FlutterChecked -FilePath (Get-FlutterExecutable) -Arguments @("build", "apk", "--debug") -WorkingDirectory (Join-Path $projectRoot "mobile")
+}
+
+function Invoke-MobilePackageAndroid {
+    # Produces a signed release APK and AAB. The Gradle build itself fails
+    # closed (see mobile/android/app/build.gradle.kts) if the
+    # BERESTA_ANDROID_KEYSTORE_* signing environment variables are not set,
+    # so this task cannot silently emit a debug-signed release artifact.
+    Invoke-MobileBind
+    $mobileDirectory = Join-Path $projectRoot "mobile"
+    Invoke-FlutterChecked -FilePath (Get-FlutterExecutable) -Arguments @("build", "apk", "--release") -WorkingDirectory $mobileDirectory
+    Invoke-FlutterChecked -FilePath (Get-FlutterExecutable) -Arguments @("build", "appbundle", "--release") -WorkingDirectory $mobileDirectory
+
+    $outputDirectory = Join-Path $projectRoot "build\output"
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+    $artifacts = @(
+        @{ Source = Join-Path $mobileDirectory "build\app\outputs\flutter-apk\app-release.apk"; File = "beresta-android-release.apk" },
+        @{ Source = Join-Path $mobileDirectory "build\app\outputs\bundle\release\app-release.aab"; File = "beresta-android-release.aab" }
+    )
+    $checksumLines = @()
+    foreach ($artifact in $artifacts) {
+        $destination = Join-Path $outputDirectory $artifact.File
+        Copy-Item -LiteralPath $artifact.Source -Destination $destination -Force
+        $digest = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+        $checksumLines += "$digest  $($artifact.File)"
+    }
+    Set-Content -LiteralPath (Join-Path $outputDirectory "android-SHA256SUMS") -Value $checksumLines -Encoding ascii
 }
 
 function Assert-AndroidArm64Device {
@@ -357,11 +387,12 @@ function Invoke-ServerCrossBuild {
     try {
         $env:CGO_ENABLED = "0"
         $env:GOFLAGS = ""
-        foreach ($target in @(
+        $targets = @(
             @{ OS = "windows"; Arch = "amd64"; File = "beresta-server-windows-amd64.exe" },
             @{ OS = "linux"; Arch = "amd64"; File = "beresta-server-linux-amd64" },
             @{ OS = "linux"; Arch = "arm64"; File = "beresta-server-linux-arm64" }
-        )) {
+        )
+        foreach ($target in $targets) {
             $env:GOOS = $target.OS
             $env:GOARCH = $target.Arch
             Invoke-Checked -FilePath $go -Arguments @("build", "-trimpath", "-ldflags=-s -w", "-o", (Join-Path $outputDirectory $target.File), "./cmd/beresta-server")
@@ -373,6 +404,72 @@ function Invoke-ServerCrossBuild {
         $env:GOARCH = $savedGOARCH
         $env:GOFLAGS = $savedGOFLAGS
     }
+    Write-ServerReleaseProvenance -OutputDirectory $outputDirectory -Targets $targets
+}
+
+# Write-ServerReleaseProvenance records, alongside the cross-built server
+# binaries, exactly what a release consumer needs to verify what they
+# downloaded and where it came from: a checksum file, a per-binary embedded
+# module manifest (a minimal, no-extra-tool software bill of materials -
+# see docs/server-operations.md), and one provenance.json capturing the
+# source commit and build environment. It reads only already-built files;
+# it never re-downloads or re-resolves dependencies.
+function Write-ServerReleaseProvenance {
+    param(
+        [Parameter(Mandatory)] [string]$OutputDirectory,
+        [Parameter(Mandatory)] [array]$Targets
+    )
+    $go = Get-GoExecutable
+    $checksumLines = @()
+    foreach ($target in $Targets) {
+        $path = Join-Path $OutputDirectory $target.File
+        $digest = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $checksumLines += "$digest  $($target.File)"
+        $sbomPath = "$path.sbom.txt"
+        & $go version -m $path | Out-File -LiteralPath $sbomPath -Encoding ascii
+        if ($LASTEXITCODE -ne 0) {
+            throw "go version -m failed for $path with exit code $LASTEXITCODE."
+        }
+    }
+    $checksumsPath = Join-Path $OutputDirectory "SHA256SUMS"
+    Set-Content -LiteralPath $checksumsPath -Value $checksumLines -Encoding ascii
+    if ($env:BERESTA_RELEASE_PRIVATE_KEY_BASE64) {
+        Invoke-Checked -FilePath $go -Arguments @("run", "./cmd/beresta-release-sign", "-detached-file", $checksumsPath)
+    }
+
+    $commit = "unknown"
+    $dirty = $true
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if ($git) {
+        # git can write non-fatal warnings (e.g. CRLF normalization notices)
+        # to stderr; under this script's $ErrorActionPreference = "Stop",
+        # even a redirected native-command stderr line becomes a terminating
+        # error unless the preference is relaxed for the call itself.
+        $savedErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $revParse = & $git.Source rev-parse HEAD 2>$null
+            if ($LASTEXITCODE -eq 0) { $commit = ($revParse | Select-Object -Last 1).Trim() }
+            & $git.Source diff --quiet HEAD 2>$null | Out-Null
+            $dirty = ($LASTEXITCODE -ne 0)
+        }
+        finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+    }
+    $goVersion = (& $go version).Trim()
+    $artifacts = @($Targets | ForEach-Object {
+        $digest = (Get-FileHash -LiteralPath (Join-Path $OutputDirectory $_.File) -Algorithm SHA256).Hash.ToLowerInvariant()
+        [ordered]@{ file = $_.File; os = $_.OS; arch = $_.Arch; sha256 = $digest }
+    })
+    $provenance = [ordered]@{
+        source_commit = $commit
+        source_dirty  = $dirty
+        go_version    = $goVersion
+        built_at_utc  = (Get-Date).ToUniversalTime().ToString("o")
+        artifacts     = $artifacts
+    }
+    ($provenance | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath (Join-Path $OutputDirectory "provenance.json") -Encoding ascii
 }
 
 function Invoke-ServerSmoke {
@@ -424,6 +521,45 @@ function Invoke-ColdStart {
     Invoke-Checked -FilePath "powershell.exe" -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $projectRoot "build\windows\cold-start.ps1"), "-ApplicationPath", $application)
 }
 
+function Invoke-CoverageGate {
+    # The release-quality spec requires at least 80 percent automated test
+    # coverage for the shared core; this gate makes that a build failure
+    # rather than an aspiration. Only core/... is measured: server, desktop,
+    # and mobile bindings are thin platform adapters over it and are covered
+    # by their own integration/end-to-end suites instead.
+    $go = Get-GoExecutable
+    $outputDirectory = Join-Path $projectRoot "build\output"
+    New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+    $coverageProfile = Join-Path $outputDirectory "core-coverage.out"
+    Invoke-Checked -FilePath $go -Arguments @("test", "-p=1", "-coverprofile=$coverageProfile", "./core/...")
+
+    $summary = & $go tool cover -func=$coverageProfile
+    if ($LASTEXITCODE -ne 0) {
+        throw "go tool cover failed with exit code $LASTEXITCODE."
+    }
+    $totalLine = $summary | Where-Object { $_ -match '^total:\s+\(statements\)\s+([\d.]+)%$' } | Select-Object -Last 1
+    if (-not $totalLine -or $totalLine -notmatch '([\d.]+)%$') {
+        throw "Could not parse total coverage from go tool cover output."
+    }
+    $percent = [double]$Matches[1]
+    $threshold = 80.0
+    Write-Output "Core coverage: $percent% (threshold: $threshold%)"
+    if ($percent -lt $threshold) {
+        throw "Core coverage $percent% is below the required $threshold% threshold."
+    }
+}
+
+function Invoke-SecurityScan {
+    # Release security gates from the release-quality spec: Go vulnerability
+    # analysis and OSV dependency scanning. Both tools are fetched by exact
+    # version through `go run`, so no extra CI-side install step is needed
+    # and the pinned version is reviewable in this file like any other
+    # dependency.
+    $go = Get-GoExecutable
+    Invoke-Checked -FilePath $go -Arguments @("run", "golang.org/x/vuln/cmd/govulncheck@v1.1.4", "./...")
+    Invoke-Checked -FilePath $go -Arguments @("run", "github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.2.1", "--lockfile=go.mod")
+}
+
 switch ($Task) {
     "bootstrap" { Invoke-Bootstrap }
     "format" { Invoke-Format }
@@ -431,6 +567,8 @@ switch ($Task) {
     "locale-check" { Invoke-LocaleCheck }
     "lint" { Invoke-Lint }
     "test" { Invoke-Tests }
+    "coverage-gate" { Invoke-CoverageGate }
+    "security-scan" { Invoke-SecurityScan }
     "build" { Invoke-Build }
     "server-build" { Invoke-ServerBuild }
     "server-cross-build" { Invoke-ServerCrossBuild }
@@ -441,6 +579,7 @@ switch ($Task) {
     "mobile-check" { Invoke-MobileCompileCheck }
     "mobile-bind-android" { Invoke-MobileBind }
     "mobile-build-android" { Invoke-MobileBuildAndroid }
+    "mobile-package-android" { Invoke-MobilePackageAndroid }
     "mobile-test-android" { Invoke-MobileTestAndroid }
     "verify" {
         Invoke-FormatCheck

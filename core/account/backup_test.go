@@ -80,6 +80,44 @@ func TestCreateBackupProducesRestorableSnapshot(t *testing.T) {
 	}
 }
 
+func TestImportBackupSetAuthenticatesExternalCopy(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	backup, err := created.CreateBackup(ctx, t.TempDir(), store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteBackup(ctx, created.db, backup.ID); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := created.ImportBackupSet(ctx, backup.Location, store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imported.ID != backup.ID || imported.VerifiedUnixMS == nil {
+		t.Fatalf("imported backup = %+v", imported)
+	}
+	if _, err := created.PreviewBackup(ctx, imported.ID); err != nil {
+		t.Fatalf("PreviewBackup(imported): %v", err)
+	}
+
+	snapshotPath := filepath.Join(backup.Location, backupSnapshotFile)
+	contents, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents[len(contents)-1] ^= 0xff
+	if err := os.WriteFile(snapshotPath, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteBackup(ctx, created.db, imported.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := created.ImportBackupSet(ctx, backup.Location, store.BackupKindManual, time.Now()); err == nil {
+		t.Fatal("tampered external backup was imported")
+	}
+}
+
 func TestCreateBackupIncludesReferencedAttachments(t *testing.T) {
 	ctx := context.Background()
 	created := createTestAccount(t)

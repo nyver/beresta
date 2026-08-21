@@ -34,6 +34,10 @@ export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
     backup_directory: "C:\\Users\\test\\Beresta\\backups",
     quick_note_hotkey: "Ctrl+Shift+N",
     autostart_enabled: false,
+    sync_enabled: false,
+    sync_server_url: "",
+    sync_security_mode: "pinned",
+    sync_fingerprint: "",
     ...overrides,
   };
   appMock.GetSettings.mockResolvedValue(settings);
@@ -43,6 +47,8 @@ export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
 
 export function mockSyncStatus(status = "disabled") {
   appMock.SyncStatus.mockResolvedValue(status);
+  appMock.ListSyncDevices.mockResolvedValue([]);
+  appMock.ListSyncQuarantine.mockResolvedValue([]);
 }
 
 export function mockAutostartStatus(overrides: Partial<main.AutostartStatusDTO> = {}) {

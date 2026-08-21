@@ -4,12 +4,15 @@ import {
   AutostartStatus,
   Catalog,
   CommitNoteBody,
+  ConnectServer,
   CreateAccount,
   CreateManualBackup,
   CreateNote,
   CreateSavedSearch,
   DefaultDatabasePath,
   DeleteSavedSearch,
+  DiagnoseServer,
+  DisableServer,
   DiffRevisions,
   EnsureDailyBackup,
   ExportNotes,
@@ -23,6 +26,8 @@ import {
   ListNotes,
   ListRevisions,
   ListSavedSearches,
+  ListSyncDevices,
+  ListSyncQuarantine,
   ListTags,
   LockAccount,
   PickAttachmentFile,
@@ -37,6 +42,8 @@ import {
   RestoreRevision,
   RestoreSelective,
   RestoreWhole,
+  RetrySyncQuarantine,
+  RevokeSyncDevice,
   RevisionMarkdown,
   SaveAttachmentToFile,
   Search,
@@ -160,6 +167,68 @@ export async function syncStatus(): Promise<SyncStatusValue> {
     return status as SyncStatusValue;
   }
   throw new Error(`unknown synchronization status: ${status}`);
+}
+
+export interface ConnectServerRequest {
+  url: string;
+  invite_code: string;
+  fingerprint: string;
+  security_mode: "pinned" | "trusted";
+  qr_code: string;
+  device_name: string;
+}
+
+export interface ServerDiagnostics {
+  reachable: boolean;
+  tls_1_3: boolean;
+  authenticated: boolean;
+  latency_ms: number;
+  error_class?: string;
+}
+
+export interface SyncDevice {
+  device_id: string;
+  display_name: string;
+  created_at: string;
+  revoked_at?: string;
+}
+
+export interface QuarantineEntry {
+  operation_id: string;
+  sequence: number;
+  reason: string;
+  received_unix_ms: number;
+}
+
+export async function connectServer(request: ConnectServerRequest): Promise<void> {
+  await ConnectServer(request);
+}
+
+export async function disableServer(): Promise<void> {
+  await DisableServer();
+}
+
+export async function diagnoseServer(): Promise<ServerDiagnostics> {
+  return DiagnoseServer() as Promise<ServerDiagnostics>;
+}
+
+export async function listSyncDevices(): Promise<SyncDevice[]> {
+  return ListSyncDevices() as Promise<SyncDevice[]>;
+}
+
+export async function revokeSyncDevice(deviceId: string): Promise<void> {
+  await RevokeSyncDevice(deviceId);
+}
+
+export async function listSyncQuarantine(): Promise<QuarantineEntry[]> {
+  // Wails bindings may still describe the previous internal store model
+  // during the first frontend pass of a clean build; the Go boundary now
+  // returns this exact DTO and regenerates the binding in the same build.
+  return ListSyncQuarantine() as unknown as Promise<QuarantineEntry[]>;
+}
+
+export async function retrySyncQuarantine(operationId: string): Promise<void> {
+  await RetrySyncQuarantine(operationId);
 }
 
 /**

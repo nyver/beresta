@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
+  createNote,
+  deleteNote,
   ensureDailyBackup,
   getSettings,
   listNotebooks,
@@ -76,6 +78,8 @@ export function Shell({ account, onLocked }: ShellProps) {
   // whatever note the previous session left mounted.
   const [quickNoteSession, setQuickNoteSession] = useState(0);
   const [quickNoteOpen, setQuickNoteOpen] = useState(false);
+  const [creatingNote, setCreatingNote] = useState(false);
+  const [noteCreateError, setNoteCreateError] = useState<string | null>(null);
 
   const loadAll = useCallback(() => {
     setLoading(true);
@@ -194,6 +198,43 @@ export function Shell({ account, onLocked }: ShellProps) {
         ? current
         : current.map((result) => main.SearchResultDTO.createFrom({ ...result, note: rename(result.note) })),
     );
+  }
+
+  async function handleCreateNote() {
+    setCreatingNote(true);
+    setNoteCreateError(null);
+    try {
+      // Files the note into the currently selected notebook, or the
+      // workspace root ("") when "All Notes" or a tag is selected - a tag
+      // is not a filing location a note can be created into directly.
+      const notebookId = selection.kind === "notebook" ? selection.id : "";
+      const created = await createNote(notebookId, "");
+      setNotes((current) => [created, ...current]);
+      searchBarRef.current?.clear();
+      // A tag selection would otherwise hide the freshly created (as yet
+      // untagged) note, since visibleNotes' "tag" branch only shows
+      // tagNotes; switching to "all" makes it immediately visible.
+      if (selection.kind === "tag") setSelection({ kind: "all" });
+      setSelectedNoteId(created.id);
+    } catch (thrown: unknown) {
+      setNoteCreateError(errorMessage(unwrapError(thrown)));
+    } finally {
+      setCreatingNote(false);
+    }
+  }
+
+  async function handleDeleteNote(noteId: string) {
+    await deleteNote(noteId);
+    // Mirrors handleTitleCommitted's optimistic patch: `notes` drives the
+    // "all"/notebook filters directly, while tagNotes and searchResults
+    // are separate fetches that would otherwise keep showing the
+    // just-deleted note until the next full reload or re-search.
+    setNotes((current) => current.map((note) => (note.id === noteId ? { ...note, deleted: true } : note)));
+    setTagNotes((current) => current.filter((note) => note.id !== noteId));
+    setSearchResults((current) =>
+      current === null ? current : current.filter((result) => result.note.id !== noteId),
+    );
+    setSelectedNoteId("");
   }
 
   async function handleLock() {
@@ -341,6 +382,18 @@ export function Shell({ account, onLocked }: ShellProps) {
                 searchBarRef.current?.clear();
                 setSelection(id === "" ? { kind: "all" } : { kind: "notebook", id });
               }}
+              onCreated={(notebook) => setNotebooks((current) => [...current, notebook])}
+              onDeleted={(notebookId) => {
+                setNotebooks((current) => current.filter((notebook) => notebook.id !== notebookId));
+                // The deleted notebook can no longer be a valid selection;
+                // its notes are still reachable, just no longer filed
+                // under it, so falling back to "All Notes" keeps them
+                // visible instead of showing an empty, unselectable filter.
+                if (selection.kind === "notebook" && selection.id === notebookId) {
+                  searchBarRef.current?.clear();
+                  setSelection({ kind: "all" });
+                }
+              }}
             />
             <TagList
               tags={tags}
@@ -352,6 +405,16 @@ export function Shell({ account, onLocked }: ShellProps) {
             />
           </aside>
           <section className="shell-notes">
+            <div className="shell-notes-toolbar">
+              <button type="button" onClick={() => void handleCreateNote()} disabled={creatingNote}>
+                {t("shell.new_note_button")}
+              </button>
+              {noteCreateError ? (
+                <p className="error" role="alert">
+                  {noteCreateError}
+                </p>
+              ) : null}
+            </div>
             <SearchBar
               ref={searchBarRef}
               tags={tags}
@@ -372,7 +435,12 @@ export function Shell({ account, onLocked }: ShellProps) {
             />
           </section>
           <section className="shell-detail">
-            <NoteEditorPane ref={editorPaneRef} note={selectedNote} onTitleCommitted={handleTitleCommitted} />
+            <NoteEditorPane
+              ref={editorPaneRef}
+              note={selectedNote}
+              onTitleCommitted={handleTitleCommitted}
+              onDeleted={handleDeleteNote}
+            />
           </section>
         </div>
       )}

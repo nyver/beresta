@@ -8,8 +8,10 @@ import {
   CreateAccount,
   CreateManualBackup,
   CreateNote,
+  CreateNotebook,
   CreateSavedSearch,
   DefaultDatabasePath,
+  DeleteNote,
   DeleteSavedSearch,
   DiagnoseServer,
   DisableServer,
@@ -48,6 +50,7 @@ import {
   SaveAttachmentToFile,
   Search,
   SearchByTag,
+  SetNotebookDeleted,
   Status,
   SyncStatus,
   UnlockAccount,
@@ -292,6 +295,26 @@ export async function deleteSavedSearch(savedSearchId: string): Promise<void> {
 
 export async function createNote(notebookId: string, title: string): Promise<main.NoteDTO> {
   return CreateNote(notebookId, title);
+}
+
+/** createNotebook files a new notebook at the workspace root (empty
+ * parentId) or nests it under an existing notebook. */
+export async function createNotebook(parentId: string, name: string): Promise<main.NotebookDTO> {
+  return CreateNotebook(parentId, name);
+}
+
+/** deleteNote tombstones a note; its history is preserved and it can be
+ * recovered later (RestoreNote), so this is safe to call without a
+ * durability warning to the user beyond the usual UI confirmation. */
+export async function deleteNote(noteId: string): Promise<void> {
+  return DeleteNote(noteId);
+}
+
+/** deleteNotebook tombstones a notebook. Notes filed in it are not
+ * deleted or moved - they simply stop appearing under this notebook in
+ * the tree and remain reachable via "All Notes" or search. */
+export async function deleteNotebook(notebookId: string): Promise<void> {
+  return SetNotebookDeleted(notebookId, true);
 }
 
 export async function getNoteDocument(noteId: string): Promise<main.NoteDocumentDTO> {

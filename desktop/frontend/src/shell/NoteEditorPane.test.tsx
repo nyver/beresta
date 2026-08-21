@@ -26,7 +26,7 @@ describe("NoteEditorPane", () => {
     mockSettings();
     render(
       <I18nProvider>
-        <NoteEditorPane note={null} onTitleCommitted={vi.fn()} />
+        <NoteEditorPane note={null} onTitleCommitted={vi.fn()} onDeleted={vi.fn()} />
       </I18nProvider>,
     );
     expect(await screen.findByText("shell.detail_placeholder")).toBeInTheDocument();
@@ -40,7 +40,7 @@ describe("NoteEditorPane", () => {
     const onTitleCommitted = vi.fn();
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={onTitleCommitted} />
+        <NoteEditorPane note={note} onTitleCommitted={onTitleCommitted} onDeleted={vi.fn()} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -63,7 +63,7 @@ describe("NoteEditorPane", () => {
     const note = fakeNote({ title: "Same title" });
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} />
+        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} onDeleted={vi.fn()} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -87,7 +87,7 @@ describe("NoteEditorPane", () => {
     const onTitleCommitted = vi.fn();
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={onTitleCommitted} />
+        <NoteEditorPane note={note} onTitleCommitted={onTitleCommitted} onDeleted={vi.fn()} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -110,7 +110,7 @@ describe("NoteEditorPane", () => {
     const ref = createRef<NoteEditorPaneHandle>();
     render(
       <I18nProvider>
-        <NoteEditorPane ref={ref} note={note} onTitleCommitted={onTitleCommitted} />
+        <NoteEditorPane ref={ref} note={note} onTitleCommitted={onTitleCommitted} onDeleted={vi.fn()} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -142,7 +142,7 @@ describe("NoteEditorPane", () => {
     const note = fakeNote({ title: "Title" });
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} />
+        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} onDeleted={vi.fn()} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -164,5 +164,47 @@ describe("NoteEditorPane", () => {
     await waitFor(() => expect(appMock.RestoreRevision).toHaveBeenCalled());
     expect(appMock.CommitNoteBody).toHaveBeenCalled();
     expect(callOrder).toEqual(["commit", "restore"]);
+  });
+
+  it("deletes the open note after the inline confirmation", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    mockEmptyDocument();
+    appMock.DeleteNote.mockResolvedValue(undefined);
+    const note = fakeNote({ title: "Title" });
+    const onDeleted = vi.fn();
+    render(
+      <I18nProvider>
+        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} onDeleted={onDeleted} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.delete_note" }));
+    await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
+
+    expect(appMock.DeleteNote).toHaveBeenCalledWith(note.id);
+    expect(onDeleted).toHaveBeenCalledWith(note.id);
+  });
+
+  it("shows an error when note deletion fails", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    mockEmptyDocument();
+    appMock.DeleteNote.mockRejectedValue(
+      new Error(JSON.stringify({ code: "internal", message: "boom" })),
+    );
+    const note = fakeNote({ title: "Title" });
+    render(
+      <I18nProvider>
+        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} onDeleted={vi.fn()} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.delete_note" }));
+    await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
   });
 });

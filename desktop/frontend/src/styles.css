@@ -219,7 +219,11 @@ button:disabled {
 
 .shell-body {
   display: grid;
-  grid-template-columns: 16rem 1fr 20rem;
+  /* The note list only ever shows titles, so it gets a comfortably fixed
+     width; the editor gets the rest of the window instead of a fixed
+     20rem, which left it by far the narrowest pane despite being where
+     the user actually writes. */
+  grid-template-columns: 16rem 22rem 1fr;
   height: calc(100vh - 3.5rem);
 }
 
@@ -274,6 +278,10 @@ button:disabled {
 
 .tree-row {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-align: left;
   background: transparent;
   color: inherit;
@@ -287,11 +295,75 @@ button:disabled {
   color: #fff;
 }
 
+.tree-row-delete {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  border-radius: 0.3rem;
+  color: #8a7f6f;
+  cursor: pointer;
+  opacity: 0;
+}
+
+/* Kept keyboard/screen-reader accessible at all times (opacity, not
+   visibility/display) - only its visibility to sighted mouse users is
+   hover-gated, to keep the tree from looking cluttered with a delete icon
+   on every row at once. */
+li:hover > .tree-row-delete,
+.tree-row-delete:focus-visible {
+  opacity: 1;
+}
+
+.tree-row-delete:hover {
+  color: #b23b3b;
+}
+
+.tree-row-delete-confirm {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.notebook-create {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.notebook-create input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem;
+  border: 1px solid #d8d1c4;
+  border-radius: 0.35rem;
+}
+
+.notebook-create button {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.6rem;
+}
+
 .shell-notes {
   overflow: hidden;
   border-right: 1px solid #d8d1c4;
   display: flex;
   flex-direction: column;
+}
+
+.shell-notes-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 0;
 }
 
 .note-list {
@@ -409,15 +481,37 @@ button:disabled {
   color: #5a5148;
 }
 
+.note-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
 .note-title-input {
+  flex: 1;
+  min-width: 0;
   font: inherit;
   font-size: 1.2rem;
   font-weight: 600;
   border: none;
   padding: 0.35rem 0;
-  margin-bottom: 0.5rem;
   background: transparent;
   color: inherit;
+}
+
+.note-delete-button {
+  flex: none;
+  font-size: 0.85rem;
+}
+
+.note-delete-confirm {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 .note-title-input:focus {
@@ -937,6 +1031,44 @@ button:disabled {
 .sync-panel section > button,
 .sync-status-error button {
   align-self: flex-start;
+}
+
+.sync-connect-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #5a5148;
+}
+
+.sync-connect-form input,
+.sync-connect-form textarea {
+  font: inherit;
+  padding: 0.5rem;
+  border: 1px solid #d8d1c4;
+  border-radius: 0.35rem;
+  color: #2b2620;
+}
+
+.sync-connect-form textarea {
+  min-height: 4rem;
+  resize: vertical;
+}
+
+.sync-connect-form .sync-checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sync-connect-form .sync-checkbox-label input {
+  width: auto;
+}
+
+.sync-connect-form > p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #5a5148;
 }
 
 .sync-status-card,

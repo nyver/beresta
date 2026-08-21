@@ -299,6 +299,76 @@ describe("Shell", () => {
     }
   });
 
+  it("creates a new note at the workspace root and opens it for editing", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(fakeNote({ id: "new-note", title: "" }));
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.new_note_button" }));
+
+    expect(appMock.CreateNote).toHaveBeenCalledWith("", "");
+    expect(await screen.findByLabelText("shell.detail_title_label")).toBeInTheDocument();
+  });
+
+  it("creates a new note inside the currently selected notebook", async () => {
+    const notebook = fakeNotebook({ name: "Work" });
+    appMock.ListNotebooks.mockResolvedValue([notebook]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(
+      fakeNote({ id: "new-note", title: "", notebook_id: notebook.id }),
+    );
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+    await user.click(await screen.findByRole("button", { name: "shell.new_note_button" }));
+
+    expect(appMock.CreateNote).toHaveBeenCalledWith(notebook.id, "");
+  });
+
+  it("deletes the selected notebook and falls back to All Notes", async () => {
+    const notebook = fakeNotebook({ name: "Work" });
+    appMock.ListNotebooks.mockResolvedValue([notebook]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    appMock.SetNotebookDeleted.mockResolvedValue(undefined);
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+    await user.click(await screen.findByRole("button", { name: "shell.delete_notebook" }));
+    await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
+
+    expect(appMock.SetNotebookDeleted).toHaveBeenCalledWith(notebook.id, true);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument());
+    expect(await screen.findByRole("button", { name: "shell.all_notes" })).toHaveClass("selected");
+  });
+
+  it("deletes the open note and clears the editor selection", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    const note = fakeNote({ title: "Grocery list" });
+    appMock.ListNotes.mockResolvedValue([note]);
+    mockEmptyNoteDocument();
+    appMock.DeleteNote.mockResolvedValue(undefined);
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText("Grocery list"));
+    await user.click(await screen.findByRole("button", { name: "shell.delete_note" }));
+    await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
+
+    expect(appMock.DeleteNote).toHaveBeenCalledWith(note.id);
+    expect(await screen.findByText("shell.detail_placeholder")).toBeInTheDocument();
+    expect(screen.queryByText("Grocery list")).not.toBeInTheDocument();
+  });
+
   it("opens the quick-note capture panel on quicknote:open and reloads notes once it closes", async () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);

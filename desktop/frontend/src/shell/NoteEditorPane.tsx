@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
+import { deleteNote, unwrapError } from "../api";
 import { NoteEditor, type NoteEditorHandle } from "../editor/NoteEditor";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
@@ -18,6 +19,10 @@ export interface NoteEditorPaneProps {
    * committed, so the caller can patch its own note list state. Never
    * called if the commit failed - see commitTitleIfChanged. */
   onTitleCommitted: (noteId: string, title: string) => void;
+  /** Called after the open note has been durably tombstoned, so the
+   * caller (Shell) can drop it from its own note list state and clear
+   * the selection. */
+  onDeleted: (noteId: string) => Promise<void> | void;
 }
 
 /**
@@ -26,11 +31,14 @@ export interface NoteEditorPaneProps {
  * body editor, and coordinates committing both together.
  */
 export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPaneProps>(
-  function NoteEditorPane({ note, onTitleCommitted }, ref) {
-    const { t } = useI18n();
+  function NoteEditorPane({ note, onTitleCommitted, onDeleted }, ref) {
+    const { t, errorMessage } = useI18n();
     const editorRef = useRef<NoteEditorHandle>(null);
     const attachmentPanelRef = useRef<AttachmentPanelHandle>(null);
     const [title, setTitle] = useState(note?.title ?? "");
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState<string | null>(null);
     // Bumped after RestoreRevision commits a new current revision, and
     // included in NoteEditor's key below to force it to remount and
     // refetch the note's document: RestoreRevision writes through the
@@ -41,7 +49,27 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
 
     useEffect(() => {
       setTitle(note?.title ?? "");
+      // Also covers a just-completed delete: onDeleted clears the parent's
+      // selection, which re-renders this same component instance with
+      // note=null rather than unmounting it, so `deleting` would otherwise
+      // stay stuck at true from handleDelete's success path.
+      setConfirmingDelete(false);
+      setDeleting(false);
+      setDeleteError(null);
     }, [note?.id, note?.title]);
+
+    async function handleDelete() {
+      if (!note) return;
+      setDeleting(true);
+      setDeleteError(null);
+      try {
+        await deleteNote(note.id);
+        await onDeleted(note.id);
+      } catch (thrown: unknown) {
+        setDeleteError(errorMessage(unwrapError(thrown)));
+        setDeleting(false);
+      }
+    }
 
     async function commitTitleIfChanged() {
       if (!note) return;
@@ -77,14 +105,41 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
 
     return (
       <div className="note-detail">
-        <input
-          className="note-title-input"
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          onBlur={() => void commitTitleIfChanged()}
-          aria-label={t("shell.detail_title_label")}
-          placeholder={t("shell.untitled_note")}
-        />
+        <div className="note-detail-header">
+          <input
+            className="note-title-input"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            onBlur={() => void commitTitleIfChanged()}
+            aria-label={t("shell.detail_title_label")}
+            placeholder={t("shell.untitled_note")}
+          />
+          {confirmingDelete ? (
+            <span className="note-delete-confirm">
+              <span>{t("shell.delete_note_confirm")}</span>
+              <button type="button" disabled={deleting} onClick={() => void handleDelete()}>
+                {deleting ? t("shell.deleting") : t("shell.delete_confirm_button")}
+              </button>
+              <button
+                type="button"
+                className="link-button"
+                disabled={deleting}
+                onClick={() => setConfirmingDelete(false)}
+              >
+                {t("common.cancel")}
+              </button>
+            </span>
+          ) : (
+            <button type="button" className="link-button note-delete-button" onClick={() => setConfirmingDelete(true)}>
+              {t("shell.delete_note")}
+            </button>
+          )}
+        </div>
+        {deleteError ? (
+          <p className="error" role="alert">
+            {deleteError}
+          </p>
+        ) : null}
         <NoteEditor
           key={`${note.id}-${restoreVersion}`}
           ref={editorRef}

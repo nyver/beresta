@@ -30,7 +30,13 @@ export const appMock = {
   ListNotebooks: vi.fn(),
   CreateNotebook: vi.fn(),
   SetNotebookDeleted: vi.fn(),
+  MoveNotebook: vi.fn(),
+  SetNoteNotebook: vi.fn(),
   ListTags: vi.fn(),
+  CreateTag: vi.fn(),
+  SetTagDeleted: vi.fn(),
+  SetNoteTag: vi.fn(),
+  NoteTagsByWorkspace: vi.fn(),
   ListNotes: vi.fn(),
   SearchByTag: vi.fn(),
   Search: vi.fn(),
@@ -125,6 +131,12 @@ beforeEach(() => {
   for (const fn of Object.values(runtimeMock)) {
     fn.mockReset();
   }
+  // Shell.tsx's loadAll always fetches this alongside notebooks/tags/notes;
+  // most tests have no need to exercise per-note tag assignment, so this
+  // default (individually overridable via mockResolvedValue, same as any
+  // other appMock entry) avoids repeating it in every test that renders
+  // Shell.
+  appMock.NoteTagsByWorkspace.mockResolvedValue({});
 });
 
 // @testing-library/react's own automatic-cleanup registration only fires

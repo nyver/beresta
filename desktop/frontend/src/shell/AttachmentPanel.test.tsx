@@ -107,7 +107,8 @@ describe("AttachmentPanel", () => {
     const user = userEvent.setup();
 
     await screen.findByText("photo.png");
-    await user.click(screen.getByRole("button", { name: "attachments.remove_button" }));
+    await user.click(screen.getByRole("button", { name: "attachments.actions: photo.png" }));
+    await user.click(await screen.findByRole("menuitem", { name: "attachments.remove_button" }));
 
     await waitFor(() => expect(appMock.RemoveAttachment).toHaveBeenCalledWith("note-1", "blob-1"));
     await waitFor(() => expect(screen.queryByText("photo.png")).not.toBeInTheDocument());
@@ -120,7 +121,8 @@ describe("AttachmentPanel", () => {
     renderPanel();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "attachments.save_button" }));
+    await user.click(await screen.findByRole("button", { name: "attachments.actions: photo.png" }));
+    await user.click(await screen.findByRole("menuitem", { name: "attachments.save_button" }));
 
     await waitFor(() =>
       expect(appMock.SaveAttachmentToFile).toHaveBeenCalledWith(
@@ -136,7 +138,8 @@ describe("AttachmentPanel", () => {
     renderPanel();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "attachments.save_button" }));
+    await user.click(await screen.findByRole("button", { name: "attachments.actions: photo.png" }));
+    await user.click(await screen.findByRole("menuitem", { name: "attachments.save_button" }));
 
     expect(appMock.SaveAttachmentToFile).not.toHaveBeenCalled();
   });

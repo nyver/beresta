@@ -20,6 +20,11 @@ export interface NoteListProps {
 
 const ESTIMATED_ROW_HEIGHT = 56;
 
+// Matches NotebookTree.tsx's DRAG_TYPE_NOTE: a note row is a drag source
+// for refiling it into a different notebook by dropping it on that
+// notebook's row.
+const DRAG_TYPE_NOTE = "application/x-beresta-note-id";
+
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -123,6 +128,11 @@ export function NoteList({
                 transform: `translateY(${virtualRow.start}px)`,
               }}
               onClick={() => onSelect(note.id)}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData(DRAG_TYPE_NOTE, note.id);
+                event.dataTransfer.effectAllowed = "move";
+              }}
             >
               <span className="note-row-title">
                 {note.title ? highlightTitle(note.title, highlightTerms) : t("shell.untitled_note")}

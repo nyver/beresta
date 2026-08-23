@@ -27,6 +27,10 @@ export interface SearchBarHandle {
 
 export interface SearchBarProps {
   tags: main.TagDTO[];
+  /** The full, already-loaded note list, used for the default partial
+   * title-match search (see hasAdvancedFilter below) so it can run
+   * entirely client-side with no backend round trip. */
+  notes: main.NoteDTO[];
   /** Called whenever the active result set changes: null means no search
    * is active (fall back to the sidebar's notebook/tag browsing), an array
    * is the current result set (possibly empty), and highlightTerms are the
@@ -63,6 +67,21 @@ function composeQuery(
   return parts.join(" ");
 }
 
+/** containsQueryToken reports whether the free-text box itself already
+ * contains one of the filter language's special tokens (tag:/after:/
+ * before:/deleted:true) - most importantly when a saved search's stored
+ * query string (which can carry any of these) is loaded straight into the
+ * text box (see handleSelectSaved below, which clears the dedicated filter
+ * controls when it does). Without this check such a query would otherwise
+ * be misread as a literal, tokens-and-all substring to match against note
+ * titles instead of being parsed as a filter. */
+function containsQueryToken(text: string): boolean {
+  return text
+    .trim()
+    .split(/\s+/)
+    .some((word) => word.startsWith("tag:") || word.startsWith("after:") || word.startsWith("before:") || word === "deleted:true");
+}
+
 function startOfDayMS(value: string): number | null {
   if (!value) return null;
   const ms = new Date(`${value}T00:00:00`).getTime();
@@ -84,11 +103,12 @@ function endOfDayMS(value: string): number | null {
  * that budget covers this UI's queries too.
  */
 export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function SearchBar(
-  { tags, onResultsChange },
+  { tags, notes, onResultsChange },
   ref,
 ) {
   const { t, errorMessage } = useI18n();
   const [text, setText] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [tagFilterId, setTagFilterId] = useState("");
   const [afterDate, setAfterDate] = useState("");
   const [beforeDate, setBeforeDate] = useState("");
@@ -97,6 +117,12 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
   const [selectedSavedSearchId, setSelectedSavedSearchId] = useState("");
   const [saveName, setSaveName] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // notes changes on every keystroke elsewhere in the app (Shell's own
+  // state); reading it through a ref keeps the effect below keyed only on
+  // the search inputs themselves, not on the note list's identity.
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
 
   // onResultsChange is a fresh closure on every Shell render; depending on
   // it directly in the debounce effect below would re-run (and re-fetch)
@@ -132,6 +158,14 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
   const tagName = tags.find((tag) => tag.id === tagFilterId)?.name ?? "";
   const afterMS = startOfDayMS(afterDate);
   const beforeMS = endOfDayMS(beforeDate);
+  // Any engaged advanced filter routes the query through the backend's
+  // tag:/after:/before: filter language (store.ParseSearchQueryText), which
+  // needs a real SQL join and cannot be done client-side. With none engaged,
+  // a bare text query instead matches by partial note title below - FTS5's
+  // unicode61 tokenizer only matches whole tokens, so it cannot do that.
+  const trimmedText = text.trim();
+  const hasAdvancedFilter =
+    tagFilterId !== "" || afterMS !== null || beforeMS !== null || includeDeleted || containsQueryToken(trimmedText);
   const activeQuery = composeQuery(text, tagName, afterMS, beforeMS, includeDeleted);
   const hasQuery = activeQuery !== "";
 
@@ -142,7 +176,23 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
       onResultsChangeRef.current(null, []);
       return;
     }
-    const terms = text.trim() ? text.trim().split(/\s+/) : [];
+
+    if (!hasAdvancedFilter) {
+      // Partial title match, entirely client-side: the full note list is
+      // already loaded in Shell, so there is no need to debounce or guard
+      // against out-of-order responses the way the backend branch below
+      // does.
+      latestRequestIdRef.current += 1;
+      setError(null);
+      const needle = trimmedText.toLowerCase();
+      const results = notesRef.current
+        .filter((note) => !note.deleted && note.title.toLowerCase().includes(needle))
+        .map((note) => main.SearchResultDTO.createFrom({ note, rank: 0 }));
+      onResultsChangeRef.current(results, [trimmedText]);
+      return;
+    }
+
+    const terms = trimmedText ? trimmedText.split(/\s+/) : [];
     const timer = window.setTimeout(() => {
       const requestId = (latestRequestIdRef.current += 1);
       search(activeQuery)
@@ -159,7 +209,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasQuery, activeQuery, errorMessage]);
+  }, [hasQuery, hasAdvancedFilter, activeQuery, trimmedText, errorMessage]);
 
   function reset() {
     setText("");
@@ -233,76 +283,95 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
         placeholder={t("search.placeholder")}
         aria-label={t("search.placeholder")}
       />
-      <div className="search-filters">
-        <label className="search-filter">
-          <span>{t("search.tag_filter_label")}</span>
-          <select value={tagFilterId} onChange={(event) => setTagFilterId(event.target.value)}>
-            <option value="">{t("search.tag_filter_all")}</option>
-            {tags
-              .filter((tag) => !tag.deleted)
-              .map((tag) => (
-                <option key={tag.id} value={tag.id}>
-                  {tag.name}
+      <button
+        type="button"
+        className="search-advanced-toggle"
+        aria-expanded={advancedOpen}
+        onClick={() => setAdvancedOpen((current) => !current)}
+      >
+        {advancedOpen ? "▾" : "▸"} {t("search.advanced_toggle")}
+      </button>
+
+      {advancedOpen ? (
+        <div className="search-advanced">
+          <div className="search-filters">
+            <label className="search-filter">
+              <span>{t("search.tag_filter_label")}</span>
+              <select value={tagFilterId} onChange={(event) => setTagFilterId(event.target.value)}>
+                <option value="">{t("search.tag_filter_all")}</option>
+                {tags
+                  .filter((tag) => !tag.deleted)
+                  .map((tag) => (
+                    <option key={tag.id} value={tag.id}>
+                      {tag.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="search-filter">
+              <span>{t("search.after_label")}</span>
+              <input type="date" value={afterDate} onChange={(event) => setAfterDate(event.target.value)} />
+            </label>
+            <label className="search-filter">
+              <span>{t("search.before_label")}</span>
+              <input type="date" value={beforeDate} onChange={(event) => setBeforeDate(event.target.value)} />
+            </label>
+            <label className="search-filter search-filter-checkbox">
+              <input
+                type="checkbox"
+                checked={includeDeleted}
+                onChange={(event) => setIncludeDeleted(event.target.checked)}
+              />
+              <span>{t("search.include_deleted")}</span>
+            </label>
+            {hasQuery ? (
+              <button type="button" className="link-button" onClick={reset}>
+                {t("search.clear_button")}
+              </button>
+            ) : null}
+          </div>
+
+          <div className="saved-searches">
+            <select
+              aria-label={t("search.saved_searches_label")}
+              value={selectedSavedSearchId}
+              onChange={(event) => handleSelectSaved(event.target.value)}
+            >
+              <option value="">{t("search.saved_searches_placeholder")}</option>
+              {savedSearches.map((saved) => (
+                <option key={saved.id} value={saved.id}>
+                  {saved.name}
                 </option>
               ))}
-          </select>
-        </label>
-        <label className="search-filter">
-          <span>{t("search.after_label")}</span>
-          <input type="date" value={afterDate} onChange={(event) => setAfterDate(event.target.value)} />
-        </label>
-        <label className="search-filter">
-          <span>{t("search.before_label")}</span>
-          <input type="date" value={beforeDate} onChange={(event) => setBeforeDate(event.target.value)} />
-        </label>
-        <label className="search-filter search-filter-checkbox">
-          <input
-            type="checkbox"
-            checked={includeDeleted}
-            onChange={(event) => setIncludeDeleted(event.target.checked)}
-          />
-          <span>{t("search.include_deleted")}</span>
-        </label>
-        {hasQuery ? (
+            </select>
+            <input
+              type="text"
+              value={saveName}
+              onChange={(event) => setSaveName(event.target.value)}
+              placeholder={t("search.save_new_placeholder")}
+              aria-label={t("search.save_new_placeholder")}
+            />
+            <button
+              type="button"
+              disabled={!hasQuery || !saveName.trim()}
+              onClick={() => void handleSaveOrUpdate()}
+            >
+              {selectedSavedSearchId ? t("search.update_button") : t("search.save_button")}
+            </button>
+            {selectedSavedSearchId ? (
+              <button type="button" className="link-button" onClick={() => void handleDelete()}>
+                {t("search.delete_button")}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        hasQuery && !hasAdvancedFilter ? (
           <button type="button" className="link-button" onClick={reset}>
             {t("search.clear_button")}
           </button>
-        ) : null}
-      </div>
-
-      <div className="saved-searches">
-        <select
-          aria-label={t("search.saved_searches_label")}
-          value={selectedSavedSearchId}
-          onChange={(event) => handleSelectSaved(event.target.value)}
-        >
-          <option value="">{t("search.saved_searches_placeholder")}</option>
-          {savedSearches.map((saved) => (
-            <option key={saved.id} value={saved.id}>
-              {saved.name}
-            </option>
-          ))}
-        </select>
-        <input
-          type="text"
-          value={saveName}
-          onChange={(event) => setSaveName(event.target.value)}
-          placeholder={t("search.save_new_placeholder")}
-          aria-label={t("search.save_new_placeholder")}
-        />
-        <button
-          type="button"
-          disabled={!hasQuery || !saveName.trim()}
-          onClick={() => void handleSaveOrUpdate()}
-        >
-          {selectedSavedSearchId ? t("search.update_button") : t("search.save_button")}
-        </button>
-        {selectedSavedSearchId ? (
-          <button type="button" className="link-button" onClick={() => void handleDelete()}>
-            {t("search.delete_button")}
-          </button>
-        ) : null}
-      </div>
+        ) : null
+      )}
 
       {error ? (
         <p className="error" role="alert">

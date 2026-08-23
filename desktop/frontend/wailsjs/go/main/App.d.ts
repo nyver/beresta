@@ -75,6 +75,8 @@ export function LockAccount():Promise<void>;
 
 export function MoveNotebook(arg1:string,arg2:string):Promise<void>;
 
+export function NoteTagsByWorkspace():Promise<Record<string, Array<string>>>;
+
 export function PickAttachmentFile():Promise<string>;
 
 export function PickBackupDirectory():Promise<string>;

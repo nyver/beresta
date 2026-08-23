@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import {
   createNote,
+  createTag,
   deleteNote,
   ensureDailyBackup,
   getSettings,
@@ -9,7 +10,9 @@ import {
   listNotes,
   listTags,
   lockAccount,
+  noteTagsByWorkspace,
   searchByTag,
+  setNoteTag,
   updateSettings,
   unwrapError,
   verifyAllBackups,
@@ -58,6 +61,10 @@ export function Shell({ account, onLocked }: ShellProps) {
   const [notebooks, setNotebooks] = useState<main.NotebookDTO[]>([]);
   const [tags, setTags] = useState<main.TagDTO[]>([]);
   const [notes, setNotes] = useState<main.NoteDTO[]>([]);
+  // Every note's current tag membership, note id -> tag ids, loaded once
+  // up front (App.NoteTagsByWorkspace) alongside notebooks/tags/notes so
+  // NoteEditorPane's tag editor never needs a per-note fetch.
+  const [noteTagIds, setNoteTagIds] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,11 +91,12 @@ export function Shell({ account, onLocked }: ShellProps) {
   const loadAll = useCallback(() => {
     setLoading(true);
     setError(null);
-    Promise.all([listNotebooks(), listTags(), listNotes()])
-      .then(([loadedNotebooks, loadedTags, loadedNotes]) => {
+    Promise.all([listNotebooks(), listTags(), listNotes(), noteTagsByWorkspace()])
+      .then(([loadedNotebooks, loadedTags, loadedNotes, loadedNoteTagIds]) => {
         setNotebooks(loadedNotebooks);
         setTags(loadedTags);
         setNotes(loadedNotes);
+        setNoteTagIds(loadedNoteTagIds);
       })
       .catch((thrown: unknown) => setError(errorMessage(unwrapError(thrown))))
       .finally(() => setLoading(false));
@@ -235,6 +243,64 @@ export function Shell({ account, onLocked }: ShellProps) {
       current === null ? current : current.filter((result) => result.note.id !== noteId),
     );
     setSelectedNoteId("");
+  }
+
+  function handleNotebookMoved(notebookId: string, newParentId: string) {
+    setNotebooks((current) =>
+      current.map((notebook) => (notebook.id === notebookId ? { ...notebook, parent_id: newParentId } : notebook)),
+    );
+  }
+
+  function handleNoteMoved(noteId: string, notebookId: string) {
+    // Same three-state patch as handleTitleCommitted/handleDeleteNote: a
+    // note dragged onto a different notebook needs its notebook_id updated
+    // everywhere it might currently be displayed from.
+    const refile = (note: main.NoteDTO) => (note.id === noteId ? { ...note, notebook_id: notebookId } : note);
+    setNotes((current) => current.map(refile));
+    setTagNotes((current) => current.map(refile));
+    setSearchResults((current) =>
+      current === null
+        ? current
+        : current.map((result) => main.SearchResultDTO.createFrom({ ...result, note: refile(result.note) })),
+    );
+    // Dragging the currently open note out of the notebook currently being
+    // browsed would otherwise leave it "open" in the editor pane while
+    // having just vanished from the note list beside it - clearing the
+    // selection here instead falls back to the same empty-state placeholder
+    // handleDeleteNote already uses for an equivalent disappearance.
+    if (selectedNoteId === noteId && selection.kind === "notebook" && selection.id !== notebookId) {
+      setSelectedNoteId("");
+    }
+  }
+
+  async function handleToggleNoteTag(noteId: string, tagId: string, present: boolean) {
+    await setNoteTag(noteId, tagId, present);
+    setNoteTagIds((current) => {
+      const existing = current[noteId] ?? [];
+      const next = present ? [...new Set([...existing, tagId])] : existing.filter((id) => id !== tagId);
+      return { ...current, [noteId]: next };
+    });
+  }
+
+  async function handleCreateAndAssignTag(noteId: string, name: string) {
+    const tag = await createTag(name);
+    setTags((current) => [...current, tag]);
+    await handleToggleNoteTag(noteId, tag.id, true);
+  }
+
+  function handleTagCreated(tag: main.TagDTO) {
+    setTags((current) => [...current, tag]);
+  }
+
+  function handleTagDeleted(tagId: string) {
+    setTags((current) => current.filter((tag) => tag.id !== tagId));
+    // A deleted tag can no longer be a valid sidebar selection; its notes
+    // are still reachable via "All Notes" or a notebook, just no longer
+    // filterable by this tag (mirrors NotebookTree.onDeleted's fallback).
+    if (selection.kind === "tag" && selection.id === tagId) {
+      searchBarRef.current?.clear();
+      setSelection({ kind: "all" });
+    }
   }
 
   async function handleLock() {
@@ -394,6 +460,8 @@ export function Shell({ account, onLocked }: ShellProps) {
                   setSelection({ kind: "all" });
                 }
               }}
+              onMoved={handleNotebookMoved}
+              onNoteMoved={handleNoteMoved}
             />
             <TagList
               tags={tags}
@@ -402,22 +470,20 @@ export function Shell({ account, onLocked }: ShellProps) {
                 searchBarRef.current?.clear();
                 setSelection({ kind: "tag", id });
               }}
+              onCreated={handleTagCreated}
+              onDeleted={handleTagDeleted}
             />
           </aside>
           <section className="shell-notes">
-            <div className="shell-notes-toolbar">
-              <button type="button" onClick={() => void handleCreateNote()} disabled={creatingNote}>
-                {t("shell.new_note_button")}
-              </button>
-              {noteCreateError ? (
-                <p className="error" role="alert">
-                  {noteCreateError}
-                </p>
-              ) : null}
-            </div>
+            {noteCreateError ? (
+              <p className="error" role="alert">
+                {noteCreateError}
+              </p>
+            ) : null}
             <SearchBar
               ref={searchBarRef}
               tags={tags}
+              notes={notes}
               onResultsChange={(results, terms) => {
                 setSearchResults(results);
                 setHighlightTerms(terms);
@@ -438,8 +504,14 @@ export function Shell({ account, onLocked }: ShellProps) {
             <NoteEditorPane
               ref={editorPaneRef}
               note={selectedNote}
+              tags={tags}
+              assignedTagIds={selectedNote ? (noteTagIds[selectedNote.id] ?? []) : []}
               onTitleCommitted={handleTitleCommitted}
               onDeleted={handleDeleteNote}
+              onCreateNote={() => void handleCreateNote()}
+              creatingNote={creatingNote}
+              onToggleTag={handleToggleNoteTag}
+              onCreateTag={handleCreateAndAssignTag}
             />
           </section>
         </div>

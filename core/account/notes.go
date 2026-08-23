@@ -278,6 +278,19 @@ func (a *Account) ListTags(ctx context.Context, workspaceID model.ID) ([]store.T
 	return store.ListTags(ctx, db, workspaceID)
 }
 
+// NoteTagIDsByWorkspace returns every note's current tag membership in a
+// workspace, keyed by note ID.
+func (a *Account) NoteTagIDsByWorkspace(ctx context.Context, workspaceID model.ID) (map[model.ID][]model.ID, error) {
+	a.mu.Lock()
+	if a.locked {
+		a.mu.Unlock()
+		return nil, ErrAccountLocked
+	}
+	db := a.db
+	a.mu.Unlock()
+	return store.NoteTagIDsByWorkspace(ctx, db, workspaceID)
+}
+
 // mutateWorkspace ticks the clock and runs apply against the account's
 // database (captured under lock, not read fresh from a.db) outside an
 // explicit transaction, then advances the persisted device clock. It is

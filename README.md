@@ -66,7 +66,21 @@ accessible notebook tree, tag navigation (via a dedicated `SearchByTag`
 binding that reuses the same search index as the search box, without its
 text-query quoting limitations), and a virtualized note list
 (`@tanstack/react-virtual`, since the account ceiling is 20,000 notes)
-selecting into a working note editor. The editor is Quill 2 bound to the
+selecting into a working note editor. Notebook, note, and tag creation and
+deletion live behind a per-row "⋮" kebab menu (`shell/KebabMenu.tsx`) next
+to each item's name rather than always-visible buttons, and both trees
+support drag-and-drop reorganization: dropping a notebook onto another
+reparents it (and everything filed under it) via the existing
+`MoveNotebook` cycle-checked binding, and dragging a note from the list
+onto a notebook row refiles it via `SetNoteNotebook` - both are plain
+reparenting/refiling, since neither `store.Notebook` nor `model.Note`
+carries a persisted sibling order to reorder within a level. Tags
+themselves are created inline from the sidebar's tag list, and assigned to
+or removed from the open note via a chip editor in the note header
+(`shell/NoteTagsEditor.tsx`, backed by `App.NoteTagsByWorkspace` and the
+existing `SetNoteTag`/`CreateTag` bindings) - previously tags could only be
+browsed and filtered, never created or attached from the UI. The editor is
+Quill 2 bound to the
 note's Yjs `Y.Text` through `y-quill` - matching `core/sync/yjsadapter`'s
 own Quill-Delta-compatible document model exactly, so the toolbar is
 deliberately restricted to the formatting marks the Go core's canonical
@@ -82,17 +96,28 @@ clipboard module can turn it into an unexportable inline blot — see
 file…" picker button; a still-queued item can be canceled, image
 attachments get an inline decrypt-to-memory preview capped at 8 MiB (never
 written to disk, matching the no-plaintext-attachment-cache rule below),
-and "Save as…" decrypts straight to a user-chosen destination. The note
-list's search box (debounced ~150 ms after the last keystroke) composes
-free text with tag/after/before/include-deleted filter controls into the
-same `tag:`/`after:`/`before:`/`deleted:true` query language `SavedSearch`
-stores verbatim, so saved searches round-trip through the same box; an
-active search overrides the sidebar's notebook/tag browsing (cleared by
-picking a notebook or tag, or by the box's own Clear button) and highlights
-its matched free-text terms in each result's title. It runs through the
-same `App.Search` → `core/account.Search` → `store.SearchNotes` path that
+clicking a thumbnail opens it enlarged in a lightbox `Modal` reusing that
+same already-decrypted preview, and "Save as…"/"Remove" now live behind
+each row's kebab menu, decrypting straight to a user-chosen destination.
+The note list's search box leads with a plain text field; the tag/date/
+include-deleted filter controls and saved-search management are collapsed
+behind a "Filters & saved searches" disclosure by default so they do not
+crowd the sidebar. With no such filter engaged, typing free text matches
+notes by partial, case-insensitive note title entirely client-side against
+the already-loaded note list - instant, and able to match mid-word,
+unlike the backend FTS5 index's whole-token-only `unicode61` tokenizer.
+Engaging any filter (or typing a query already containing one of the
+`tag:`/`after:`/`before:`/`deleted:true` tokens directly, as a loaded saved
+search's stored query does) instead composes free text with those filters
+into that same query language and runs it through the debounced (~150 ms)
+`App.Search` → `core/account.Search` → `store.SearchNotes` path that
 `core/store`'s 20,000-note / 150 ms budget test already benchmarks (see
-above), so that budget covers this UI's queries too. A note's history
+above), so that budget covers this UI's queries too; `SavedSearch` stores
+the composed query verbatim so saved searches round-trip through the same
+box. Either way, an active search overrides the sidebar's notebook/tag
+browsing (cleared by picking a notebook or tag, or by the box's own Clear
+button) and highlights its matched free-text term in each result's title.
+A note's history
 panel lists its retained revisions (newest first, checkpoints marked),
 diffs the selected one against its predecessor, and can restore it as a
 new current revision without erasing anything in between - restoring

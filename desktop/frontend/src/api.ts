@@ -10,6 +10,7 @@ import {
   CreateNote,
   CreateNotebook,
   CreateSavedSearch,
+  CreateTag,
   DefaultDatabasePath,
   DeleteNote,
   DeleteSavedSearch,
@@ -32,6 +33,8 @@ import {
   ListSyncQuarantine,
   ListTags,
   LockAccount,
+  MoveNotebook,
+  NoteTagsByWorkspace,
   PickAttachmentFile,
   PickBackupDirectory,
   PickExportDestination,
@@ -50,7 +53,10 @@ import {
   SaveAttachmentToFile,
   Search,
   SearchByTag,
+  SetNoteNotebook,
   SetNotebookDeleted,
+  SetNoteTag,
+  SetTagDeleted,
   Status,
   SyncStatus,
   UnlockAccount,
@@ -315,6 +321,41 @@ export async function deleteNote(noteId: string): Promise<void> {
  * the tree and remain reachable via "All Notes" or search. */
 export async function deleteNotebook(notebookId: string): Promise<void> {
   return SetNotebookDeleted(notebookId, true);
+}
+
+/** moveNotebook reassigns a notebook's parent (drag-and-drop reparenting).
+ * An empty newParentId moves it to the workspace root. The backend rejects
+ * a move that would create a cycle (dropping a notebook onto its own
+ * descendant). */
+export async function moveNotebook(notebookId: string, newParentId: string): Promise<void> {
+  return MoveNotebook(notebookId, newParentId);
+}
+
+/** setNoteNotebook refiles a note into a different notebook (drag-and-drop),
+ * or to the workspace root when notebookId is "". */
+export async function setNoteNotebook(noteId: string, notebookId: string): Promise<void> {
+  return SetNoteNotebook(noteId, notebookId);
+}
+
+export async function createTag(name: string): Promise<main.TagDTO> {
+  return CreateTag(name);
+}
+
+/** deleteTag tombstones a tag; it stops appearing anywhere but existing
+ * note associations are preserved history, not removed. */
+export async function deleteTag(tagId: string): Promise<void> {
+  return SetTagDeleted(tagId, true);
+}
+
+/** setNoteTag adds or removes a note's membership in one tag. */
+export async function setNoteTag(noteId: string, tagId: string, present: boolean): Promise<void> {
+  return SetNoteTag(noteId, tagId, present);
+}
+
+/** noteTagsByWorkspace returns every note's current tag membership as
+ * note id -> tag ids, for the account's workspace. */
+export async function noteTagsByWorkspace(): Promise<Record<string, string[]>> {
+  return NoteTagsByWorkspace();
 }
 
 export async function getNoteDocument(noteId: string): Promise<main.NoteDocumentDTO> {

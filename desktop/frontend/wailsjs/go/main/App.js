@@ -146,6 +146,10 @@ export function MoveNotebook(arg1, arg2) {
   return window['go']['main']['App']['MoveNotebook'](arg1, arg2);
 }
 
+export function NoteTagsByWorkspace() {
+  return window['go']['main']['App']['NoteTagsByWorkspace']();
+}
+
 export function PickAttachmentFile() {
   return window['go']['main']['App']['PickAttachmentFile']();
 }

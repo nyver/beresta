@@ -139,20 +139,30 @@ describe("Shell", () => {
     const user = userEvent.setup();
 
     await screen.findByText("Browsed note");
-    await user.type(screen.getByPlaceholderText("search.placeholder"), "found");
+    // A bare word would now be matched client-side against the already-
+    // loaded note list (task 1.2's partial title match), which never
+    // includes a search-only result like foundNote; a filter token routes
+    // it through the mocked backend Search() call instead, exercising the
+    // override-then-restore behavior this test is actually about.
+    await user.type(screen.getByPlaceholderText("search.placeholder"), "deleted:true");
 
     // The typed query also becomes a highlight term, so "Found" renders
     // inside its own <mark>, splitting the row's text across elements -
-    // findByText's exact string match cannot see across that split. Scoped
-    // to the listbox because the search filters' <select> options also
-    // carry an implicit "option" role.
-    const noteList = screen.getByRole("listbox");
-    await waitFor(() => expect(within(noteList).getByRole("option")).toHaveTextContent("Found via search"));
+    // findByText's exact string match cannot see across that split. The
+    // listbox itself is re-queried on every poll (not captured once)
+    // because the client-side title match briefly renders the "no
+    // results" message in its place while "deleted:true" is still being
+    // typed one character at a time, before the debounced backend call
+    // (routed here by the filter token) settles - re-querying avoids
+    // asserting against a node React has already detached.
+    await waitFor(() =>
+      expect(within(screen.getByRole("listbox")).getByRole("option")).toHaveTextContent("Found via search"),
+    );
     expect(screen.queryByText("Browsed note")).not.toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: "Work" }));
 
-    await waitFor(() => expect(within(noteList).queryByRole("option")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
     expect(screen.getByPlaceholderText("search.placeholder")).toHaveValue("");
   });
 
@@ -342,7 +352,8 @@ describe("Shell", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "Work" }));
-    await user.click(await screen.findByRole("button", { name: "shell.delete_notebook" }));
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_notebook" }));
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(appMock.SetNotebookDeleted).toHaveBeenCalledWith(notebook.id, true);
@@ -361,7 +372,8 @@ describe("Shell", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByText("Grocery list"));
-    await user.click(await screen.findByRole("button", { name: "shell.delete_note" }));
+    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_note" }));
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(appMock.DeleteNote).toHaveBeenCalledWith(note.id);

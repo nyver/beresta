@@ -400,3 +400,25 @@ func (a *App) ListTags() ([]TagDTO, error) {
 	}
 	return out, nil
 }
+
+// NoteTagsByWorkspace returns every note's current tag membership in the
+// account's workspace, keyed by note ID.
+func (a *App) NoteTagsByWorkspace() (map[string][]string, error) {
+	acc, workspaceID, err := a.primaryWorkspace()
+	if err != nil {
+		return nil, mapError(err)
+	}
+	byNote, err := acc.NoteTagIDsByWorkspace(a.requestContext(), workspaceID)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := make(map[string][]string, len(byNote))
+	for noteID, tagIDs := range byNote {
+		ids := make([]string, len(tagIDs))
+		for i, id := range tagIDs {
+			ids[i] = idString(id)
+		}
+		out[idString(noteID)] = ids
+	}
+	return out, nil
+}

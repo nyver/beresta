@@ -22,6 +22,8 @@ import { formatBytes } from "../format";
 import { useI18n } from "../i18n";
 import { OnFileDrop, OnFileDropOff } from "../../wailsjs/runtime/runtime";
 import { main } from "../../wailsjs/go/models";
+import { KebabMenu } from "./KebabMenu";
+import { Modal } from "./Modal";
 
 export interface AttachmentPanelHandle {
   /** Queues one or more in-memory files (clipboard paste) for upload. See
@@ -103,6 +105,9 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
     const [loadError, setLoadError] = useState<string | null>(null);
     const [previews, setPreviews] = useState<Record<string, string>>({});
     const [itemError, setItemError] = useState<string | null>(null);
+    // Blob id of the attachment currently shown enlarged in the lightbox
+    // Modal, or null when it's closed.
+    const [viewingBlobId, setViewingBlobId] = useState<string | null>(null);
     // The upload queue's processing order and item lifecycle live in a ref,
     // not React state: processQueue's loop needs to read-modify-write the
     // queue synchronously between awaits, and two enqueue() calls racing
@@ -359,33 +364,55 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
           <p className="hint">{t("attachments.empty")}</p>
         ) : (
           <ul className="attachment-list">
-            {attachments.map((attachment) => (
-              <li key={attachment.blob_id} className="attachment-row">
-                {previews[attachment.blob_id] ? (
-                  <img
-                    className="attachment-thumbnail"
-                    src={previews[attachment.blob_id]}
-                    alt={attachment.display_name}
+            {attachments.map((attachment) => {
+              const preview = previews[attachment.blob_id];
+              return (
+                <li key={attachment.blob_id} className="attachment-row">
+                  {preview ? (
+                    <img
+                      className="attachment-thumbnail"
+                      src={preview}
+                      alt={attachment.display_name}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setViewingBlobId(attachment.blob_id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setViewingBlobId(attachment.blob_id);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span className="attachment-thumbnail attachment-thumbnail-placeholder" aria-hidden="true" />
+                  )}
+                  <span className="attachment-name">{attachment.display_name}</span>
+                  <span className="attachment-size">{formatBytes(attachment.size_bytes)}</span>
+                  <KebabMenu
+                    label={`${t("attachments.actions")}: ${attachment.display_name}`}
+                    items={[
+                      { label: t("attachments.save_button"), onSelect: () => void handleSave(attachment) },
+                      {
+                        label: t("attachments.remove_button"),
+                        onSelect: () => void handleRemove(attachment.blob_id),
+                        destructive: true,
+                      },
+                    ]}
                   />
-                ) : (
-                  <span className="attachment-thumbnail attachment-thumbnail-placeholder" aria-hidden="true" />
-                )}
-                <span className="attachment-name">{attachment.display_name}</span>
-                <span className="attachment-size">{formatBytes(attachment.size_bytes)}</span>
-                <button type="button" onClick={() => void handleSave(attachment)}>
-                  {t("attachments.save_button")}
-                </button>
-                <button
-                  type="button"
-                  className="link-button"
-                  onClick={() => void handleRemove(attachment.blob_id)}
-                >
-                  {t("attachments.remove_button")}
-                </button>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
+
+        {viewingBlobId && previews[viewingBlobId] ? (
+          <Modal
+            title={attachments.find((attachment) => attachment.blob_id === viewingBlobId)?.display_name ?? ""}
+            onClose={() => setViewingBlobId(null)}
+          >
+            <img className="lightbox-image" src={previews[viewingBlobId]} alt="" />
+          </Modal>
+        ) : null}
       </section>
     );
   },

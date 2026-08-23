@@ -13,6 +13,8 @@ function renderTree(notebooks: ReturnType<typeof fakeNotebook>[], selectedId: st
   const onSelect = vi.fn();
   const onCreated = vi.fn();
   const onDeleted = vi.fn();
+  const onMoved = vi.fn();
+  const onNoteMoved = vi.fn();
   render(
     <I18nProvider>
       <NotebookTree
@@ -21,10 +23,12 @@ function renderTree(notebooks: ReturnType<typeof fakeNotebook>[], selectedId: st
         onSelect={onSelect}
         onCreated={onCreated}
         onDeleted={onDeleted}
+        onMoved={onMoved}
+        onNoteMoved={onNoteMoved}
       />
     </I18nProvider>,
   );
-  return { onSelect, onCreated, onDeleted };
+  return { onSelect, onCreated, onDeleted, onMoved, onNoteMoved };
 }
 
 describe("NotebookTree", () => {
@@ -60,12 +64,14 @@ describe("NotebookTree", () => {
     expect(screen.queryByRole("button", { name: "Deleted" })).not.toBeInTheDocument();
   });
 
-  it("creates a new root notebook from the inline form", async () => {
+  it("creates a new root notebook from the section menu", async () => {
     const created = fakeNotebook({ name: "Personal" });
     appMock.CreateNotebook.mockResolvedValue(created);
     const { onCreated } = renderTree([]);
     const user = userEvent.setup();
 
+    await user.click(await screen.findByRole("button", { name: "shell.notebooks_section_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.new_notebook_menu_item" }));
     await user.type(
       await screen.findByRole("textbox", { name: "shell.new_notebook_placeholder" }),
       "Personal",
@@ -83,6 +89,8 @@ describe("NotebookTree", () => {
     renderTree([]);
     const user = userEvent.setup();
 
+    await user.click(await screen.findByRole("button", { name: "shell.notebooks_section_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.new_notebook_menu_item" }));
     await user.type(
       await screen.findByRole("textbox", { name: "shell.new_notebook_placeholder" }),
       "Personal",
@@ -92,13 +100,33 @@ describe("NotebookTree", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
   });
 
+  it("creates a child notebook from a row's menu", async () => {
+    const root = fakeNotebook({ name: "Work" });
+    const created = fakeNotebook({ name: "Projects", parent_id: root.id });
+    appMock.CreateNotebook.mockResolvedValue(created);
+    const { onCreated } = renderTree([root]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.new_notebook_menu_item" }));
+    await user.type(
+      await screen.findByRole("textbox", { name: "shell.new_notebook_placeholder" }),
+      "Projects",
+    );
+    await user.click(await screen.findByRole("button", { name: "shell.new_notebook_button" }));
+
+    expect(appMock.CreateNotebook).toHaveBeenCalledWith(root.id, "Projects");
+    expect(onCreated).toHaveBeenCalledWith(created);
+  });
+
   it("deletes a notebook after the inline confirmation", async () => {
     const root = fakeNotebook({ name: "Work" });
     appMock.SetNotebookDeleted.mockResolvedValue(undefined);
     const { onDeleted } = renderTree([root]);
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "shell.delete_notebook" }));
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_notebook" }));
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(appMock.SetNotebookDeleted).toHaveBeenCalledWith(root.id, true);
@@ -110,12 +138,13 @@ describe("NotebookTree", () => {
     const { onDeleted } = renderTree([root]);
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "shell.delete_notebook" }));
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_notebook" }));
     await user.click(await screen.findByRole("button", { name: "common.cancel" }));
 
     expect(appMock.SetNotebookDeleted).not.toHaveBeenCalled();
     expect(onDeleted).not.toHaveBeenCalled();
-    expect(await screen.findByRole("button", { name: "shell.delete_notebook" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "shell.notebook_actions: Work" })).toBeInTheDocument();
   });
 
   it("shows an error when notebook deletion fails", async () => {
@@ -126,7 +155,8 @@ describe("NotebookTree", () => {
     renderTree([root]);
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "shell.delete_notebook" }));
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_notebook" }));
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");

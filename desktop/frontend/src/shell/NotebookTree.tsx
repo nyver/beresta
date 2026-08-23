@@ -1,9 +1,16 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 
-import { createNotebook, deleteNotebook, unwrapError } from "../api";
+import { createNotebook, deleteNotebook, moveNotebook, setNoteNotebook, unwrapError } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { KebabMenu } from "./KebabMenu";
 import { buildNotebookTree, flattenVisibleNotebooks, type NotebookNode } from "./notebookTreeModel";
+
+// Custom drag payload types (see NoteList.tsx for the note-side source):
+// distinguishing them lets a single drop target (a notebook row) tell a
+// dragged notebook (reparent) apart from a dragged note (refile).
+const DRAG_TYPE_NOTEBOOK = "application/x-beresta-notebook-id";
+const DRAG_TYPE_NOTE = "application/x-beresta-note-id";
 
 export interface NotebookTreeProps {
   notebooks: main.NotebookDTO[];
@@ -17,6 +24,13 @@ export interface NotebookTreeProps {
   /** Called after a notebook has been durably tombstoned, so the caller
    * (Shell) can drop it from its own notebooks state. */
   onDeleted: (notebookId: string) => void;
+  /** Called after a notebook has been durably reparented (drag-and-drop),
+   * so the caller can patch its own notebooks state's parent_id. */
+  onMoved: (notebookId: string, newParentId: string) => void;
+  /** Called after a note has been durably refiled into a different
+   * notebook (dragged from the note list), so the caller can patch its own
+   * notes state's notebook_id. */
+  onNoteMoved: (noteId: string, notebookId: string) => void;
 }
 
 /**
@@ -26,9 +40,22 @@ export interface NotebookTreeProps {
  * this size, native interactive elements give the same real keyboard
  * accessibility with far less custom event-handling code to get right.
  */
-export function NotebookTree({ notebooks, selectedId, onSelect, onCreated, onDeleted }: NotebookTreeProps) {
+export function NotebookTree({
+  notebooks,
+  selectedId,
+  onSelect,
+  onCreated,
+  onDeleted,
+  onMoved,
+  onNoteMoved,
+}: NotebookTreeProps) {
   const { t, errorMessage } = useI18n();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  // Which row's "create a notebook here" inline form is open: "" means the
+  // root-level form (triggered from the section header's kebab), a
+  // notebook id means that row's "new subnotebook" form, null means none
+  // open. Only one at a time, mirroring confirmingDeleteId below.
+  const [creatingParentId, setCreatingParentId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -38,6 +65,10 @@ export function NotebookTree({ notebooks, selectedId, onSelect, onCreated, onDel
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Id of the row currently under a valid drag-over (for the highlight
+  // outline); "" is the "All Notes" root drop target.
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   const tree = useMemo(() => buildNotebookTree(notebooks), [notebooks]);
   const visible = useMemo(() => flattenVisibleNotebooks(tree, expanded), [tree, expanded]);
@@ -54,15 +85,22 @@ export function NotebookTree({ notebooks, selectedId, onSelect, onCreated, onDel
     });
   }
 
+  function startCreate(parentId: string) {
+    setCreateError(null);
+    setNewName("");
+    setCreatingParentId(parentId);
+  }
+
   async function handleCreate() {
     const name = newName.trim();
-    if (!name || creating) return;
+    if (!name || creating || creatingParentId === null) return;
     setCreating(true);
     setCreateError(null);
     try {
-      const notebook = await createNotebook("", name);
+      const notebook = await createNotebook(creatingParentId, name);
       onCreated(notebook);
       setNewName("");
+      setCreatingParentId(null);
     } catch (thrown: unknown) {
       setCreateError(errorMessage(unwrapError(thrown)));
     } finally {
@@ -84,34 +122,112 @@ export function NotebookTree({ notebooks, selectedId, onSelect, onCreated, onDel
     }
   }
 
+  function acceptsDrag(event: DragEvent) {
+    return event.dataTransfer.types.includes(DRAG_TYPE_NOTEBOOK) || event.dataTransfer.types.includes(DRAG_TYPE_NOTE);
+  }
+
+  function handleDragOver(rowId: string, event: DragEvent) {
+    if (!acceptsDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dragOverId !== rowId) setDragOverId(rowId);
+  }
+
+  function handleDragLeave(rowId: string) {
+    setDragOverId((current) => (current === rowId ? null : current));
+  }
+
+  async function handleDrop(targetNotebookId: string, event: DragEvent) {
+    event.preventDefault();
+    setDragOverId(null);
+    const draggedNotebookId = event.dataTransfer.getData(DRAG_TYPE_NOTEBOOK);
+    const draggedNoteId = event.dataTransfer.getData(DRAG_TYPE_NOTE);
+    setMoveError(null);
+    try {
+      if (draggedNotebookId) {
+        if (draggedNotebookId === targetNotebookId) return;
+        await moveNotebook(draggedNotebookId, targetNotebookId);
+        onMoved(draggedNotebookId, targetNotebookId);
+      } else if (draggedNoteId) {
+        await setNoteNotebook(draggedNoteId, targetNotebookId);
+        onNoteMoved(draggedNoteId, targetNotebookId);
+      }
+    } catch (thrown: unknown) {
+      setMoveError(errorMessage(unwrapError(thrown)));
+    }
+  }
+
   return (
     <nav aria-label={t("shell.notebooks_section")} className="notebook-tree">
-      <h2>{t("shell.notebooks_section")}</h2>
+      <div className="tree-section-header">
+        <h2>{t("shell.notebooks_section")}</h2>
+        <KebabMenu
+          label={t("shell.notebooks_section_actions")}
+          items={[{ label: t("shell.new_notebook_menu_item"), onSelect: () => startCreate("") }]}
+        />
+      </div>
       <button
         type="button"
-        className={`tree-row${selectedId === "" ? " selected" : ""}`}
+        className={`tree-row${selectedId === "" ? " selected" : ""}${dragOverId === "" ? " drag-over" : ""}`}
         onClick={() => onSelect("")}
+        onDragOver={(event) => handleDragOver("", event)}
+        onDragLeave={() => handleDragLeave("")}
+        onDrop={(event) => void handleDrop("", event)}
       >
         {t("shell.all_notes")}
       </button>
+      {creatingParentId === "" ? (
+        <NotebookCreateForm
+          name={newName}
+          creating={creating}
+          onChange={setNewName}
+          onSubmit={() => void handleCreate()}
+          onCancel={() => setCreatingParentId(null)}
+        />
+      ) : null}
+      {createError && creatingParentId === "" ? (
+        <p className="error" role="alert">
+          {createError}
+        </p>
+      ) : null}
       <ul>
         {visible.map((node) => (
-          <NotebookRow
-            key={node.notebook.id}
-            node={node}
-            expanded={expanded.has(node.notebook.id)}
-            selected={node.notebook.id === selectedId}
-            onToggle={() => toggle(node.notebook.id)}
-            onSelect={() => onSelect(node.notebook.id)}
-            confirmingDelete={confirmingDeleteId === node.notebook.id}
-            deleting={deleting}
-            onRequestDelete={() => {
-              setDeleteError(null);
-              setConfirmingDeleteId(node.notebook.id);
-            }}
-            onCancelDelete={() => setConfirmingDeleteId(null)}
-            onConfirmDelete={() => void handleDelete(node.notebook.id)}
-          />
+          <li key={node.notebook.id} style={{ paddingLeft: `${node.depth}rem` }}>
+            <NotebookRow
+              node={node}
+              expanded={expanded.has(node.notebook.id)}
+              selected={node.notebook.id === selectedId}
+              dragOver={dragOverId === node.notebook.id}
+              onToggle={() => toggle(node.notebook.id)}
+              onSelect={() => onSelect(node.notebook.id)}
+              confirmingDelete={confirmingDeleteId === node.notebook.id}
+              deleting={deleting}
+              onRequestCreateChild={() => startCreate(node.notebook.id)}
+              onRequestDelete={() => {
+                setDeleteError(null);
+                setConfirmingDeleteId(node.notebook.id);
+              }}
+              onCancelDelete={() => setConfirmingDeleteId(null)}
+              onConfirmDelete={() => void handleDelete(node.notebook.id)}
+              onDragOver={(event) => handleDragOver(node.notebook.id, event)}
+              onDragLeave={() => handleDragLeave(node.notebook.id)}
+              onDrop={(event) => void handleDrop(node.notebook.id, event)}
+            />
+            {creatingParentId === node.notebook.id ? (
+              <NotebookCreateForm
+                name={newName}
+                creating={creating}
+                onChange={setNewName}
+                onSubmit={() => void handleCreate()}
+                onCancel={() => setCreatingParentId(null)}
+              />
+            ) : null}
+            {createError && creatingParentId === node.notebook.id ? (
+              <p className="error" role="alert">
+                {createError}
+              </p>
+            ) : null}
+          </li>
         ))}
       </ul>
       {deleteError ? (
@@ -119,30 +235,52 @@ export function NotebookTree({ notebooks, selectedId, onSelect, onCreated, onDel
           {deleteError}
         </p>
       ) : null}
-      <form
-        className="notebook-create"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void handleCreate();
-        }}
-      >
-        <input
-          type="text"
-          value={newName}
-          onChange={(event) => setNewName(event.target.value)}
-          placeholder={t("shell.new_notebook_placeholder")}
-          aria-label={t("shell.new_notebook_placeholder")}
-        />
-        <button type="submit" disabled={creating || !newName.trim()}>
-          {t("shell.new_notebook_button")}
-        </button>
-      </form>
-      {createError ? (
+      {moveError ? (
         <p className="error" role="alert">
-          {createError}
+          {moveError}
         </p>
       ) : null}
     </nav>
+  );
+}
+
+function NotebookCreateForm({
+  name,
+  creating,
+  onChange,
+  onSubmit,
+  onCancel,
+}: {
+  name: string;
+  creating: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <form
+      className="notebook-create"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      <input
+        type="text"
+        autoFocus
+        value={name}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t("shell.new_notebook_placeholder")}
+        aria-label={t("shell.new_notebook_placeholder")}
+      />
+      <button type="submit" disabled={creating || !name.trim()}>
+        {t("shell.new_notebook_button")}
+      </button>
+      <button type="button" className="link-button" onClick={onCancel} disabled={creating}>
+        {t("common.cancel")}
+      </button>
+    </form>
   );
 }
 
@@ -150,30 +288,45 @@ function NotebookRow({
   node,
   expanded,
   selected,
+  dragOver,
   onToggle,
   onSelect,
   confirmingDelete,
   deleting,
+  onRequestCreateChild,
   onRequestDelete,
   onCancelDelete,
   onConfirmDelete,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   node: NotebookNode;
   expanded: boolean;
   selected: boolean;
+  dragOver: boolean;
   onToggle: () => void;
   onSelect: () => void;
   confirmingDelete: boolean;
   deleting: boolean;
+  onRequestCreateChild: () => void;
   onRequestDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
+  onDragOver: (event: DragEvent) => void;
+  onDragLeave: () => void;
+  onDrop: (event: DragEvent) => void;
 }) {
   const { t } = useI18n();
   const hasChildren = node.children.length > 0;
 
   return (
-    <li style={{ paddingLeft: `${node.depth}rem` }}>
+    <div
+      className={`notebook-row-container${dragOver ? " drag-over" : ""}`}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {hasChildren ? (
         <button
           type="button"
@@ -188,8 +341,13 @@ function NotebookRow({
       )}
       <button
         type="button"
+        draggable
         className={`tree-row${selected ? " selected" : ""}`}
         onClick={onSelect}
+        onDragStart={(event) => {
+          event.dataTransfer.setData(DRAG_TYPE_NOTEBOOK, node.notebook.id);
+          event.dataTransfer.effectAllowed = "move";
+        }}
       >
         {node.notebook.name}
       </button>
@@ -203,15 +361,14 @@ function NotebookRow({
           </button>
         </span>
       ) : (
-        <button
-          type="button"
-          className="tree-row-delete"
-          aria-label={t("shell.delete_notebook")}
-          onClick={onRequestDelete}
-        >
-          ×
-        </button>
+        <KebabMenu
+          label={`${t("shell.notebook_actions")}: ${node.notebook.name}`}
+          items={[
+            { label: t("shell.new_notebook_menu_item"), onSelect: onRequestCreateChild },
+            { label: t("shell.delete_notebook"), onSelect: onRequestDelete, destructive: true },
+          ]}
+        />
       )}
-    </li>
+    </div>
   );
 }

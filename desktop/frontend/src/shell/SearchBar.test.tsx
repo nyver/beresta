@@ -9,23 +9,24 @@ import { fakeSavedSearch, fakeTag, mockLocaleCatalog, mockSavedSearches, mockSet
 import { SearchBar, type SearchBarHandle } from "./SearchBar";
 import { main } from "../../wailsjs/go/models";
 
-function fakeResult(title: string): main.SearchResultDTO {
-  return main.SearchResultDTO.createFrom({
-    note: {
-      id: `note-${title}`,
-      workspace_id: "workspace",
-      notebook_id: "",
-      title,
-      pinned: false,
-      archived: false,
-      deleted: false,
-      created_unix_ms: 0,
-    },
-    rank: 0,
+function fakeNoteDTO(title: string): main.NoteDTO {
+  return main.NoteDTO.createFrom({
+    id: `note-${title}`,
+    workspace_id: "workspace",
+    notebook_id: "",
+    title,
+    pinned: false,
+    archived: false,
+    deleted: false,
+    created_unix_ms: 0,
   });
 }
 
-function renderSearchBar(tags: main.TagDTO[] = []) {
+function fakeResult(title: string): main.SearchResultDTO {
+  return main.SearchResultDTO.createFrom({ note: fakeNoteDTO(title), rank: 0 });
+}
+
+function renderSearchBar(tags: main.TagDTO[] = [], notes: main.NoteDTO[] = []) {
   mockLocaleCatalog();
   mockSettings();
   mockSavedSearches();
@@ -33,10 +34,16 @@ function renderSearchBar(tags: main.TagDTO[] = []) {
   const onResultsChange = vi.fn();
   render(
     <I18nProvider>
-      <SearchBar ref={ref} tags={tags} onResultsChange={onResultsChange} />
+      <SearchBar ref={ref} tags={tags} notes={notes} onResultsChange={onResultsChange} />
     </I18nProvider>,
   );
   return { ref, onResultsChange };
+}
+
+/** Opens the collapsed "Filters & saved searches" disclosure, which hides
+ * the tag/date/saved-search controls by default (task 1.1). */
+async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /search.advanced_toggle/ }));
 }
 
 describe("SearchBar", () => {
@@ -47,16 +54,39 @@ describe("SearchBar", () => {
     expect(appMock.Search).not.toHaveBeenCalled();
   });
 
-  it("debounces typed text and reports the results plus highlight terms", async () => {
-    appMock.Search.mockResolvedValue([fakeResult("Grocery list")]);
+  it("matches notes by partial title, entirely client-side", async () => {
+    const notes = [fakeNoteDTO("Grocery list"), fakeNoteDTO("Other note")];
+    const { onResultsChange } = renderSearchBar([], notes);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByPlaceholderText("search.placeholder"), "rocery");
+
+    await waitFor(() =>
+      expect(onResultsChange).toHaveBeenCalledWith([fakeResult("Grocery list")], ["rocery"]),
+    );
+    expect(appMock.Search).not.toHaveBeenCalled();
+  });
+
+  it("excludes deleted notes from the client-side title match", async () => {
+    const notes = [main.NoteDTO.createFrom({ ...fakeNoteDTO("Grocery list"), deleted: true })];
+    const { onResultsChange } = renderSearchBar([], notes);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByPlaceholderText("search.placeholder"), "grocery");
+
+    await waitFor(() => expect(onResultsChange).toHaveBeenCalledWith([], ["grocery"]));
+  });
+
+  it("routes text containing a filter token through the backend instead of a literal title match", async () => {
+    appMock.Search.mockResolvedValue([fakeResult("Urgent item")]);
     const { onResultsChange } = renderSearchBar();
     const user = userEvent.setup();
 
-    await user.type(screen.getByPlaceholderText("search.placeholder"), "grocery list");
+    await user.type(screen.getByPlaceholderText("search.placeholder"), "tag:urgent");
 
-    await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("grocery list"));
+    await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("tag:urgent"));
     await waitFor(() =>
-      expect(onResultsChange).toHaveBeenCalledWith([fakeResult("Grocery list")], ["grocery", "list"]),
+      expect(onResultsChange).toHaveBeenCalledWith([fakeResult("Urgent item")], ["tag:urgent"]),
     );
   });
 
@@ -68,20 +98,24 @@ describe("SearchBar", () => {
     const { onResultsChange } = renderSearchBar();
     const user = userEvent.setup();
 
-    await user.type(screen.getByPlaceholderText("search.placeholder"), "al");
-    await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("al"));
-    await user.type(screen.getByPlaceholderText("search.placeholder"), "p");
-    await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("alp"));
+    // A filter token forces the backend path (see the test above) so the
+    // debounce/race-guard behavior being tested here is actually exercised.
+    await user.type(screen.getByPlaceholderText("search.placeholder"), "deleted:true");
+    await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("deleted:true"));
+    await user.type(screen.getByPlaceholderText("search.placeholder"), " x");
+    await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("deleted:true x"));
 
-    // Resolve out of order: the newer query ("alp") answers first, the
-    // stale one ("al") answers after it - the stale response must not
-    // overwrite the newer result.
-    resolveFresh([fakeResult("Alp result")]);
-    await waitFor(() => expect(onResultsChange).toHaveBeenCalledWith([fakeResult("Alp result")], ["alp"]));
-    resolveStale([fakeResult("Al result")]);
+    // Resolve out of order: the newer query answers first, the stale one
+    // answers after it - the stale response must not overwrite the newer
+    // result.
+    resolveFresh([fakeResult("Fresh result")]);
+    await waitFor(() =>
+      expect(onResultsChange).toHaveBeenCalledWith([fakeResult("Fresh result")], ["deleted:true", "x"]),
+    );
+    resolveStale([fakeResult("Stale result")]);
 
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(onResultsChange).not.toHaveBeenCalledWith([fakeResult("Al result")], ["al"]);
+    expect(onResultsChange).not.toHaveBeenCalledWith([fakeResult("Stale result")], ["deleted:true"]);
   });
 
   it("composes the tag filter into the query text", async () => {
@@ -90,6 +124,7 @@ describe("SearchBar", () => {
     renderSearchBar([tag]);
     const user = userEvent.setup();
 
+    await openAdvanced(user);
     await user.selectOptions(screen.getByText("search.tag_filter_all").closest("select")!, tag.id);
 
     await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("tag:urgent"));
@@ -100,6 +135,7 @@ describe("SearchBar", () => {
     renderSearchBar();
     const user = userEvent.setup();
 
+    await openAdvanced(user);
     const [afterInput, beforeInput] = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
     await user.type(afterInput, "2026-01-01");
     await user.type(beforeInput, "2026-01-02");
@@ -115,13 +151,13 @@ describe("SearchBar", () => {
   });
 
   it("saves the current query as a new saved search and reloads the list", async () => {
-    appMock.Search.mockResolvedValue([]);
     appMock.CreateSavedSearch.mockResolvedValue(fakeSavedSearch({ id: "saved-1", name: "My search" }));
-    renderSearchBar();
+    const { onResultsChange } = renderSearchBar();
     const user = userEvent.setup();
 
+    await openAdvanced(user);
     await user.type(screen.getByPlaceholderText("search.placeholder"), "project");
-    await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("project"));
+    await waitFor(() => expect(onResultsChange).toHaveBeenCalledWith([], ["project"]));
     await user.type(screen.getByPlaceholderText("search.save_new_placeholder"), "My search");
     appMock.ListSavedSearches.mockResolvedValue([fakeSavedSearch({ id: "saved-1", name: "My search" })]);
     await user.click(screen.getByRole("button", { name: "search.save_button" }));
@@ -139,16 +175,19 @@ describe("SearchBar", () => {
     const onResultsChange = vi.fn();
     render(
       <I18nProvider>
-        <SearchBar tags={[]} onResultsChange={onResultsChange} />
+        <SearchBar tags={[]} notes={[]} onResultsChange={onResultsChange} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
 
+    await openAdvanced(user);
     await screen.findByText("Urgent items");
     await user.selectOptions(screen.getByLabelText("search.saved_searches_label"), "saved-1");
 
     expect(screen.getByPlaceholderText("search.placeholder")).toHaveValue("tag:urgent");
     expect(screen.getByRole("button", { name: "search.update_button" })).toBeInTheDocument();
+    // The loaded query still carries its tag: token, so it still resolves
+    // through the backend rather than being read as a literal title match.
     await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("tag:urgent"));
   });
 
@@ -161,11 +200,12 @@ describe("SearchBar", () => {
     appMock.Search.mockResolvedValue([]);
     render(
       <I18nProvider>
-        <SearchBar tags={[]} onResultsChange={vi.fn()} />
+        <SearchBar tags={[]} notes={[]} onResultsChange={vi.fn()} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
 
+    await openAdvanced(user);
     await screen.findByText("Urgent items");
     await user.selectOptions(screen.getByLabelText("search.saved_searches_label"), "saved-1");
     await user.click(await screen.findByRole("button", { name: "search.delete_button" }));
@@ -175,12 +215,11 @@ describe("SearchBar", () => {
   });
 
   it("clear() resets every field through the imperative handle", async () => {
-    appMock.Search.mockResolvedValue([fakeResult("Note")]);
-    const { ref, onResultsChange } = renderSearchBar();
+    const { ref, onResultsChange } = renderSearchBar([], [fakeNoteDTO("Note")]);
     const user = userEvent.setup();
 
     await user.type(screen.getByPlaceholderText("search.placeholder"), "note");
-    await waitFor(() => expect(appMock.Search).toHaveBeenCalledWith("note"));
+    await waitFor(() => expect(onResultsChange).toHaveBeenCalledWith([fakeResult("Note")], ["note"]));
 
     act(() => {
       ref.current?.clear();

@@ -5,6 +5,8 @@ import { NoteEditor, type NoteEditorHandle } from "../editor/NoteEditor";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { AttachmentPanel, type AttachmentPanelHandle } from "./AttachmentPanel";
+import { KebabMenu } from "./KebabMenu";
+import { NoteTagsEditor } from "./NoteTagsEditor";
 import { RevisionsPanel } from "./RevisionsPanel";
 
 export interface NoteEditorPaneHandle {
@@ -15,6 +17,10 @@ export interface NoteEditorPaneHandle {
 
 export interface NoteEditorPaneProps {
   note: main.NoteDTO | null;
+  tags: main.TagDTO[];
+  /** Tag ids currently assigned to the open note; ignored while no note is
+   * open. */
+  assignedTagIds: string[];
   /** Called with the new title right after a rename has been durably
    * committed, so the caller can patch its own note list state. Never
    * called if the commit failed - see commitTitleIfChanged. */
@@ -23,6 +29,17 @@ export interface NoteEditorPaneProps {
    * caller (Shell) can drop it from its own note list state and clear
    * the selection. */
   onDeleted: (noteId: string) => Promise<void> | void;
+  /** Creates a new note (in whatever notebook context Shell currently has
+   * selected) - used by both the open note's kebab menu and the
+   * no-note-open placeholder. */
+  onCreateNote: () => void;
+  /** True while a just-requested onCreateNote call is still in flight, so
+   * both triggers can disable themselves against a double click. */
+  creatingNote: boolean;
+  /** Assigns or unassigns one tag on the open note. */
+  onToggleTag: (noteId: string, tagId: string, present: boolean) => Promise<void>;
+  /** Creates a new workspace tag and assigns it to the open note. */
+  onCreateTag: (noteId: string, name: string) => Promise<void>;
 }
 
 /**
@@ -31,7 +48,10 @@ export interface NoteEditorPaneProps {
  * body editor, and coordinates committing both together.
  */
 export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPaneProps>(
-  function NoteEditorPane({ note, onTitleCommitted, onDeleted }, ref) {
+  function NoteEditorPane(
+    { note, tags, assignedTagIds, onTitleCommitted, onDeleted, onCreateNote, creatingNote, onToggleTag, onCreateTag },
+    ref,
+  ) {
     const { t, errorMessage } = useI18n();
     const editorRef = useRef<NoteEditorHandle>(null);
     const attachmentPanelRef = useRef<AttachmentPanelHandle>(null);
@@ -99,6 +119,9 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
       return (
         <div className="note-detail note-detail-empty">
           <p>{t("shell.detail_placeholder")}</p>
+          <button type="button" onClick={onCreateNote} disabled={creatingNote}>
+            {t("shell.new_note_button")}
+          </button>
         </div>
       );
     }
@@ -130,9 +153,13 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
               </button>
             </span>
           ) : (
-            <button type="button" className="link-button note-delete-button" onClick={() => setConfirmingDelete(true)}>
-              {t("shell.delete_note")}
-            </button>
+            <KebabMenu
+              label={t("shell.note_actions")}
+              items={[
+                { label: t("shell.new_note_button"), onSelect: onCreateNote, disabled: creatingNote },
+                { label: t("shell.delete_note"), onSelect: () => setConfirmingDelete(true), destructive: true },
+              ]}
+            />
           )}
         </div>
         {deleteError ? (
@@ -140,6 +167,12 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
             {deleteError}
           </p>
         ) : null}
+        <NoteTagsEditor
+          tags={tags}
+          assignedTagIds={assignedTagIds}
+          onToggle={(tagId, present) => onToggleTag(note.id, tagId, present)}
+          onCreateAndAssign={(name) => onCreateTag(note.id, name)}
+        />
         <NoteEditor
           key={`${note.id}-${restoreVersion}`}
           ref={editorRef}

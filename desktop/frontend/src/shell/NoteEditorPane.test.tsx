@@ -8,7 +8,7 @@ import { bytesToBase64 } from "../editor/base64";
 import { I18nProvider } from "../i18n";
 import { appMock } from "../setupTests";
 import { fakeNote, mockLocaleCatalog, mockSettings } from "../testUtils";
-import { NoteEditorPane, type NoteEditorPaneHandle } from "./NoteEditorPane";
+import { NoteEditorPane, type NoteEditorPaneHandle, type NoteEditorPaneProps } from "./NoteEditorPane";
 
 function mockEmptyDocument() {
   const doc = new Y.Doc();
@@ -20,16 +20,48 @@ function mockEmptyDocument() {
   appMock.ListRevisions.mockResolvedValue([]);
 }
 
+/** Every prop NoteEditorPane now requires, with harmless no-op defaults so
+ * each test only overrides what it actually exercises. */
+function baseProps(overrides: Partial<NoteEditorPaneProps> = {}): NoteEditorPaneProps {
+  return {
+    note: null,
+    tags: [],
+    assignedTagIds: [],
+    onTitleCommitted: vi.fn(),
+    onDeleted: vi.fn(),
+    onCreateNote: vi.fn(),
+    creatingNote: false,
+    onToggleTag: vi.fn(),
+    onCreateTag: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe("NoteEditorPane", () => {
   it("shows the placeholder when no note is selected", async () => {
     mockLocaleCatalog();
     mockSettings();
     render(
       <I18nProvider>
-        <NoteEditorPane note={null} onTitleCommitted={vi.fn()} onDeleted={vi.fn()} />
+        <NoteEditorPane {...baseProps()} />
       </I18nProvider>,
     );
     expect(await screen.findByText("shell.detail_placeholder")).toBeInTheDocument();
+  });
+
+  it("creates a note from the placeholder", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    const onCreateNote = vi.fn();
+    render(
+      <I18nProvider>
+        <NoteEditorPane {...baseProps({ onCreateNote })} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.new_note_button" }));
+    expect(onCreateNote).toHaveBeenCalled();
   });
 
   it("renames the note on blur and reports the committed title", async () => {
@@ -40,7 +72,7 @@ describe("NoteEditorPane", () => {
     const onTitleCommitted = vi.fn();
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={onTitleCommitted} onDeleted={vi.fn()} />
+        <NoteEditorPane {...baseProps({ note, onTitleCommitted })} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -63,7 +95,7 @@ describe("NoteEditorPane", () => {
     const note = fakeNote({ title: "Same title" });
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} onDeleted={vi.fn()} />
+        <NoteEditorPane {...baseProps({ note })} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -87,7 +119,7 @@ describe("NoteEditorPane", () => {
     const onTitleCommitted = vi.fn();
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={onTitleCommitted} onDeleted={vi.fn()} />
+        <NoteEditorPane {...baseProps({ note, onTitleCommitted })} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -110,7 +142,7 @@ describe("NoteEditorPane", () => {
     const ref = createRef<NoteEditorPaneHandle>();
     render(
       <I18nProvider>
-        <NoteEditorPane ref={ref} note={note} onTitleCommitted={onTitleCommitted} onDeleted={vi.fn()} />
+        <NoteEditorPane ref={ref} {...baseProps({ note, onTitleCommitted })} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -142,7 +174,7 @@ describe("NoteEditorPane", () => {
     const note = fakeNote({ title: "Title" });
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} onDeleted={vi.fn()} />
+        <NoteEditorPane {...baseProps({ note })} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
@@ -175,12 +207,13 @@ describe("NoteEditorPane", () => {
     const onDeleted = vi.fn();
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} onDeleted={onDeleted} />
+        <NoteEditorPane {...baseProps({ note, onDeleted })} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "shell.delete_note" }));
+    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_note" }));
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(appMock.DeleteNote).toHaveBeenCalledWith(note.id);
@@ -197,14 +230,54 @@ describe("NoteEditorPane", () => {
     const note = fakeNote({ title: "Title" });
     render(
       <I18nProvider>
-        <NoteEditorPane note={note} onTitleCommitted={vi.fn()} onDeleted={vi.fn()} />
+        <NoteEditorPane {...baseProps({ note })} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "shell.delete_note" }));
+    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_note" }));
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
+  });
+
+  it("creates a new note from the open note's menu", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    mockEmptyDocument();
+    const note = fakeNote({ title: "Title" });
+    const onCreateNote = vi.fn();
+    render(
+      <I18nProvider>
+        <NoteEditorPane {...baseProps({ note, onCreateNote })} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.new_note_button" }));
+
+    expect(onCreateNote).toHaveBeenCalled();
+  });
+
+  it("assigns and removes a tag on the open note", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    mockEmptyDocument();
+    const note = fakeNote({ title: "Title" });
+    const tag = { id: "tag-1", workspace_id: "ws-1", name: "urgent", deleted: false };
+    const onToggleTag = vi.fn().mockResolvedValue(undefined);
+    render(
+      <I18nProvider>
+        <NoteEditorPane {...baseProps({ note, tags: [tag], onToggleTag })} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "+ shell.tags_add_button" }));
+    await user.click(await screen.findByRole("checkbox", { name: "urgent" }));
+
+    expect(onToggleTag).toHaveBeenCalledWith(note.id, "tag-1", true);
   });
 });

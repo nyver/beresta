@@ -89,7 +89,7 @@ class KeyWrappingInstrumentedTest {
                     latch.countDown()
                 }
 
-                override fun error(code: String) {
+                override fun error(code: String, detail: String?) {
                     result.error = code
                     latch.countDown()
                 }

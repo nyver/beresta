@@ -202,20 +202,21 @@ func (s *Service) Status() (string, error) {
 }
 
 type noteDTO struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	NotebookID  string `json:"notebook_id,omitempty"`
-	Title       string `json:"title"`
-	Pinned      bool   `json:"pinned"`
-	Archived    bool   `json:"archived"`
-	Deleted     bool   `json:"deleted"`
-	CreatedMS   uint64 `json:"created_unix_ms"`
+	ID          string   `json:"id"`
+	WorkspaceID string   `json:"workspace_id"`
+	NotebookID  string   `json:"notebook_id,omitempty"`
+	Title       string   `json:"title"`
+	Pinned      bool     `json:"pinned"`
+	Archived    bool     `json:"archived"`
+	Deleted     bool     `json:"deleted"`
+	CreatedMS   uint64   `json:"created_unix_ms"`
+	TagIDs      []string `json:"tag_ids"`
 }
 
 func mobileNote(note model.Note) noteDTO {
 	return noteDTO{ID: note.ID.String(), WorkspaceID: note.WorkspaceID.String(), NotebookID: idString(note.NotebookID.Value), Title: note.Title.Value,
 		Pinned: note.Flags.Value&model.NoteFlagPinned != 0, Archived: note.Flags.Value&model.NoteFlagArchived != 0,
-		Deleted: note.Deleted.Value, CreatedMS: note.CreatedAt.PhysicalMS}
+		Deleted: note.Deleted.Value, CreatedMS: note.CreatedAt.PhysicalMS, TagIDs: []string{}}
 }
 
 func (s *Service) ListNotes(requestID string) (string, error) {
@@ -232,9 +233,16 @@ func (s *Service) ListNotes(requestID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	tagsByNote, err := store.NoteTagIDsByWorkspace(ctx, value.DB(), workspaceID)
+	if err != nil {
+		return "", err
+	}
 	result := make([]noteDTO, len(notes))
 	for i, note := range notes {
 		result[i] = mobileNote(note)
+		for _, tagID := range tagsByNote[note.ID] {
+			result[i].TagIDs = append(result[i].TagIDs, tagID.String())
+		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedMS > result[j].CreatedMS })
 	return marshal(result)
@@ -348,6 +356,27 @@ func (s *Service) DeleteNote(requestID, noteID string, deleted bool) error {
 	return err
 }
 
+func (s *Service) MoveNote(requestID, noteID, notebookID string) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return err
+	}
+	notebook, err := optionalID(notebookID)
+	if err != nil {
+		return err
+	}
+	if err := value.SetNoteNotebook(ctx, workspaceID, id, notebook); err != nil {
+		return err
+	}
+	s.emit("notes_changed", map[string]string{"note_id": id.String()})
+	return nil
+}
+
 // AddAttachmentData imports one bounded camera/document-provider result. The
 // Android host passes bytes directly from a content URI; no plaintext path or
 // shared-media cache is created.
@@ -371,6 +400,113 @@ func (s *Service) AddAttachmentData(requestID, noteID, displayName, mediaType st
 	return nil
 }
 
+func (s *Service) ListNoteAttachments(requestID, noteID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return "", err
+	}
+	attachments, err := value.ListNoteAttachments(ctx, workspaceID, id)
+	if err != nil {
+		return "", err
+	}
+	result := make([]map[string]any, len(attachments))
+	for i, a := range attachments {
+		result[i] = map[string]any{
+			"blob_id":      hex.EncodeToString(a.BlobID[:]),
+			"display_name": a.DisplayName,
+			"media_type":   a.MediaType,
+			"size_bytes":   a.SizeBytes,
+		}
+	}
+	return marshal(result)
+}
+
+// maxAttachmentPreviewBytes bounds ReadAttachmentData so an inline mobile
+// preview never buffers an unbounded amount of decrypted plaintext in
+// memory or across the platform channel. Mirrors desktop's
+// maxAttachmentPreviewBytes (desktop/attachments.go).
+const maxAttachmentPreviewBytes = 8 * 1024 * 1024
+
+// errAttachmentPreviewTooLarge reports that an attachment exceeds
+// maxAttachmentPreviewBytes and cannot be inline-previewed.
+var errAttachmentPreviewTooLarge = fmt.Errorf("mobileapi: attachment exceeds the %d-byte inline preview limit", maxAttachmentPreviewBytes)
+
+// boundedBuffer is a bytes.Buffer that refuses writes once it has
+// accumulated more than limit bytes, so a decrypt-to-memory call fails
+// closed instead of buffering an oversized attachment in full first.
+type boundedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+func (w *boundedBuffer) Write(p []byte) (int, error) {
+	if w.buf.Len()+len(p) > w.limit {
+		return 0, errAttachmentPreviewTooLarge
+	}
+	return w.buf.Write(p)
+}
+
+// ReadAttachmentData returns one attachment's decrypted, authenticated
+// plaintext in full, for the bounded previews and thumbnails a mobile
+// client renders inline. It fails closed at maxAttachmentPreviewBytes
+// instead of streaming large files.
+func (s *Service) ReadAttachmentData(requestID, blobIDHex string) ([]byte, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := hex.DecodeString(blobIDHex)
+	if err != nil {
+		return nil, errors.New("mobileapi: invalid attachment identifier")
+	}
+	blobID, err := store.ParseBlobID(raw)
+	if err != nil {
+		return nil, err
+	}
+	dest := &boundedBuffer{limit: maxAttachmentPreviewBytes}
+	if _, _, err := value.ReadAttachment(ctx, workspaceID, blobID, dest); err != nil {
+		return nil, err
+	}
+	return dest.buf.Bytes(), nil
+}
+
+// RemoveAttachmentData removes noteID's reference to one attachment. The
+// published blob itself is left in place for garbage collection.
+func (s *Service) RemoveAttachmentData(requestID, noteID, blobIDHex string) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return err
+	}
+	raw, err := hex.DecodeString(blobIDHex)
+	if err != nil {
+		return errors.New("mobileapi: invalid attachment identifier")
+	}
+	blobID, err := store.ParseBlobID(raw)
+	if err != nil {
+		return err
+	}
+	if err := value.RemoveAttachment(ctx, workspaceID, id, blobID); err != nil {
+		return err
+	}
+	s.emit("attachments_changed", map[string]any{"note_id": id.String(), "blob_id": blobIDHex})
+	return nil
+}
+
 func (s *Service) Search(requestID, query string, limit int) (string, error) {
 	ctx, done, err := s.begin(requestID)
 	if err != nil {
@@ -390,11 +526,40 @@ func (s *Service) Search(requestID, query string, limit int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	tagsByNote, err := store.NoteTagIDsByWorkspace(ctx, value.DB(), workspaceID)
+	if err != nil {
+		return "", err
+	}
 	result := make([]noteDTO, len(rows))
 	for i, row := range rows {
 		result[i] = mobileNote(row.Note)
+		for _, tagID := range tagsByNote[row.Note.ID] {
+			result[i].TagIDs = append(result[i].TagIDs, tagID.String())
+		}
 	}
 	return marshal(result)
+}
+
+func (s *Service) CreateNotebook(requestID, parentID, name string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	parent, err := optionalID(parentID)
+	if err != nil {
+		return "", err
+	}
+	notebook, err := value.CreateNotebook(ctx, workspaceID, parent, name)
+	if err != nil {
+		return "", err
+	}
+	s.emit("notebooks_changed", map[string]string{"notebook_id": notebook.ID.String()})
+	return marshal(map[string]any{"id": notebook.ID.String(), "parent_id": idString(notebook.ParentID), "name": notebook.Name, "deleted": notebook.Deleted})
 }
 
 func (s *Service) ListNotebooks(requestID string) (string, error) {
@@ -414,6 +579,103 @@ func (s *Service) ListNotebooks(requestID string) (string, error) {
 	result := make([]map[string]any, len(rows))
 	for i, row := range rows {
 		result[i] = map[string]any{"id": row.ID.String(), "parent_id": idString(row.ParentID), "name": row.Name, "deleted": row.Deleted}
+	}
+	return marshal(result)
+}
+
+func (s *Service) DeleteNotebook(requestID, notebookID string, deleted bool) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return err
+	}
+	id, err := parseID(notebookID)
+	if err != nil {
+		return err
+	}
+	return value.SetNotebookDeleted(ctx, workspaceID, id, deleted)
+}
+
+func (s *Service) CreateTag(requestID, name string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	tag, err := value.CreateTag(ctx, workspaceID, name)
+	if err != nil {
+		return "", err
+	}
+	return marshal(map[string]any{"id": tag.ID.String(), "name": tag.Name, "deleted": tag.Deleted})
+}
+
+func (s *Service) DeleteTag(requestID, tagID string, deleted bool) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return err
+	}
+	id, err := parseID(tagID)
+	if err != nil {
+		return err
+	}
+	return value.SetTagDeleted(ctx, workspaceID, id, deleted)
+}
+
+func (s *Service) SetNoteTag(requestID, noteID, tagID string, present bool) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return err
+	}
+	tag, err := parseID(tagID)
+	if err != nil {
+		return err
+	}
+	if err := value.SetNoteTag(ctx, workspaceID, id, tag, present); err != nil {
+		return err
+	}
+	s.emit("notes_changed", map[string]string{"note_id": id.String()})
+	return nil
+}
+
+func (s *Service) ListNoteTags(requestID, noteID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return "", err
+	}
+	note, err := value.GetNote(ctx, id)
+	if err != nil || note.WorkspaceID != workspaceID {
+		return "", coalesce(err, store.ErrWrongWorkspace)
+	}
+	tagIDs, err := store.NoteTagIDs(ctx, value.DB(), id)
+	if err != nil {
+		return "", err
+	}
+	result := make([]string, len(tagIDs))
+	for i, tagID := range tagIDs {
+		result[i] = tagID.String()
 	}
 	return marshal(result)
 }

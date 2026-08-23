@@ -1,7 +1,7 @@
 package app.beresta.notes
 
-import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -18,6 +18,7 @@ import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 
 internal class AndroidKeyWrappingAdapter(
@@ -45,7 +46,9 @@ internal class AndroidKeyWrappingAdapter(
     interface Callback {
         fun success(value: ByteArray)
 
-        fun error(code: String)
+        // detail carries the underlying Java exception/error text for
+        // diagnostics; it is never a substitute for switching on code.
+        fun error(code: String, detail: String? = null)
     }
 
     fun biometricAvailable(): Boolean =
@@ -75,6 +78,10 @@ internal class AndroidKeyWrappingAdapter(
                 cipher = cipher,
                 prompt = prompt,
                 cancelLabel = cancelLabel,
+                // getOrCreateKey never hands back a key that requires
+                // authentication (it replaces any legacy one first), so a
+                // freshly wrapped envelope never needs CryptoObject binding.
+                requireCryptoBinding = false,
                 callback = wipingCallback,
             ) { authorizedCipher ->
                 val ciphertext = authorizedCipher.doFinal(ownedPlaintext)
@@ -87,9 +94,9 @@ internal class AndroidKeyWrappingAdapter(
         } catch (_: KeyPermanentlyInvalidatedException) {
             ownedPlaintext.fill(0)
             callback.error(ERROR_KEY_INVALIDATED)
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
             ownedPlaintext.fill(0)
-            callback.error(ERROR_UNAVAILABLE)
+            callback.error(ERROR_UNAVAILABLE, describe(failure))
         }
     }
 
@@ -122,16 +129,22 @@ internal class AndroidKeyWrappingAdapter(
                 cipher = cipher,
                 prompt = prompt,
                 cancelLabel = cancelLabel,
+                // A key created before getOrCreateKey stopped setting
+                // setUserAuthenticationRequired is still bound to that
+                // requirement at the Keystore level; its envelope can only
+                // ever be opened by authorizing this same cipher through a
+                // CryptoObject-bound prompt, exactly as before.
+                requireCryptoBinding = requiresUserAuthentication(key),
                 callback = wipingCallback,
             ) { authorizedCipher ->
                 authorizedCipher.doFinal(parsed.ciphertext)
             }
         } catch (_: KeyPermanentlyInvalidatedException) {
             wipingCallback.error(ERROR_KEY_INVALIDATED)
-        } catch (_: AEADBadTagException) {
-            wipingCallback.error(ERROR_AUTHENTICATION)
-        } catch (_: Exception) {
-            wipingCallback.error(ERROR_AUTHENTICATION)
+        } catch (failure: AEADBadTagException) {
+            wipingCallback.error(ERROR_AUTHENTICATION, describe(failure))
+        } catch (failure: Exception) {
+            wipingCallback.error(ERROR_AUTHENTICATION, describe(failure))
         }
     }
 
@@ -153,6 +166,7 @@ internal class AndroidKeyWrappingAdapter(
         cipher: Cipher,
         prompt: String?,
         cancelLabel: String?,
+        requireCryptoBinding: Boolean,
         callback: Callback,
         operation: (Cipher) -> ByteArray,
     ) {
@@ -183,13 +197,18 @@ internal class AndroidKeyWrappingAdapter(
                                 -> ERROR_CANCELED
                                 else -> ERROR_AUTHENTICATION
                             }
-                        callback.error(code)
+                        callback.error(code, "biometric error $errorCode: $errString")
                     }
 
                     override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                        val authorized = result.cryptoObject?.cipher
+                        // Without CryptoObject binding, the biometric check
+                        // gates use of a standard Keystore cipher rather than
+                        // authorizing a hardware-bound operation (see
+                        // getOrCreateKey). requireCryptoBinding is only true
+                        // for a legacy key that still requires it.
+                        val authorized = if (requireCryptoBinding) result.cryptoObject?.cipher else cipher
                         if (authorized == null) {
-                            callback.error(ERROR_AUTHENTICATION)
+                            callback.error(ERROR_AUTHENTICATION, "biometric result carried no cipher")
                             return
                         }
                         executeCipher(authorized, callback, operation)
@@ -202,7 +221,11 @@ internal class AndroidKeyWrappingAdapter(
                 .setNegativeButtonText(requireNotNull(cancelLabel))
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .build()
-        biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+        if (requireCryptoBinding) {
+            biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
+        } else {
+            biometricPrompt.authenticate(promptInfo)
+        }
     }
 
     private fun executeCipher(
@@ -214,8 +237,8 @@ internal class AndroidKeyWrappingAdapter(
             callback.success(operation(cipher))
         } catch (_: KeyPermanentlyInvalidatedException) {
             callback.error(ERROR_KEY_INVALIDATED)
-        } catch (_: Exception) {
-            callback.error(ERROR_AUTHENTICATION)
+        } catch (failure: Exception) {
+            callback.error(ERROR_AUTHENTICATION, describe(failure))
         }
     }
 
@@ -229,17 +252,30 @@ internal class AndroidKeyWrappingAdapter(
                 delegate.success(value)
             }
 
-            override fun error(code: String) {
+            override fun error(code: String, detail: String?) {
                 sensitive.fill(0)
-                delegate.error(code)
+                delegate.error(code, detail)
             }
         }
 
+    // Neither tier binds the key to `setUserAuthenticationRequired`: on several
+    // real Keymaster/TEE implementations, an AES/GCM key gated behind
+    // BiometricPrompt's CryptoObject throws IllegalBlockSizeException from
+    // doFinal() even after authentication succeeds. BIOMETRIC still requires
+    // a successful fingerprint/face check (see execute()) - it's a gate in
+    // front of a standard non-exportable Keystore key, not a hardware-enforced
+    // binding of the key to biometric proof.
     private fun getOrCreateKey(
         protection: Protection,
         metadata: Metadata,
     ): SecretKey {
-        loadKey(protection, metadata)?.let { return it }
+        loadKey(protection, metadata)?.let { existing ->
+            if (!requiresUserAuthentication(existing)) return existing
+            // Left over from a build that bound this key to
+            // setUserAuthenticationRequired; replace it so doFinal() doesn't
+            // hit the IllegalBlockSizeException class of Keymaster bugs above.
+            keyStore().deleteEntry(alias(protection, metadata))
+        }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
         val builder =
             KeyGenParameterSpec.Builder(
@@ -249,21 +285,17 @@ internal class AndroidKeyWrappingAdapter(
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setRandomizedEncryptionRequired(true)
-        if (protection == Protection.BIOMETRIC) {
-            builder.setUserAuthenticationRequired(true)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                builder.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
-            } else {
-                @Suppress("DEPRECATION")
-                builder.setUserAuthenticationValidityDurationSeconds(-1)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                builder.setInvalidatedByBiometricEnrollment(true)
-            }
-        }
         generator.init(builder.build())
         return generator.generateKey()
     }
+
+    private fun requiresUserAuthentication(key: SecretKey): Boolean =
+        try {
+            val factory = SecretKeyFactory.getInstance(key.algorithm, ANDROID_KEY_STORE)
+            (factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo).isUserAuthenticationRequired
+        } catch (_: Exception) {
+            false
+        }
 
     private fun loadKey(
         protection: Protection,
@@ -314,6 +346,9 @@ internal class AndroidKeyWrappingAdapter(
                 value.all { it.isLetterOrDigit() && it.code < 128 || it == '-' || it == '_' || it == '.' }
 
         private fun validPrompt(value: String?): Boolean = value != null && value.isNotBlank() && value.length <= 128
+
+        private fun describe(failure: Throwable): String =
+            "${failure.javaClass.simpleName}: ${failure.message ?: "no message"}"
 
         private fun binding(
             protection: Protection,

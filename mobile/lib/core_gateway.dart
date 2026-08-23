@@ -12,9 +12,19 @@ abstract interface class CoreGateway {
   Future<Map<String, dynamic>> getNote(String id);
   Future<void> saveNote(String id, String title, String body);
   Future<void> deleteNote(String id, bool deleted);
+  Future<void> moveNote(String id, String notebookId);
   Future<List<Map<String, dynamic>>> search(String query);
+  Future<Map<String, dynamic>> createNotebook(String name, {String parentId});
   Future<List<Map<String, dynamic>>> listNotebooks();
+  Future<void> deleteNotebook(String id, bool deleted);
+  Future<List<Map<String, dynamic>>> listNoteAttachments(String noteId);
+  Future<Uint8List> readAttachmentData(String blobId);
+  Future<void> removeAttachmentData(String noteId, String blobId);
   Future<List<Map<String, dynamic>>> listTags();
+  Future<Map<String, dynamic>> createTag(String name);
+  Future<void> deleteTag(String id, bool deleted);
+  Future<void> setNoteTag(String noteId, String tagId, bool present);
+  Future<List<String>> listNoteTags(String noteId);
   Future<List<Map<String, dynamic>>> listRevisions(String noteId);
   Future<void> restoreRevision(String noteId, String revisionId);
   Future<void> syncNow();
@@ -92,16 +102,66 @@ class MethodChannelCore implements CoreGateway {
       _invoke("deleteNote", {"noteId": id, "deleted": deleted});
 
   @override
+  Future<void> moveNote(String id, String notebookId) =>
+      _invoke("moveNote", {"noteId": id, "notebookId": notebookId});
+
+  @override
   Future<List<Map<String, dynamic>>> search(String query) async =>
       _list(await _invoke("search", {"query": query}));
+
+  @override
+  Future<Map<String, dynamic>> createNotebook(
+    String name, {
+    String parentId = "",
+  }) async => _object(
+    await _invoke("createNotebook", {"name": name, "parentId": parentId}),
+  );
 
   @override
   Future<List<Map<String, dynamic>>> listNotebooks() async =>
       _list(await _invoke("listNotebooks"));
 
   @override
+  Future<void> deleteNotebook(String id, bool deleted) =>
+      _invoke("deleteNotebook", {"notebookId": id, "deleted": deleted});
+
+  @override
+  Future<List<Map<String, dynamic>>> listNoteAttachments(String noteId) async =>
+      _list(await _invoke("listNoteAttachments", {"noteId": noteId}));
+
+  @override
+  Future<Uint8List> readAttachmentData(String blobId) async =>
+      await _invoke("readAttachmentData", {"blobId": blobId}) as Uint8List;
+
+  @override
+  Future<void> removeAttachmentData(String noteId, String blobId) =>
+      _invoke("removeAttachmentData", {"noteId": noteId, "blobId": blobId});
+
+  @override
   Future<List<Map<String, dynamic>>> listTags() async =>
       _list(await _invoke("listTags"));
+
+  @override
+  Future<Map<String, dynamic>> createTag(String name) async =>
+      _object(await _invoke("createTag", {"name": name}));
+
+  @override
+  Future<void> deleteTag(String id, bool deleted) =>
+      _invoke("deleteTag", {"tagId": id, "deleted": deleted});
+
+  @override
+  Future<void> setNoteTag(String noteId, String tagId, bool present) =>
+      _invoke("setNoteTag", {
+        "noteId": noteId,
+        "tagId": tagId,
+        "present": present,
+      });
+
+  @override
+  Future<List<String>> listNoteTags(String noteId) async =>
+      (jsonDecode(await _invoke("listNoteTags", {"noteId": noteId}) as String)
+              as List<dynamic>)
+          .cast<String>();
 
   @override
   Future<List<Map<String, dynamic>>> listRevisions(String noteId) async =>

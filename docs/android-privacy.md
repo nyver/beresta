@@ -3,8 +3,11 @@
 - `FLAG_SECURE` and Android 13 recent-task screenshot suppression protect every
   note-bearing activity. The app locks after the configured background delay.
 - A non-exportable Android Keystore AES-256-GCM key wraps the mobile core device
-  secret. Strong-biometric mode authorizes each unwrap and invalidates the key
-  after biometric enrollment changes.
+  secret. When strong biometrics are enrolled, a `BiometricPrompt` gates each
+  wrap/unwrap; the key itself is not hardware-bound to the biometric result
+  (`setUserAuthenticationRequired`), because several real Keymaster/TEE
+  implementations throw `IllegalBlockSizeException` from `Cipher.doFinal()` on
+  an AES/GCM key authorized through `BiometricPrompt.CryptoObject`.
 - Notes, search indexes, revisions, sync journals, preferences, and cache policy
   live in SQLCipher. Attachment files and backups remain encrypted.
 - Share and widget input is validated and encrypted before it touches private

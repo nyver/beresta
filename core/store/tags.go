@@ -175,3 +175,39 @@ func NoteTagIDs(ctx context.Context, exec Executor, noteID model.ID) ([]model.ID
 	}
 	return tagIDs, nil
 }
+
+// NoteTagIDsByWorkspace returns every note's present tag IDs across an
+// entire workspace in one query, keyed by note ID. A note with no tags is
+// simply absent from the result map. Callers that need tag IDs for many
+// notes at once (a note list, a search result page) should use this instead
+// of NoteTagIDs in a loop, which would issue one query per note.
+func NoteTagIDsByWorkspace(ctx context.Context, exec Executor, workspaceID model.ID) (map[model.ID][]model.ID, error) {
+	rows, err := exec.QueryContext(ctx, `SELECT nt.note_id, nt.tag_id FROM note_tags nt
+		JOIN notes n ON n.id = nt.note_id
+		WHERE nt.present = 1 AND n.workspace_id = ?`, workspaceID.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("store: list workspace note tags: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[model.ID][]model.ID)
+	for rows.Next() {
+		var rawNote, rawTag []byte
+		if err := rows.Scan(&rawNote, &rawTag); err != nil {
+			return nil, fmt.Errorf("store: scan workspace note tag: %w", err)
+		}
+		noteID, err := model.ParseID(rawNote)
+		if err != nil {
+			return nil, fmt.Errorf("store: stored note tag note ID: %w", err)
+		}
+		tagID, err := model.ParseID(rawTag)
+		if err != nil {
+			return nil, fmt.Errorf("store: stored note tag ID: %w", err)
+		}
+		result[noteID] = append(result[noteID], tagID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list workspace note tags: %w", err)
+	}
+	return result, nil
+}

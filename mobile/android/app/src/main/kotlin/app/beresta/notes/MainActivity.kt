@@ -24,6 +24,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingCapture: PendingCapture? = null
     private var pendingBackupDestination: MethodChannel.Result? = null
     @Volatile private var lifecycleGeneration = 0L
+    @Volatile private var nativeCoreInitStarted = false
 
     private val backupTreePicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         val pending = pendingBackupDestination.also { pendingBackupDestination = null } ?: return@registerForActivityResult
@@ -68,7 +69,6 @@ class MainActivity : FlutterFragmentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             setRecentsScreenshotEnabled(false)
         }
-        initializeNativeCore()
         SyncWorker.schedule(this)
         BackupWorker.schedule(this)
         importShareIntent(intent)
@@ -78,6 +78,18 @@ class MainActivity : FlutterFragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         importShareIntent(intent)
+    }
+
+    // BiometricPrompt requires the window to actually have focus before
+    // authenticate() is called; triggering it any earlier (e.g. from
+    // onCreate/onResume) lets the framework fail the attempt immediately with
+    // a generic authentication error instead of showing the prompt.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && !nativeCoreInitStarted) {
+            nativeCoreInitStarted = true
+            initializeNativeCore()
+        }
     }
 
     override fun onStart() {
@@ -122,7 +134,10 @@ class MainActivity : FlutterFragmentActivity() {
         val envelopeFile = File(filesDir, "mobile-core.bkw1")
         val temporaryEnvelope = File(filesDir, "mobile-core.bkw1.tmp")
         if (!envelopeFile.exists() && temporaryEnvelope.exists()) {
-            if (!temporaryEnvelope.renameTo(envelopeFile)) return
+            if (!temporaryEnvelope.renameTo(envelopeFile)) {
+                NativeCore.failInitialization("cannot recover pending device-secret envelope")
+                return
+            }
         }
         val newProtection = if (adapter.biometricAvailable()) AndroidKeyWrappingAdapter.Protection.BIOMETRIC else AndroidKeyWrappingAdapter.Protection.KEYSTORE
         val callback = object : AndroidKeyWrappingAdapter.Callback {
@@ -139,29 +154,41 @@ class MainActivity : FlutterFragmentActivity() {
                     getString(R.string.biometric_cancel),
                     object : AndroidKeyWrappingAdapter.Callback {
                         override fun success(envelope: ByteArray) {
-                            FileOutputStream(temporaryEnvelope).use { output ->
-                                output.write(envelope)
-                                output.fd.sync()
-                            }
-                            check(temporaryEnvelope.renameTo(envelopeFile)) {
-                                "cannot publish device-secret envelope"
+                            try {
+                                FileOutputStream(temporaryEnvelope).use { output ->
+                                    output.write(envelope)
+                                    output.fd.sync()
+                                }
+                                check(temporaryEnvelope.renameTo(envelopeFile)) {
+                                    "cannot publish device-secret envelope"
+                                }
+                            } catch (failure: Exception) {
+                                value.fill(0)
+                                NativeCore.failInitialization("wrap: publish envelope failed: ${failure.message}")
+                                return
                             }
                             NativeCore.initialize(value)
                         }
 
-                        override fun error(code: String) {
+                        override fun error(code: String, detail: String?) {
                             value.fill(0)
+                            NativeCore.failInitialization("wrap: $code" + (detail?.let { " ($it)" } ?: ""))
                         }
                     },
                 )
             }
 
-            override fun error(code: String) = Unit
+            override fun error(code: String, detail: String?) {
+                NativeCore.failInitialization("unwrap: $code" + (detail?.let { " ($it)" } ?: ""))
+            }
         }
         if (envelopeFile.exists()) {
             val envelope = envelopeFile.readBytes()
             val protection = envelope.getOrNull(5)?.let(AndroidKeyWrappingAdapter.Protection::fromCode)
-            if (protection == null) return
+            if (protection == null) {
+                NativeCore.failInitialization("corrupt device-secret envelope")
+                return
+            }
             adapter.unwrap(
                 protection,
                 metadata,
@@ -197,7 +224,11 @@ class MainActivity : FlutterFragmentActivity() {
         }
         executor.execute {
             runCatching { invokeCore(call) }.fold(
-                onSuccess = { value -> mainHandler.post { result.success(value) } },
+                // Void-returning core calls (lock, saveNote, ...) surface here
+                // as kotlin.Unit, which StandardMessageCodec cannot encode.
+                onSuccess = { value ->
+                    mainHandler.post { result.success(value.takeUnless { it is Unit }) }
+                },
                 onFailure = { error -> mainHandler.post { result.error("core_error", error.message, null) } },
             )
         }
@@ -207,7 +238,7 @@ class MainActivity : FlutterFragmentActivity() {
         val service = NativeCore.awaitService()
         val requestId = call.argument<String>("requestId") ?: "android-${System.nanoTime()}"
         return when (call.method) {
-            "status" -> service.status()
+            "status" -> annotateStatus(service.status())
             "createAccount" -> service.createAccount(requestId, NativeCore.accountPath(filesDir), required(call, "passphrase")).also {
                 ShareHandoff.drain(this)
                 BackupWorker.requestImmediate(this)
@@ -222,9 +253,19 @@ class MainActivity : FlutterFragmentActivity() {
             "getNote" -> service.getNote(requestId, required(call, "noteId"))
             "saveNote" -> service.saveNote(requestId, required(call, "noteId"), required(call, "title"), required(call, "body"))
             "deleteNote" -> service.deleteNote(requestId, required(call, "noteId"), call.argument<Boolean>("deleted") == true)
+            "moveNote" -> service.moveNote(requestId, required(call, "noteId"), call.argument<String>("notebookId") ?: "")
             "search" -> service.search(requestId, required(call, "query"), 100L)
+            "createNotebook" -> service.createNotebook(requestId, call.argument<String>("parentId") ?: "", required(call, "name"))
             "listNotebooks" -> service.listNotebooks(requestId)
+            "deleteNotebook" -> service.deleteNotebook(requestId, required(call, "notebookId"), call.argument<Boolean>("deleted") == true)
+            "listNoteAttachments" -> service.listNoteAttachments(requestId, required(call, "noteId"))
+            "readAttachmentData" -> service.readAttachmentData(requestId, required(call, "blobId"))
+            "removeAttachmentData" -> service.removeAttachmentData(requestId, required(call, "noteId"), required(call, "blobId"))
             "listTags" -> service.listTags(requestId)
+            "createTag" -> service.createTag(requestId, required(call, "name"))
+            "deleteTag" -> service.deleteTag(requestId, required(call, "tagId"), call.argument<Boolean>("deleted") == true)
+            "setNoteTag" -> service.setNoteTag(requestId, required(call, "noteId"), required(call, "tagId"), call.argument<Boolean>("present") == true)
+            "listNoteTags" -> service.listNoteTags(requestId, required(call, "noteId"))
             "listRevisions" -> service.listRevisions(requestId, required(call, "noteId"))
             "restoreRevision" -> service.restoreRevision(requestId, required(call, "noteId"), required(call, "revisionId"))
             "syncNow" -> service.syncNow()
@@ -244,6 +285,18 @@ class MainActivity : FlutterFragmentActivity() {
 
     private fun required(call: MethodCall, name: String): String =
         requireNotNull(call.argument<String>(name)) { "missing $name" }
+
+    // The Go core only knows about the account it holds in memory, so a
+    // locked status can't tell a fresh install apart from a device that
+    // already has an account and just needs its passphrase. Flag on-disk
+    // presence here so the onboarding screen can offer "Unlock" instead of
+    // "Create" to a returning user.
+    private fun annotateStatus(rawStatus: String): String {
+        val status = JSONObject(rawStatus)
+        if (status.optBoolean("unlocked", false)) return rawStatus
+        status.put("account_exists", File(NativeCore.accountPath(filesDir)).exists())
+        return status.toString()
+    }
 
     private fun readBounded(input: java.io.InputStream, maximum: Int): ByteArray {
         val output = java.io.ByteArrayOutputStream()
@@ -301,7 +354,7 @@ class MainActivity : FlutterFragmentActivity() {
     private fun methodChannelCallback(result: MethodChannel.Result) =
         object : AndroidKeyWrappingAdapter.Callback {
             override fun success(value: ByteArray) = result.success(value)
-            override fun error(code: String) = result.error(code, null, null)
+            override fun error(code: String, detail: String?) = result.error(code, detail, null)
         }
 
     private data class PendingCapture(

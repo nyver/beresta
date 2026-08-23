@@ -1,3 +1,5 @@
+import "dart:typed_data";
+
 import "package:beresta/main.dart";
 import "package:flutter/material.dart";
 import "package:flutter_test/flutter_test.dart";
@@ -103,11 +105,39 @@ class FakeGateway implements CoreGateway {
   Future<void> deleteNote(String id, bool deleted) async =>
       note["deleted"] = deleted;
   @override
+  Future<void> moveNote(String id, String notebookId) async =>
+      note["notebook_id"] = notebookId;
+  @override
   Future<List<Map<String, dynamic>>> search(String query) async => [note];
+  @override
+  Future<Map<String, dynamic>> createNotebook(
+    String name, {
+    String parentId = "",
+  }) async => {"id": "018f0000-0000-7000-8000-000000000003", "name": name};
   @override
   Future<List<Map<String, dynamic>>> listNotebooks() async => [];
   @override
+  Future<void> deleteNotebook(String id, bool deleted) async {}
+  @override
+  Future<List<Map<String, dynamic>>> listNoteAttachments(
+    String noteId,
+  ) async => [];
+  @override
+  Future<Uint8List> readAttachmentData(String blobId) async =>
+      Uint8List(0);
+  @override
+  Future<void> removeAttachmentData(String noteId, String blobId) async {}
+  @override
   Future<List<Map<String, dynamic>>> listTags() async => [];
+  @override
+  Future<Map<String, dynamic>> createTag(String name) async =>
+      {"id": "018f0000-0000-7000-8000-000000000004", "name": name};
+  @override
+  Future<void> deleteTag(String id, bool deleted) async {}
+  @override
+  Future<void> setNoteTag(String noteId, String tagId, bool present) async {}
+  @override
+  Future<List<String>> listNoteTags(String noteId) async => [];
   @override
   Future<List<Map<String, dynamic>>> listRevisions(String noteId) async => [];
   @override

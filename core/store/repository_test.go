@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/beresta-app/beresta/core/model"
@@ -258,6 +259,71 @@ func TestSetNoteTagIsIndependentPerTag(t *testing.T) {
 	}
 	if len(tagIDs) != 1 || tagIDs[0] != home.ID {
 		t.Fatalf("NoteTagIDs() = %v, want only %s", tagIDs, home.ID)
+	}
+}
+
+func TestNoteTagIDsByWorkspaceMatchesPerNoteLookupAndScopesToWorkspace(t *testing.T) {
+	db := repoTestDB(t)
+	ctx := context.Background()
+	workspaceID := seedWorkspace(t, db)
+	otherWorkspaceID := seedWorkspace(t, db)
+
+	tagged, err := CreateNote(ctx, db, workspaceID, model.Nil, "Groceries", repoClock(t, 10, 0, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+	untagged, err := CreateNote(ctx, db, workspaceID, model.Nil, "Blank", repoClock(t, 10, 1, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+	elsewhere, err := CreateNote(ctx, db, otherWorkspaceID, model.Nil, "Other workspace", repoClock(t, 10, 2, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+	urgent, err := CreateTag(ctx, db, workspaceID, "urgent", repoClock(t, 10, 0, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := CreateTag(ctx, db, workspaceID, "home", repoClock(t, 10, 0, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTag, err := CreateTag(ctx, db, otherWorkspaceID, "other", repoClock(t, 10, 0, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetNoteTag(ctx, db, tagged.ID, urgent.ID, true, repoClock(t, 20, 0, 0x02)); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetNoteTag(ctx, db, tagged.ID, home.ID, true, repoClock(t, 21, 0, 0x02)); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetNoteTag(ctx, db, elsewhere.ID, otherTag.ID, true, repoClock(t, 20, 0, 0x02)); err != nil {
+		t.Fatal(err)
+	}
+
+	byNote, err := NoteTagIDsByWorkspace(ctx, db, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := byNote[untagged.ID]; present {
+		t.Fatalf("NoteTagIDsByWorkspace() included untagged note %s", untagged.ID)
+	}
+	if _, present := byNote[elsewhere.ID]; present {
+		t.Fatalf("NoteTagIDsByWorkspace() leaked a note from another workspace: %s", elsewhere.ID)
+	}
+	got := byNote[tagged.ID]
+	want, err := NoteTagIDs(ctx, db, tagged.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("NoteTagIDsByWorkspace()[tagged] = %v, want %v", got, want)
+	}
+	for _, id := range want {
+		if !slices.Contains(got, id) {
+			t.Fatalf("NoteTagIDsByWorkspace()[tagged] = %v, missing %s", got, id)
+		}
 	}
 }
 

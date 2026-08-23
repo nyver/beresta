@@ -28,7 +28,13 @@ type mobilePreferences struct {
 }
 
 func defaultMobilePreferences() mobilePreferences {
-	return mobilePreferences{Language: "en", AutoLockMinutes: 5, AttachmentRetention: retentionAll, CacheLimitBytes: 512 << 20}
+	return mobilePreferences{
+		Language:            "en",
+		AutoLockMinutes:     5,
+		AttachmentRetention: retentionAll,
+		SelectedNotebooks:   []string{},
+		CacheLimitBytes:     512 << 20,
+	}
 }
 
 func (p mobilePreferences) validate() error {
@@ -115,6 +121,12 @@ func loadMobilePreferences(ctx context.Context, db *sql.DB) (mobilePreferences, 
 	}
 	if err := json.Unmarshal(contents, &prefs); err != nil {
 		return prefs, errors.New("mobileapi: stored preferences are malformed")
+	}
+	if prefs.SelectedNotebooks == nil {
+		// A nil slice marshals to JSON null, which the Flutter client cannot
+		// cast to a List; a row persisted before this normalization existed
+		// can still carry that null.
+		prefs.SelectedNotebooks = []string{}
 	}
 	return prefs, prefs.validate()
 }

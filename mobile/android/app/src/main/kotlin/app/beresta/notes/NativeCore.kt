@@ -12,6 +12,9 @@ internal object NativeCore {
     @Volatile
     private var service: Service? = null
 
+    @Volatile
+    private var initializationFailure: String? = null
+
     fun initialize(deviceSecret: ByteArray) {
         check(service == null) { "native core is already initialized" }
         service = Mobileapi.newService(deviceSecret)
@@ -19,9 +22,19 @@ internal object NativeCore {
         ready.countDown()
     }
 
+    // Records why device-secret bootstrapping stopped short of [initialize], so
+    // awaitService fails immediately with the real reason instead of always
+    // waiting out its timeout. The first recorded failure wins.
+    fun failInitialization(reason: String) {
+        if (service != null) return
+        initializationFailure = reason
+        ready.countDown()
+    }
+
     fun awaitService(): Service {
         check(ready.await(30, TimeUnit.SECONDS)) { "native core initialization timed out" }
-        return checkNotNull(service) { "native core initialization failed" }
+        return service
+            ?: error("native core initialization failed: ${initializationFailure ?: "unknown reason"}")
     }
 
     fun accountPath(filesDirectory: File): String {

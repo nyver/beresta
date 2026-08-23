@@ -1,9 +1,30 @@
 import "dart:async";
+import "dart:typed_data";
 
+import "package:flutter/foundation.dart" show kDebugMode;
 import "package:flutter/material.dart";
+import "package:flutter/services.dart" show PlatformException;
+import "package:flutter_markdown_plus/flutter_markdown_plus.dart";
 
 import "core_gateway.dart";
 import "strings.dart";
+
+/// Renders a localized error with the underlying platform failure appended
+/// in debug builds, so a real device can be diagnosed without attaching a
+/// debugger or reading logcat.
+String describeFailure(Strings strings, Object failure) {
+  final base = strings("error");
+  if (!kDebugMode) return base;
+  if (failure is PlatformException) {
+    final message = failure.message;
+    final detail =
+        message == null || message.isEmpty
+            ? failure.code
+            : "${failure.code}: $message";
+    return "$base ($detail)";
+  }
+  return "$base ($failure)";
+}
 
 class BerestaApp extends StatefulWidget {
   const BerestaApp({super.key, this.gateway});
@@ -139,6 +160,7 @@ class SessionRoot extends StatefulWidget {
 
 class _SessionRootState extends State<SessionRoot> {
   bool? unlocked;
+  bool accountExists = false;
 
   @override
   void initState() {
@@ -146,7 +168,12 @@ class _SessionRootState extends State<SessionRoot> {
     widget.gateway
         .status()
         .then((status) {
-          if (mounted) setState(() => unlocked = status["unlocked"] == true);
+          if (mounted) {
+            setState(() {
+              unlocked = status["unlocked"] == true;
+              accountExists = status["account_exists"] == true;
+            });
+          }
         })
         .catchError((_) {
           if (mounted) setState(() => unlocked = false);
@@ -165,6 +192,7 @@ class _SessionRootState extends State<SessionRoot> {
         strings: strings,
         language: widget.language,
         onLanguageChanged: widget.onLanguageChanged,
+        accountExists: accountExists,
         onUnlocked: () => setState(() => unlocked = true),
       );
     }
@@ -185,6 +213,7 @@ class OnboardingScreen extends StatefulWidget {
     required this.language,
     required this.onLanguageChanged,
     required this.onUnlocked,
+    this.accountExists = false,
     super.key,
   });
 
@@ -193,6 +222,7 @@ class OnboardingScreen extends StatefulWidget {
   final String language;
   final ValueChanged<String> onLanguageChanged;
   final VoidCallback onUnlocked;
+  final bool accountExists;
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -216,8 +246,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await widget.gateway.unlockAccount(passphrase.text);
       }
       widget.onUnlocked();
-    } catch (_) {
-      if (mounted) setState(() => error = widget.strings("error"));
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
     } finally {
       passphrase.clear();
       if (mounted) setState(() => busy = false);
@@ -253,22 +285,35 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 TextField(
                   controller: passphrase,
                   obscureText: true,
-                  autofillHints: const [AutofillHints.password],
+                  enableSuggestions: false,
+                  autocorrect: false,
                   decoration: InputDecoration(
                     labelText: widget.strings("passphrase"),
                     border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: busy ? null : () => submit(true),
-                  child: Text(widget.strings("create")),
+                if (widget.accountExists)
+                  FilledButton(
+                    onPressed: busy ? null : () => submit(false),
+                    child: Text(widget.strings("unlock")),
+                  )
+                else ...[
+                  FilledButton(
+                    onPressed: busy ? null : () => submit(true),
+                    child: Text(widget.strings("create")),
+                  ),
+                  TextButton(
+                    onPressed: busy ? null : () => submit(false),
+                    child: Text(widget.strings("unlock")),
+                  ),
+                ],
+                Text(
+                  widget.accountExists
+                      ? widget.strings("returning_hint")
+                      : widget.strings("local_hint"),
+                  textAlign: TextAlign.center,
                 ),
-                TextButton(
-                  onPressed: busy ? null : () => submit(false),
-                  child: Text(widget.strings("unlock")),
-                ),
-                Text(widget.strings("local_hint"), textAlign: TextAlign.center),
                 if (error != null)
                   Semantics(
                     liveRegion: true,
@@ -339,6 +384,7 @@ class _NotesShellState extends State<NotesShell> {
   List<Map<String, dynamic>> tags = [];
   bool loading = true;
   String? selectedNotebook;
+  String? selectedTag;
   String? error;
   Timer? searchDebounce;
 
@@ -384,8 +430,10 @@ class _NotesShellState extends State<NotesShell> {
       try {
         final result = await widget.gateway.search(value);
         if (mounted) setState(() => notes = result);
-      } catch (_) {
-        if (mounted) setState(() => error = widget.strings("error"));
+      } catch (failure) {
+        if (mounted) {
+          setState(() => error = describeFailure(widget.strings, failure));
+        }
       }
     });
   }
@@ -404,7 +452,10 @@ class _NotesShellState extends State<NotesShell> {
               (note) =>
                   note["deleted"] != true &&
                   (selectedNotebook == null ||
-                      note["notebook_id"] == selectedNotebook),
+                      note["notebook_id"] == selectedNotebook) &&
+                  (selectedTag == null ||
+                      (note["tag_ids"] as List<dynamic>? ?? const [])
+                          .contains(selectedTag)),
             )
             .toList();
     return Scaffold(
@@ -442,35 +493,55 @@ class _NotesShellState extends State<NotesShell> {
         ],
       ),
       drawer: NavigationDrawer(
+        onDestinationSelected: (index) {
+          // The only NavigationDrawerDestination below is "Notes" (index 0);
+          // every other drawer row is a plain ListTile and does not count
+          // toward this index.
+          if (index == 0) {
+            setState(() {
+              selectedNotebook = null;
+              selectedTag = null;
+            });
+            Navigator.pop(context);
+          }
+        },
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              widget.strings("notebooks"),
-              style: Theme.of(context).textTheme.titleMedium,
+            padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  widget.strings("notebooks"),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                IconButton(
+                  tooltip: widget.strings("new_notebook"),
+                  onPressed: () => createNotebook(),
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                ),
+              ],
             ),
           ),
           NavigationDrawerDestination(
             icon: const Icon(Icons.notes),
             label: Text(widget.strings("notes")),
           ),
-          ...notebooks
-              .where((item) => item["deleted"] != true)
-              .map(
-                (item) => ListTile(
-                  leading: const Icon(Icons.book_outlined),
-                  title: Text(item["name"] as String),
-                  selected: selectedNotebook == item["id"],
-                  onTap: () {
-                    setState(() => selectedNotebook = item["id"] as String);
-                    Navigator.pop(context);
-                  },
-                ),
-              ),
+          ...notebookTree(),
           const Divider(),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(widget.strings("tags")),
+            padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(widget.strings("tags")),
+                IconButton(
+                  tooltip: widget.strings("new_tag"),
+                  onPressed: createTag,
+                  icon: const Icon(Icons.add, size: 20),
+                ),
+              ],
+            ),
           ),
           ...tags
               .where((item) => item["deleted"] != true)
@@ -478,6 +549,21 @@ class _NotesShellState extends State<NotesShell> {
                 (item) => ListTile(
                   leading: const Icon(Icons.tag),
                   title: Text(item["name"] as String),
+                  selected: selectedTag == item["id"],
+                  onTap: () {
+                    setState(() {
+                      selectedTag =
+                          selectedTag == item["id"]
+                              ? null
+                              : item["id"] as String;
+                    });
+                    Navigator.pop(context);
+                  },
+                  trailing: IconButton(
+                    tooltip: widget.strings("delete"),
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => deleteTag(item["id"] as String),
+                  ),
                 ),
               ),
           ListTile(
@@ -529,6 +615,11 @@ class _NotesShellState extends State<NotesShell> {
                             DateTime.fromMillisecondsSinceEpoch(
                               note["created_unix_ms"] as int,
                             ).toLocal().toString(),
+                          ),
+                          trailing: IconButton(
+                            tooltip: widget.strings("move_to_notebook"),
+                            icon: const Icon(Icons.drive_file_move_outline),
+                            onPressed: () => moveNote(note["id"] as String),
                           ),
                           onTap: () => openEditor(note["id"] as String),
                         );
@@ -599,6 +690,224 @@ class _NotesShellState extends State<NotesShell> {
       builder:
           (_) => ServerSheet(gateway: widget.gateway, strings: widget.strings),
     );
+  }
+
+  List<Widget> notebookTree() {
+    final visibleNotebooks = notebooks.where((item) => item["deleted"] != true);
+    final byParent = <String, List<Map<String, dynamic>>>{};
+    for (final item in visibleNotebooks) {
+      final parent = (item["parent_id"] as String?) ?? "";
+      byParent.putIfAbsent(parent, () => []).add(item);
+    }
+    List<Widget> render(String parentId, int depth) {
+      final children = byParent[parentId] ?? const [];
+      return [
+        for (final item in children) ...[
+          ListTile(
+            contentPadding: EdgeInsets.only(left: 16.0 + depth * 20, right: 4),
+            leading: const Icon(Icons.book_outlined),
+            title: Text(item["name"] as String),
+            selected: selectedNotebook == item["id"],
+            onTap: () {
+              setState(() {
+                selectedNotebook = item["id"] as String;
+                selectedTag = null;
+              });
+              Navigator.pop(context);
+            },
+            trailing: PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert),
+              onSelected: (action) {
+                if (action == "add") {
+                  createNotebook(parentId: item["id"] as String);
+                } else {
+                  deleteNotebook(item["id"] as String);
+                }
+              },
+              itemBuilder:
+                  (context) => [
+                    PopupMenuItem(
+                      value: "add",
+                      child: Text(widget.strings("new_notebook")),
+                    ),
+                    PopupMenuItem(
+                      value: "delete",
+                      child: Text(widget.strings("delete")),
+                    ),
+                  ],
+            ),
+          ),
+          ...render(item["id"] as String, depth + 1),
+        ],
+      ];
+    }
+
+    return render("", 0);
+  }
+
+  Future<void> createNotebook({String parentId = ""}) async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(widget.strings("new_notebook")),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: widget.strings("notebook_name"),
+              ),
+              onSubmitted:
+                  (value) => Navigator.pop(dialogContext, value.trim()),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed:
+                    () => Navigator.pop(dialogContext, controller.text.trim()),
+                child: Text(widget.strings("create")),
+              ),
+            ],
+          ),
+    );
+    if (name == null || name.isEmpty) return;
+    try {
+      await widget.gateway.createNotebook(name, parentId: parentId);
+      await refresh();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    }
+  }
+
+  Future<void> deleteNotebook(String id) async {
+    final hasChildren = notebooks.any(
+      (item) => item["deleted"] != true && item["parent_id"] == id,
+    );
+    if (hasChildren) {
+      if (mounted) {
+        setState(() => error = widget.strings("notebook_has_children"));
+      }
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(widget.strings("delete_notebook")),
+            content: Text(widget.strings("delete_notebook_warning")),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(widget.strings("delete")),
+              ),
+            ],
+          ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.gateway.deleteNotebook(id, true);
+      if (selectedNotebook == id) selectedNotebook = null;
+      await refresh();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    }
+  }
+
+  Future<void> createTag() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(widget.strings("new_tag")),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: widget.strings("tag_name"),
+              ),
+              onSubmitted:
+                  (value) => Navigator.pop(dialogContext, value.trim()),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed:
+                    () => Navigator.pop(dialogContext, controller.text.trim()),
+                child: Text(widget.strings("create")),
+              ),
+            ],
+          ),
+    );
+    if (name == null || name.isEmpty) return;
+    try {
+      await widget.gateway.createTag(name);
+      await refresh();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    }
+  }
+
+  Future<void> deleteTag(String id) async {
+    try {
+      await widget.gateway.deleteTag(id, true);
+      if (selectedTag == id) selectedTag = null;
+      await refresh();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    }
+  }
+
+  Future<void> moveNote(String noteId) async {
+    final target = await showDialog<String>(
+      context: context,
+      builder:
+          (dialogContext) => SimpleDialog(
+            title: Text(widget.strings("move_to_notebook")),
+            children: [
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialogContext, ""),
+                child: Text(widget.strings("no_notebook")),
+              ),
+              for (final item in notebooks.where(
+                (item) => item["deleted"] != true,
+              ))
+                SimpleDialogOption(
+                  onPressed:
+                      () => Navigator.pop(dialogContext, item["id"] as String),
+                  child: Text(item["name"] as String),
+                ),
+            ],
+          ),
+    );
+    if (target == null) return;
+    try {
+      await widget.gateway.moveNote(noteId, target);
+      await refresh();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    }
   }
 }
 
@@ -718,8 +1027,10 @@ class _ServerSheetState extends State<ServerSheet> {
         "device_name": "Android",
       });
       if (mounted) Navigator.pop(context);
-    } catch (_) {
-      if (mounted) setState(() => error = widget.strings("error"));
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -754,8 +1065,10 @@ class _SettingsSheetState extends State<SettingsSheet> {
         .then((value) {
           if (mounted) setState(() => settings = value);
         })
-        .catchError((_) {
-          if (mounted) setState(() => error = widget.strings("error"));
+        .catchError((Object failure) {
+          if (mounted) {
+            setState(() => error = describeFailure(widget.strings, failure));
+          }
         });
   }
 
@@ -881,9 +1194,11 @@ class _SettingsSheetState extends State<SettingsSheet> {
               try {
                 await widget.gateway.updateSettings(current);
                 if (context.mounted) Navigator.pop(context);
-              } catch (_) {
+              } catch (failure) {
                 if (mounted) {
-                  setState(() => error = widget.strings("error"));
+                  setState(
+                    () => error = describeFailure(widget.strings, failure),
+                  );
                 }
               }
             },
@@ -935,7 +1250,7 @@ class _BackupSheetState extends State<BackupSheet> {
                       error =
                           failure.toString().toLowerCase().contains("space")
                               ? widget.strings("backup_capacity")
-                              : widget.strings("error");
+                              : describeFailure(widget.strings, failure);
                     });
                   }
                 }
@@ -954,7 +1269,7 @@ class _BackupSheetState extends State<BackupSheet> {
                       error =
                           failure.toString().toLowerCase().contains("space")
                               ? widget.strings("backup_capacity")
-                              : widget.strings("error");
+                              : describeFailure(widget.strings, failure);
                     });
                   }
                 }
@@ -1055,6 +1370,10 @@ class _EditorScreenState extends State<EditorScreen> {
   bool loading = true;
   bool preview = false;
   bool dirty = false;
+  List<Map<String, dynamic>> attachments = [];
+  bool capturingPhoto = false;
+  List<Map<String, dynamic>> allTags = [];
+  List<String> noteTagIds = [];
 
   @override
   void initState() {
@@ -1068,10 +1387,169 @@ class _EditorScreenState extends State<EditorScreen> {
       title.addListener(markDirty);
       body.addListener(markDirty);
     });
+    refreshAttachments();
+    refreshTags();
   }
 
   void markDirty() {
     if (!dirty && mounted) setState(() => dirty = true);
+  }
+
+  Future<void> refreshAttachments() async {
+    try {
+      final result = await widget.gateway.listNoteAttachments(widget.noteId);
+      if (mounted) setState(() => attachments = result);
+    } catch (_) {
+      // Best-effort: the editor still works without the attachment strip.
+    }
+  }
+
+  Future<void> refreshTags() async {
+    try {
+      final results = await Future.wait([
+        widget.gateway.listTags(),
+        widget.gateway.listNoteTags(widget.noteId),
+      ]);
+      if (mounted) {
+        setState(() {
+          allTags = results[0] as List<Map<String, dynamic>>;
+          noteTagIds = results[1] as List<String>;
+        });
+      }
+    } catch (_) {
+      // Best-effort: the editor still works without the tags row.
+    }
+  }
+
+  Future<void> toggleTag(String tagId, bool present) async {
+    try {
+      await widget.gateway.setNoteTag(widget.noteId, tagId, present);
+      await refreshTags();
+    } catch (failure) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeFailure(widget.strings, failure))),
+        );
+      }
+    }
+  }
+
+  Future<void> pickTag() async {
+    final unassigned =
+        allTags
+            .where(
+              (tag) =>
+                  tag["deleted"] != true && !noteTagIds.contains(tag["id"]),
+            )
+            .toList();
+    final selection = await showDialog<String>(
+      context: context,
+      builder:
+          (dialogContext) => SimpleDialog(
+            title: Text(widget.strings("add_tag")),
+            children: [
+              for (final tag in unassigned)
+                SimpleDialogOption(
+                  onPressed:
+                      () => Navigator.pop(dialogContext, tag["id"] as String),
+                  child: Text(tag["name"] as String),
+                ),
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialogContext, "\x00new"),
+                child: Text(widget.strings("new_tag")),
+              ),
+            ],
+          ),
+    );
+    if (selection == null) return;
+    if (selection != "\x00new") {
+      await toggleTag(selection, true);
+      return;
+    }
+    if (!mounted) return;
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(widget.strings("new_tag")),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: widget.strings("tag_name"),
+              ),
+              onSubmitted:
+                  (value) => Navigator.pop(dialogContext, value.trim()),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed:
+                    () => Navigator.pop(dialogContext, controller.text.trim()),
+                child: Text(widget.strings("create")),
+              ),
+            ],
+          ),
+    );
+    if (name == null || name.isEmpty) return;
+    try {
+      final created = await widget.gateway.createTag(name);
+      await toggleTag(created["id"] as String, true);
+    } catch (failure) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeFailure(widget.strings, failure))),
+        );
+      }
+    }
+  }
+
+  Widget tagsRow() {
+    final assigned =
+        allTags
+            .where(
+              (tag) =>
+                  tag["deleted"] != true && noteTagIds.contains(tag["id"]),
+            )
+            .toList();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Wrap(
+        spacing: 6,
+        children: [
+          for (final tag in assigned)
+            InputChip(
+              label: Text(tag["name"] as String),
+              onDeleted: () => toggleTag(tag["id"] as String, false),
+            ),
+          ActionChip(
+            avatar: const Icon(Icons.add, size: 16),
+            label: Text(widget.strings("add_tag")),
+            onPressed: pickTag,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> capturePhoto() async {
+    setState(() => capturingPhoto = true);
+    try {
+      await widget.gateway.capturePhoto(widget.noteId);
+      await refreshAttachments();
+    } catch (failure) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeFailure(widget.strings, failure))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => capturingPhoto = false);
+    }
   }
 
   Future<void> save() async {
@@ -1122,32 +1600,48 @@ class _EditorScreenState extends State<EditorScreen> {
         body:
             loading
                 ? const Center(child: CircularProgressIndicator())
-                : preview
-                ? SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: SelectableText(
-                    body.text,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                )
-                : TextField(
-                  controller: body,
-                  expands: true,
-                  maxLines: null,
-                  minLines: null,
-                  textAlignVertical: TextAlignVertical.top,
-                  decoration: InputDecoration(
-                    hintText: widget.strings("body"),
-                    contentPadding: const EdgeInsets.all(20),
-                    border: InputBorder.none,
-                  ),
+                : Column(
+                  children: [
+                    if (attachments.isNotEmpty) attachmentsStrip(),
+                    tagsRow(),
+                    Expanded(
+                      child:
+                          preview
+                              ? SingleChildScrollView(
+                                padding: const EdgeInsets.all(20),
+                                child: MarkdownBody(
+                                  data: body.text,
+                                  selectable: true,
+                                ),
+                              )
+                              : TextField(
+                                controller: body,
+                                expands: true,
+                                maxLines: null,
+                                minLines: null,
+                                textAlignVertical: TextAlignVertical.top,
+                                decoration: InputDecoration(
+                                  hintText: widget.strings("body"),
+                                  contentPadding: const EdgeInsets.all(20),
+                                  border: InputBorder.none,
+                                ),
+                              ),
+                    ),
+                  ],
                 ),
         bottomNavigationBar: SafeArea(
           child: Row(
             children: [
               TextButton.icon(
-                onPressed: () => widget.gateway.capturePhoto(widget.noteId),
-                icon: const Icon(Icons.photo_camera),
+                onPressed: capturingPhoto ? null : capturePhoto,
+                icon:
+                    capturingPhoto
+                        ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                        : const Icon(Icons.photo_camera),
                 label: Text(widget.strings("photo")),
               ),
               TextButton.icon(
@@ -1177,6 +1671,167 @@ class _EditorScreenState extends State<EditorScreen> {
               body.text = value["body"] as String;
             },
           ),
+    );
+  }
+
+  Widget attachmentsStrip() {
+    return SizedBox(
+      height: 96,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        itemCount: attachments.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final attachment = attachments[index];
+          final blobId = attachment["blob_id"] as String;
+          return _AttachmentThumbnail(
+            key: ValueKey(blobId),
+            gateway: widget.gateway,
+            strings: widget.strings,
+            noteId: widget.noteId,
+            blobId: blobId,
+            mediaType: attachment["media_type"] as String,
+            onDeleted: refreshAttachments,
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _AttachmentThumbnail extends StatefulWidget {
+  const _AttachmentThumbnail({
+    super.key,
+    required this.gateway,
+    required this.strings,
+    required this.noteId,
+    required this.blobId,
+    required this.mediaType,
+    required this.onDeleted,
+  });
+
+  final CoreGateway gateway;
+  final Strings strings;
+  final String noteId;
+  final String blobId;
+  final String mediaType;
+  final VoidCallback onDeleted;
+
+  @override
+  State<_AttachmentThumbnail> createState() => _AttachmentThumbnailState();
+}
+
+class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
+  late final Future<Uint8List> bytes = widget.gateway.readAttachmentData(
+    widget.blobId,
+  );
+
+  Future<void> confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(widget.strings("delete_photo")),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(widget.strings("delete")),
+              ),
+            ],
+          ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.gateway.removeAttachmentData(widget.noteId, widget.blobId);
+      widget.onDeleted();
+    } catch (failure) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeFailure(widget.strings, failure))),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isImage = widget.mediaType.startsWith("image/");
+    return GestureDetector(
+      onTap:
+          isImage
+              ? () => showDialog<void>(
+                context: context,
+                builder:
+                    (_) => Dialog(
+                      child: FutureBuilder<Uint8List>(
+                        future: bytes,
+                        builder: (context, snapshot) {
+                          if (snapshot.hasError) {
+                            return SizedBox(
+                              height: 200,
+                              child: Center(
+                                child: Icon(
+                                  Icons.broken_image_outlined,
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
+                            );
+                          }
+                          if (!snapshot.hasData) {
+                            return const SizedBox(
+                              height: 200,
+                              child: Center(
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+                          }
+                          return InteractiveViewer(
+                            child: Image.memory(snapshot.data!),
+                          );
+                        },
+                      ),
+                    ),
+              )
+              : null,
+      onLongPress: confirmDelete,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 96,
+          height: 96,
+          child: FutureBuilder<Uint8List>(
+            future: bytes,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const ColoredBox(
+                  color: Color(0x11000000),
+                  child: Center(child: Icon(Icons.broken_image_outlined)),
+                );
+              }
+              if (!snapshot.hasData) {
+                return const ColoredBox(
+                  color: Color(0x11000000),
+                  child: Center(
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                );
+              }
+              if (!isImage) {
+                return const ColoredBox(
+                  color: Color(0x11000000),
+                  child: Center(child: Icon(Icons.insert_drive_file_outlined)),
+                );
+              }
+              return Image.memory(snapshot.data!, fit: BoxFit.cover);
+            },
+          ),
+        ),
+      ),
     );
   }
 }

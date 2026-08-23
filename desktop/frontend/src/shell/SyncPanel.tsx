@@ -125,7 +125,7 @@ export function SyncPanel({ deviceId }: SyncPanelProps) {
             <label>{t("sync.url_label")}<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} /></label>
             <label>{t("sync.invite_label")}<input type="password" value={invite} onChange={(event) => setInvite(event.target.value)} /></label>
             <label>{t("sync.server_fingerprint_label")}<input value={fingerprint} onChange={(event) => setFingerprint(event.target.value)} /></label>
-            <label><input type="checkbox" checked={trusted} onChange={(event) => setTrusted(event.target.checked)} />{t("sync.trusted_certificate_label")}</label>
+            <label className="sync-checkbox-label"><input type="checkbox" checked={trusted} onChange={(event) => setTrusted(event.target.checked)} />{t("sync.trusted_certificate_label")}</label>
             <p>{t("sync.server_fingerprint_warning")}</p>
             <button type="button" disabled={busy || (!qr && !url)} onClick={() => void connect()}>{t("sync.connect_button")}</button>
           </div>

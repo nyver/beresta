@@ -1,15 +1,15 @@
 export namespace main {
-
+	
 	export class AccountInfo {
 	    account_id: string;
 	    device_id: string;
 	    workspace_id: string;
 	    key_protection: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AccountInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.account_id = source["account_id"];
@@ -21,17 +21,17 @@ export namespace main {
 	export class AccountStatus {
 	    unlocked: boolean;
 	    account?: AccountInfo;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AccountStatus(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.unlocked = source["unlocked"];
 	        this.account = this.convertValues(source["account"], AccountInfo);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -61,11 +61,11 @@ export namespace main {
 	    sync_server_url: string;
 	    sync_security_mode: string;
 	    sync_fingerprint: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.language = source["language"];
@@ -86,11 +86,11 @@ export namespace main {
 	    display_name: string;
 	    media_type: string;
 	    size_bytes: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AttachmentDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.blob_id = source["blob_id"];
@@ -104,11 +104,11 @@ export namespace main {
 	    display_name: string;
 	    media_type: string;
 	    data_base64: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AttachmentPreviewDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.display_name = source["display_name"];
@@ -119,7 +119,7 @@ export namespace main {
 	export class AttachmentSaveResult {
 	    display_name: string;
 	    media_type: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AttachmentSaveResult(source);
 	    }
@@ -227,11 +227,11 @@ export namespace main {
 	    security_mode: string;
 	    qr_code: string;
 	    device_name: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConnectServerRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.url = source["url"];
@@ -636,11 +636,11 @@ export namespace main {
 	    security_mode: string;
 	    fingerprint?: string;
 	    diagnostics: transport.Diagnostics;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerConnectionInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
@@ -649,7 +649,7 @@ export namespace main {
 	        this.fingerprint = source["fingerprint"];
 	        this.diagnostics = this.convertValues(source["diagnostics"], transport.Diagnostics);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -673,11 +673,11 @@ export namespace main {
 	    sequence: number;
 	    reason: string;
 	    received_unix_ms: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SyncQuarantineDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.operation_id = source["operation_id"];
@@ -722,18 +722,18 @@ export namespace main {
 }
 
 export namespace transport {
-
+	
 	export class Diagnostics {
 	    reachable: boolean;
 	    tls_1_3: boolean;
 	    authenticated: boolean;
 	    latency_ms: number;
 	    error_class?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Diagnostics(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.reachable = source["reachable"];
@@ -752,11 +752,11 @@ export namespace transport {
 	    created_at: any;
 	    // Go type: time
 	    revoked_at?: any;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RemoteDevice(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.device_id = source["device_id"];
@@ -766,7 +766,7 @@ export namespace transport {
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.revoked_at = this.convertValues(source["revoked_at"], null);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -787,3 +787,4 @@ export namespace transport {
 	}
 
 }
+

@@ -10,5 +10,5 @@ FROM scratch
 COPY --from=build /beresta-server /beresta-server
 COPY build/server/container-config.yaml /etc/beresta/config.yaml
 VOLUME ["/data"]
-EXPOSE 8443
+EXPOSE 8446
 ENTRYPOINT ["/beresta-server", "--config", "/etc/beresta/config.yaml", "--data", "/data"]

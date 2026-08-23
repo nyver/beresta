@@ -72,7 +72,7 @@ targets with `build.cmd server-cross-build`; run the host smoke with
 
 ```text
 docker build -f build/server/Dockerfile -t beresta-server .
-docker run --rm -p 8443:8443 -v beresta-data:/data beresta-server
+docker run -d --rm -p 8446:8446 -v beresta-data:/data beresta-server
 ```
 
 The container configuration binds inside its network namespace; preserve the

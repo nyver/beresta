@@ -20,6 +20,14 @@ type NoteDTO struct {
 	Archived    bool   `json:"archived"`
 	Deleted     bool   `json:"deleted"`
 	CreatedMS   int64  `json:"created_unix_ms"`
+	// UpdatedMS is the note's last-modified time (title/flags rename or body
+	// edit, whichever is newest); it defaults to CreatedMS for a note with no
+	// list metadata available (see noteDTO - true only for a note this
+	// process just created, or one fetched outside ListNotes).
+	UpdatedMS int64 `json:"updated_unix_ms"`
+	// Preview is a short plaintext snippet of the note's body, for the note
+	// list row; empty for a note with no body yet.
+	Preview string `json:"preview"`
 }
 
 func noteDTO(n model.Note) NoteDTO {
@@ -32,13 +40,23 @@ func noteDTO(n model.Note) NoteDTO {
 		Archived:    n.Flags.Value&model.NoteFlagArchived != 0,
 		Deleted:     n.Deleted.Value,
 		CreatedMS:   int64(n.CreatedAt.PhysicalMS),
+		UpdatedMS:   int64(n.CreatedAt.PhysicalMS),
 	}
 }
 
-func noteDTOs(notes []model.Note) []NoteDTO {
+// noteDTOsWithMeta builds NoteDTOs enriched with each note's list-row
+// metadata (see App.ListNotes); a note absent from meta (never edited, so it
+// has no crdt_states/notes_fts row yet) keeps noteDTO's own CreatedMS
+// fallback for UpdatedMS and an empty Preview.
+func noteDTOsWithMeta(notes []model.Note, meta map[model.ID]store.NoteListMeta) []NoteDTO {
 	out := make([]NoteDTO, len(notes))
 	for i, n := range notes {
-		out[i] = noteDTO(n)
+		dto := noteDTO(n)
+		if m, ok := meta[n.ID]; ok {
+			dto.UpdatedMS = m.UpdatedUnixMS
+			dto.Preview = m.Preview
+		}
+		out[i] = dto
 	}
 	return out
 }
@@ -85,11 +103,16 @@ func (a *App) ListNotes() ([]NoteDTO, error) {
 	if err != nil {
 		return nil, mapError(err)
 	}
-	notes, err := acc.ListNotes(a.requestContext(), workspaceID)
+	ctx := a.requestContext()
+	notes, err := acc.ListNotes(ctx, workspaceID)
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return noteDTOs(notes), nil
+	meta, err := acc.NoteListMetaByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return noteDTOsWithMeta(notes, meta), nil
 }
 
 // SetNoteNotebook reassigns a note's notebook (empty notebookID files it

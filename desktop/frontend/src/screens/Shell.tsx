@@ -25,7 +25,7 @@ import { ImportExportPanel } from "../shell/ImportExportPanel";
 import { Modal } from "../shell/Modal";
 import { NotebookTree } from "../shell/NotebookTree";
 import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPane";
-import { NoteList } from "../shell/NoteList";
+import { NoteList, type NoteListMeta } from "../shell/NoteList";
 import { QuickNotePanel } from "../shell/QuickNotePanel";
 import { SearchBar, type SearchBarHandle } from "../shell/SearchBar";
 import { ShellIntegrationPanel } from "../shell/ShellIntegrationPanel";
@@ -186,6 +186,22 @@ export function Shell({ account, onLocked }: ShellProps) {
         return tagNotes;
     }
   }, [notes, tagNotes, selection, searchResults]);
+
+  // Built from `notes` alone (the workspace-wide ListNotes fetch) rather
+  // than from visibleNotes itself: tagNotes/searchResults come from their
+  // own separate IPC calls (SearchByTag/Search) that are not enriched with
+  // preview/last-modified metadata, since re-running that workspace-wide
+  // join on every keystroke of an interactive search would risk the
+  // search box's own latency budget for no benefit - every note surfaced
+  // by any selection is also present in `notes`, so looking it up here by
+  // ID covers all four selection kinds without duplicating the join.
+  const noteMetaById = useMemo(() => {
+    const map = new Map<string, NoteListMeta>();
+    for (const note of notes) {
+      map.set(note.id, { updatedMs: note.updated_unix_ms, preview: note.preview });
+    }
+    return map;
+  }, [notes]);
 
   const selectedNote = visibleNotes.find((note) => note.id === selectedNoteId) ?? null;
 
@@ -358,6 +374,25 @@ export function Shell({ account, onLocked }: ShellProps) {
     setAutoLockMinutes(updated.auto_lock_minutes);
   }
 
+  // Ctrl+N/Cmd+N creates a note from anywhere in the shell, mirroring the
+  // sidebar's "+ New note" button. Read through a ref (same pattern as
+  // handleLockRef above) so this listener is only ever attached once,
+  // instead of being torn down and reattached on every keystroke-driven
+  // Shell render.
+  const handleCreateNoteRef = useRef(handleCreateNote);
+  handleCreateNoteRef.current = handleCreateNote;
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        void handleCreateNoteRef.current();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
     <main className="screen shell" aria-labelledby={shellTitleId}>
       <header className="shell-topbar">
@@ -370,6 +405,20 @@ export function Shell({ account, onLocked }: ShellProps) {
                 : t("shell.key_protection_dpapi")}
             </span>
           ) : null}
+          <button type="button" onClick={() => setDataModalOpen(true)}>
+            {t("settings.title")}
+          </button>
+          <button type="button" onClick={() => setSyncModalOpen(true)}>
+            {t("sync.open_button")}
+          </button>
+          <button type="button" onClick={() => void handleLock()} disabled={locking}>
+            {t("shell.lock_button")}
+          </button>
+        </div>
+      </header>
+
+      {dataModalOpen ? (
+        <Modal title={t("settings.title")} onClose={() => setDataModalOpen(false)}>
           <label className="auto-lock-control">
             <span>{t("shell.auto_lock_label")}</span>
             <select
@@ -384,20 +433,6 @@ export function Shell({ account, onLocked }: ShellProps) {
               <option value={60}>{t("shell.auto_lock_60min")}</option>
             </select>
           </label>
-          <button type="button" onClick={() => setDataModalOpen(true)}>
-            {t("data.title")}
-          </button>
-          <button type="button" onClick={() => setSyncModalOpen(true)}>
-            {t("sync.open_button")}
-          </button>
-          <button type="button" onClick={() => void handleLock()} disabled={locking}>
-            {t("shell.lock_button")}
-          </button>
-        </div>
-      </header>
-
-      {dataModalOpen ? (
-        <Modal title={t("data.title")} onClose={() => setDataModalOpen(false)}>
           <BackupsPanel onRestored={loadAll} />
           <ImportExportPanel onImported={loadAll} />
           <ShellIntegrationPanel />
@@ -439,6 +474,14 @@ export function Shell({ account, onLocked }: ShellProps) {
       ) : (
         <div className="shell-body">
           <aside className="shell-sidebar">
+            <button
+              type="button"
+              className="new-note-button"
+              onClick={() => void handleCreateNote()}
+              disabled={creatingNote}
+            >
+              {t("shell.new_note_button")}
+            </button>
             <NotebookTree
               notebooks={notebooks}
               selectedId={
@@ -496,6 +539,7 @@ export function Shell({ account, onLocked }: ShellProps) {
               }
               selectedNoteId={selectedNoteId}
               onSelect={setSelectedNoteId}
+              noteMetaById={noteMetaById}
               highlightTerms={highlightTerms}
               emptyMessage={searchResults !== null ? t("search.no_results") : undefined}
             />

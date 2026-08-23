@@ -6,6 +6,7 @@ import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { AttachmentPanel, type AttachmentPanelHandle } from "./AttachmentPanel";
 import { KebabMenu } from "./KebabMenu";
+import { Modal } from "./Modal";
 import { NoteTagsEditor } from "./NoteTagsEditor";
 import { RevisionsPanel } from "./RevisionsPanel";
 
@@ -66,6 +67,13 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     // in-memory structure with no server push) has no other way to learn
     // about.
     const [restoreVersion, setRestoreVersion] = useState(0);
+    // History and Attachments both live behind a modal now instead of
+    // sitting inline in the editor column (task: expand the editor's
+    // usable area); AttachmentPanel itself stays mounted regardless (see
+    // its own doc comment), but this still needs resetting on note change
+    // so switching notes does not leave the previous note's modal open.
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [attachmentsOpen, setAttachmentsOpen] = useState(false);
 
     useEffect(() => {
       setTitle(note?.title ?? "");
@@ -76,6 +84,8 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
       setConfirmingDelete(false);
       setDeleting(false);
       setDeleteError(null);
+      setHistoryOpen(false);
+      setAttachmentsOpen(false);
     }, [note?.id, note?.title]);
 
     async function handleDelete() {
@@ -153,13 +163,18 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
               </button>
             </span>
           ) : (
-            <KebabMenu
-              label={t("shell.note_actions")}
-              items={[
-                { label: t("shell.new_note_button"), onSelect: onCreateNote, disabled: creatingNote },
-                { label: t("shell.delete_note"), onSelect: () => setConfirmingDelete(true), destructive: true },
-              ]}
-            />
+            <>
+              <button type="button" className="link-button" onClick={() => setHistoryOpen(true)}>
+                {t("revisions.open_button")}
+              </button>
+              <KebabMenu
+                label={t("shell.note_actions")}
+                items={[
+                  { label: t("shell.new_note_button"), onSelect: onCreateNote, disabled: creatingNote },
+                  { label: t("shell.delete_note"), onSelect: () => setConfirmingDelete(true), destructive: true },
+                ]}
+              />
+            </>
           )}
         </div>
         {deleteError ? (
@@ -179,23 +194,33 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
           noteId={note.id}
           onAttachFiles={(files) => attachmentPanelRef.current?.attachFiles(files)}
         />
-        <AttachmentPanel key={note.id} ref={attachmentPanelRef} noteId={note.id} />
-        <RevisionsPanel
-          key={`revisions-${note.id}`}
+        <AttachmentPanel
+          key={note.id}
+          ref={attachmentPanelRef}
           noteId={note.id}
-          onBeforeRestore={async () => {
-            // Flush any not-yet-debounced body edit into its own revision
-            // first: RestoreRevision below unconditionally replaces the
-            // note's current content, but if a pending edit stayed queued
-            // instead, remounting NoteEditor after the restore (via
-            // restoreVersion below) would tear down the old instance and
-            // its useNoteDocument cleanup would flush that stale edit on
-            // top of the just-restored content - silently reintroducing
-            // exactly what the user asked to discard.
-            await editorRef.current?.flush();
-          }}
-          onRestored={() => setRestoreVersion((v) => v + 1)}
+          open={attachmentsOpen}
+          onOpenChange={setAttachmentsOpen}
         />
+        {historyOpen ? (
+          <Modal title={t("revisions.section_title")} onClose={() => setHistoryOpen(false)}>
+            <RevisionsPanel
+              key={`revisions-${note.id}`}
+              noteId={note.id}
+              onBeforeRestore={async () => {
+                // Flush any not-yet-debounced body edit into its own revision
+                // first: RestoreRevision below unconditionally replaces the
+                // note's current content, but if a pending edit stayed queued
+                // instead, remounting NoteEditor after the restore (via
+                // restoreVersion below) would tear down the old instance and
+                // its useNoteDocument cleanup would flush that stale edit on
+                // top of the just-restored content - silently reintroducing
+                // exactly what the user asked to discard.
+                await editorRef.current?.flush();
+              }}
+              onRestored={() => setRestoreVersion((v) => v + 1)}
+            />
+          </Modal>
+        ) : null}
       </div>
     );
   },

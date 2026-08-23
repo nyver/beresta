@@ -327,6 +327,66 @@ func TestNoteTagIDsByWorkspaceMatchesPerNoteLookupAndScopesToWorkspace(t *testin
 	}
 }
 
+func TestNoteListMetaByWorkspaceCollapsesPreviewAndScopesToWorkspace(t *testing.T) {
+	db := repoTestDB(t)
+	ctx := context.Background()
+	workspaceID := seedWorkspace(t, db)
+	otherWorkspaceID := seedWorkspace(t, db)
+
+	edited, err := CreateNote(ctx, db, workspaceID, model.Nil, "Groceries", repoClock(t, 10, 0, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+	untouched, err := CreateNote(ctx, db, workspaceID, model.Nil, "Blank", repoClock(t, 15, 0, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+	elsewhere, err := CreateNote(ctx, db, otherWorkspaceID, model.Nil, "Other workspace", repoClock(t, 10, 0, 0x02))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ReplaceNoteFTS(ctx, db, edited.ID, "Groceries", "buy   oat milk\nand\ncoffee"); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertCRDTState(ctx, db, edited.ID, CRDTState{Snapshot: []byte("snap"), StateVector: []byte("sv")}, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceNoteFTS(ctx, db, elsewhere.ID, "Other workspace", "secret"); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := NoteListMetaByWorkspace(ctx, db, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := meta[elsewhere.ID]; present {
+		t.Fatalf("NoteListMetaByWorkspace() leaked a note from another workspace: %s", elsewhere.ID)
+	}
+
+	got, ok := meta[edited.ID]
+	if !ok {
+		t.Fatalf("NoteListMetaByWorkspace() missing edited note %s", edited.ID)
+	}
+	if want := "buy oat milk and coffee"; got.Preview != want {
+		t.Fatalf("NoteListMetaByWorkspace()[edited].Preview = %q, want %q", got.Preview, want)
+	}
+	if got.UpdatedUnixMS != 20 {
+		t.Fatalf("NoteListMetaByWorkspace()[edited].UpdatedUnixMS = %d, want 20 (from crdt_states, newer than the note's own clocks)", got.UpdatedUnixMS)
+	}
+
+	blank, ok := meta[untouched.ID]
+	if !ok {
+		t.Fatalf("NoteListMetaByWorkspace() missing untouched note %s", untouched.ID)
+	}
+	if blank.Preview != "" {
+		t.Fatalf("NoteListMetaByWorkspace()[untouched].Preview = %q, want empty (never had a body committed)", blank.Preview)
+	}
+	if blank.UpdatedUnixMS != 15 {
+		t.Fatalf("NoteListMetaByWorkspace()[untouched].UpdatedUnixMS = %d, want 15 (falls back to the note's own created clock)", blank.UpdatedUnixMS)
+	}
+}
+
 func TestCreateAndUpdateNoteMetadata(t *testing.T) {
 	db := repoTestDB(t)
 	ctx := context.Background()

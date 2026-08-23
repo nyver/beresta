@@ -196,6 +196,30 @@ func TestNoteAndSearchLifecycle(t *testing.T) {
 	if len(notes) != 1 || notes[0].ID != note.ID {
 		t.Fatalf("ListNotes = %+v", notes)
 	}
+	if notes[0].Preview != "" {
+		t.Fatalf("ListNotes()[0].Preview = %q, want empty before any body commit", notes[0].Preview)
+	}
+	if notes[0].UpdatedMS != notes[0].CreatedMS {
+		t.Fatalf("ListNotes()[0].UpdatedMS = %d, want CreatedMS %d before any body commit", notes[0].UpdatedMS, notes[0].CreatedMS)
+	}
+
+	update, format := encodedNoteUpdate(t, "milk  and\neggs")
+	if err := a.CommitNoteBody(CommitNoteBodyRequest{NoteID: note.ID, UpdateBase64: update, UpdateFormat: format}); err != nil {
+		t.Fatalf("CommitNoteBody: %v", err)
+	}
+	notesAfterCommit, err := a.ListNotes()
+	if err != nil {
+		t.Fatalf("ListNotes after commit: %v", err)
+	}
+	if len(notesAfterCommit) != 1 {
+		t.Fatalf("ListNotes after commit = %+v", notesAfterCommit)
+	}
+	if want := "milk and eggs"; notesAfterCommit[0].Preview != want {
+		t.Fatalf("ListNotes()[0].Preview after commit = %q, want %q", notesAfterCommit[0].Preview, want)
+	}
+	if notesAfterCommit[0].UpdatedMS < notesAfterCommit[0].CreatedMS {
+		t.Fatalf("ListNotes()[0].UpdatedMS after commit = %d, want >= CreatedMS %d", notesAfterCommit[0].UpdatedMS, notesAfterCommit[0].CreatedMS)
+	}
 
 	results, err := a.Search("Grocery")
 	if err != nil {

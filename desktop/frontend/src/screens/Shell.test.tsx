@@ -238,10 +238,14 @@ describe("Shell", () => {
     expect(screen.getByText("sync.status_disabled")).toBeInTheDocument();
   });
 
-  it("changes the auto-lock duration through the topbar control and persists it", async () => {
+  it("changes the auto-lock duration through the Settings modal and persists it", async () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);
     appMock.ListNotes.mockResolvedValue([]);
+    // The Settings modal now also mounts BackupsPanel (auto-lock moved in
+    // alongside it), which needs its own ListBackups fetch mocked or it
+    // renders with backups still undefined.
+    appMock.ListBackups.mockResolvedValue([]);
     appMock.UpdateSettings.mockResolvedValue({
       language: "en",
       last_database_path: "",
@@ -251,6 +255,7 @@ describe("Shell", () => {
     renderShell();
     const user = userEvent.setup();
 
+    await user.click(await screen.findByRole("button", { name: "settings.title" }));
     const select = await screen.findByLabelText("shell.auto_lock_label");
     // The control starts disabled until the initial GetSettings() fetch
     // resolves and arms autoLockMinutes; selecting an option before then
@@ -318,7 +323,12 @@ describe("Shell", () => {
     renderShell();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "shell.new_note_button" }));
+    // The empty detail pane shows its own "New note" button alongside the
+    // sidebar's persistent one while no note is selected; both call the
+    // same handler, so either works - the sidebar's (first in DOM order)
+    // disambiguates the query.
+    const [newNoteButton] = await screen.findAllByRole("button", { name: "shell.new_note_button" });
+    await user.click(newNoteButton);
 
     expect(appMock.CreateNote).toHaveBeenCalledWith("", "");
     expect(await screen.findByLabelText("shell.detail_title_label")).toBeInTheDocument();
@@ -337,7 +347,8 @@ describe("Shell", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "Work" }));
-    await user.click(await screen.findByRole("button", { name: "shell.new_note_button" }));
+    const [newNoteButton] = await screen.findAllByRole("button", { name: "shell.new_note_button" });
+    await user.click(newNoteButton);
 
     expect(appMock.CreateNote).toHaveBeenCalledWith(notebook.id, "");
   });

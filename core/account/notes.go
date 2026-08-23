@@ -291,6 +291,19 @@ func (a *Account) NoteTagIDsByWorkspace(ctx context.Context, workspaceID model.I
 	return store.NoteTagIDsByWorkspace(ctx, db, workspaceID)
 }
 
+// NoteListMetaByWorkspace returns every note's list-row display metadata
+// (preview snippet, last-modified time) in a workspace, keyed by note ID.
+func (a *Account) NoteListMetaByWorkspace(ctx context.Context, workspaceID model.ID) (map[model.ID]store.NoteListMeta, error) {
+	a.mu.Lock()
+	if a.locked {
+		a.mu.Unlock()
+		return nil, ErrAccountLocked
+	}
+	db := a.db
+	a.mu.Unlock()
+	return store.NoteListMetaByWorkspace(ctx, db, workspaceID)
+}
+
 // mutateWorkspace ticks the clock and runs apply against the account's
 // database (captured under lock, not read fresh from a.db) outside an
 // explicit transaction, then advances the persisted device clock. It is

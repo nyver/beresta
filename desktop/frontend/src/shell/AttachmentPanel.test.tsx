@@ -23,13 +23,16 @@ function fakeAttachment(overrides: Partial<main.AttachmentDTO> = {}): main.Attac
   };
 }
 
-function renderPanel(noteId = "note-1") {
+/** Renders with open=true (the list/dropzone visible inside its Modal) by
+ * default, since almost every existing test asserts against that content;
+ * the compact closed-trigger state gets its own dedicated test below. */
+function renderPanel(noteId = "note-1", open = true) {
   mockLocaleCatalog();
   mockSettings();
   const ref = createRef<AttachmentPanelHandle>();
   render(
     <I18nProvider>
-      <AttachmentPanel ref={ref} noteId={noteId} />
+      <AttachmentPanel ref={ref} noteId={noteId} open={open} onOpenChange={() => {}} />
     </I18nProvider>,
   );
   return { ref };
@@ -210,5 +213,24 @@ describe("AttachmentPanel", () => {
     releaseFirstUpload();
     await waitFor(() => expect(appMock.AddAttachmentFromFile).toHaveBeenCalledTimes(1));
     expect(appMock.AddAttachmentFromFile).not.toHaveBeenCalledWith("note-1", "C:\\b.bin");
+  });
+
+  it("renders just a compact trigger with a count badge when closed, and asks to open on click", async () => {
+    appMock.ListNoteAttachments.mockResolvedValue([fakeAttachment(), fakeAttachment({ blob_id: "blob-2" })]);
+    mockLocaleCatalog();
+    mockSettings();
+    const onOpenChange = vi.fn();
+    render(
+      <I18nProvider>
+        <AttachmentPanel noteId="note-1" open={false} onOpenChange={onOpenChange} />
+      </I18nProvider>,
+    );
+
+    const trigger = await screen.findByRole("button", { name: /attachments.open_button/ });
+    await waitFor(() => expect(trigger).toHaveTextContent("2"));
+    expect(screen.queryByText("photo.png")).not.toBeInTheDocument();
+
+    await userEvent.setup().click(trigger);
+    expect(onOpenChange).toHaveBeenCalledWith(true);
   });
 });

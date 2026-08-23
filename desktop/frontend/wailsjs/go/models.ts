@@ -428,6 +428,8 @@ export namespace main {
 	    archived: boolean;
 	    deleted: boolean;
 	    created_unix_ms: number;
+	    updated_unix_ms: number;
+	    preview: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new NoteDTO(source);
@@ -443,6 +445,8 @@ export namespace main {
 	        this.archived = source["archived"];
 	        this.deleted = source["deleted"];
 	        this.created_unix_ms = source["created_unix_ms"];
+	        this.updated_unix_ms = source["updated_unix_ms"];
+	        this.preview = source["preview"];
 	    }
 	}
 	export class NoteDocumentDTO {

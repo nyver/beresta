@@ -98,7 +98,6 @@ export function RevisionsPanel({ noteId, onBeforeRestore, onRestored }: Revision
   if (loadError) {
     return (
       <section className="revisions-panel" aria-label={t("revisions.section_title")}>
-        <h2>{t("revisions.section_title")}</h2>
         <p className="error" role="alert">
           {loadError}
         </p>
@@ -111,8 +110,9 @@ export function RevisionsPanel({ noteId, onBeforeRestore, onRestored }: Revision
   const displayOrder = [...revisions].reverse();
 
   return (
+    // No own heading here - it always renders inside NoteEditorPane's
+    // History Modal now, whose title already says "History".
     <section className="revisions-panel" aria-label={t("revisions.section_title")}>
-      <h2>{t("revisions.section_title")}</h2>
       {displayOrder.length === 0 ? (
         <p className="hint">{t("revisions.empty")}</p>
       ) : (

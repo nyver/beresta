@@ -112,6 +112,8 @@ export function fakeNote(overrides: Partial<main.NoteDTO> = {}): main.NoteDTO {
     archived: false,
     deleted: false,
     created_unix_ms: Date.UTC(2026, 0, 1),
+    updated_unix_ms: Date.UTC(2026, 0, 1),
+    preview: "",
     ...overrides,
   };
 }

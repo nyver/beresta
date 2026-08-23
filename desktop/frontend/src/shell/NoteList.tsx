@@ -1,14 +1,30 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Fragment, useRef, type KeyboardEvent, type ReactNode } from "react";
 
+import { formatNoteTimestamp } from "../format";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+
+/** One note's list-row display metadata, looked up by note ID rather than
+ * carried on each `notes` entry directly: `notes` here can come from three
+ * different IPC calls (ListNotes/SearchByTag/Search), only one of which
+ * (ListNotes, workspace-wide) is enriched with accurate UpdatedMS/Preview -
+ * see Shell.tsx's noteMetaById. */
+export interface NoteListMeta {
+  updatedMs: number;
+  preview: string;
+}
 
 export interface NoteListProps {
   notes: main.NoteDTO[];
   loading: boolean;
   selectedNoteId: string;
   onSelect: (noteId: string) => void;
+  /** Preview snippet + last-modified time for every note in the workspace,
+   * keyed by note ID; a note absent here (should not normally happen -
+   * every note surfaced by any selection is also in the workspace-wide
+   * list this is built from) just renders no preview/date. */
+  noteMetaById: Map<string, NoteListMeta>;
   /** Free-text words to highlight (case-insensitive) within each note's
    * title, e.g. the terms an active search matched on. Empty/omitted
    * renders titles plainly. */
@@ -18,7 +34,10 @@ export interface NoteListProps {
   emptyMessage?: string;
 }
 
-const ESTIMATED_ROW_HEIGHT = 56;
+// Taller than a title-only row (task: note list shows a preview + date) so
+// the virtualizer's initial layout guess is close before it measures actual
+// rendered rows.
+const ESTIMATED_ROW_HEIGHT = 72;
 
 // Matches NotebookTree.tsx's DRAG_TYPE_NOTE: a note row is a drag source
 // for refiling it into a different notebook by dropping it on that
@@ -61,6 +80,7 @@ export function NoteList({
   loading,
   selectedNoteId,
   onSelect,
+  noteMetaById,
   highlightTerms = [],
   emptyMessage,
 }: NoteListProps) {
@@ -111,6 +131,7 @@ export function NoteList({
       <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const note = notes[virtualRow.index];
+          const meta = noteMetaById.get(note.id);
           return (
             <button
               key={note.id}
@@ -134,14 +155,20 @@ export function NoteList({
                 event.dataTransfer.effectAllowed = "move";
               }}
             >
-              <span className="note-row-title">
-                {note.title ? highlightTitle(note.title, highlightTerms) : t("shell.untitled_note")}
-              </span>
-              {note.pinned ? (
-                <span aria-label={t("shell.pinned_note")} className="note-row-flag">
-                  ★
+              <span className="note-row-top">
+                <span className="note-row-title">
+                  {note.title ? highlightTitle(note.title, highlightTerms) : t("shell.untitled_note")}
                 </span>
-              ) : null}
+                {note.pinned ? (
+                  <span aria-label={t("shell.pinned_note")} className="note-row-flag">
+                    ★
+                  </span>
+                ) : null}
+              </span>
+              <span className="note-row-bottom">
+                {meta?.preview ? <span className="note-row-preview">{meta.preview}</span> : null}
+                {meta ? <span className="note-row-date">{formatNoteTimestamp(meta.updatedMs)}</span> : null}
+              </span>
             </button>
           );
         })}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/beresta-app/beresta/core/model"
 )
@@ -200,6 +201,81 @@ func ListNotes(ctx context.Context, exec Executor, workspaceID model.ID) ([]mode
 		return nil, fmt.Errorf("store: list notes: %w", err)
 	}
 	return notes, nil
+}
+
+// notePreviewRunes caps how much of a note's plaintext body is kept as its
+// list-row preview: the workspace ceiling is 20,000 notes (design.md), and
+// NoteListMetaByWorkspace returns every one of them at once, so this must
+// stay small enough that the JS bridge payload cannot balloon on a
+// body-heavy workspace.
+const notePreviewRunes = 160
+
+// NoteListMeta is one note's list-row display metadata: a plaintext preview
+// snippet and a "last modified" timestamp that is not tracked anywhere on
+// model.Note itself (LWW registers only cover title/notebook/flags/deleted;
+// body edits only ever touch crdt_states).
+type NoteListMeta struct {
+	UpdatedUnixMS int64
+	Preview       string
+}
+
+// NoteListMetaByWorkspace returns every note's list-row metadata across an
+// entire workspace in one query, keyed by note ID, mirroring
+// NoteTagIDsByWorkspace's shape and reasoning (tags.go): a note list or
+// search result page needs this for many notes at once, so one indexed join
+// beats issuing a query per note. UpdatedUnixMS is the latest of the note's
+// own LWW clocks (title/flags/created) and its CRDT body's last commit
+// (crdt_states.updated_unix_ms, NULL for a note whose body was never
+// edited), so a title-only rename still bumps "last modified" even without
+// a body commit. Preview comes from notes_fts.body - the note's plaintext
+// canonical Markdown body, already held there unencrypted for FTS5 matching
+// (see ReplaceNoteFTS's doc comment); the whole database file is itself
+// SQLCipher-encrypted at rest, which is the trust boundary Search and
+// SearchByTag already rely on for the same table.
+func NoteListMetaByWorkspace(ctx context.Context, exec Executor, workspaceID model.ID) (map[model.ID]NoteListMeta, error) {
+	rows, err := exec.QueryContext(ctx, `
+		SELECT n.id,
+		       MAX(n.created_physical_ms, COALESCE(n.title_physical_ms, 0), COALESCE(n.flags_physical_ms, 0), COALESCE(cs.updated_unix_ms, 0)),
+		       f.body
+		FROM notes n
+		LEFT JOIN crdt_states cs ON cs.note_id = n.id
+		LEFT JOIN notes_fts f ON f.note_id = n.id
+		WHERE n.workspace_id = ?`, workspaceID.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("store: list note metadata: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[model.ID]NoteListMeta)
+	for rows.Next() {
+		var rawID []byte
+		var updatedMS int64
+		var body sql.NullString
+		if err := rows.Scan(&rawID, &updatedMS, &body); err != nil {
+			return nil, fmt.Errorf("store: scan note metadata: %w", err)
+		}
+		id, err := model.ParseID(rawID)
+		if err != nil {
+			return nil, fmt.Errorf("store: stored note metadata ID: %w", err)
+		}
+		result[id] = NoteListMeta{UpdatedUnixMS: updatedMS, Preview: notePreview(body.String)}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list note metadata: %w", err)
+	}
+	return result, nil
+}
+
+// notePreview collapses a note body's whitespace/newlines into single spaces
+// and truncates it to notePreviewRunes, so a note list row gets a short
+// plain-text snippet instead of raw Markdown line breaks.
+func notePreview(body string) string {
+	collapsed := strings.Join(strings.Fields(body), " ")
+	runes := []rune(collapsed)
+	if len(runes) <= notePreviewRunes {
+		return collapsed
+	}
+	return string(runes[:notePreviewRunes])
 }
 
 const noteSelectColumns = `SELECT id, workspace_id, notebook_id, notebook_physical_ms, notebook_logical, notebook_device_id,

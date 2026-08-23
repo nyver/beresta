@@ -33,6 +33,19 @@ export interface AttachmentPanelHandle {
 
 export interface AttachmentPanelProps {
   noteId: string;
+  /** Whether the attachment list/dropzone is currently shown (inside a
+   * Modal); false renders just a compact trigger button instead. This only
+   * gates the returned JSX - every hook below (the upload queue, the
+   * OnFileDrop subscription, the attachFiles imperative handle used by
+   * NoteEditor's paste-to-attach) keeps running regardless, since
+   * AttachmentPanel itself stays mounted the whole time a note is open.
+   * The trigger button also carries its own --wails-drop-target (see
+   * styles.css): main.go's DragAndDrop only delivers a dropped file to an
+   * element marked with that CSS property, so without it on the closed
+   * trigger too, dropping a file while the modal is closed would silently
+   * do nothing instead of attaching. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 /** Matches desktop/attachments.go's maxAttachmentPreviewBytes: the panel
@@ -99,7 +112,7 @@ function readFileAsBase64(file: File): Promise<string> {
  * cooperative cancellation across the JS bridge.
  */
 export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanelProps>(
-  function AttachmentPanel({ noteId }, ref) {
+  function AttachmentPanel({ noteId, open, onOpenChange }, ref) {
     const { t, errorMessage, ready } = useI18n();
     const [attachments, setAttachments] = useState<main.AttachmentDTO[]>([]);
     const [loadError, setLoadError] = useState<string | null>(null);
@@ -317,94 +330,111 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
 
     const pendingCount = queue.filter((item) => item.status === "pending").length;
 
+    // A compact one-line trigger stands in for the full list/dropzone
+    // whenever the Attachments modal is closed (task: expand the editor's
+    // usable area), showing enough at a glance to know whether opening it
+    // is worthwhile.
+    const trigger = (
+      <button type="button" className="attachment-trigger" onClick={() => onOpenChange(true)}>
+        {t("attachments.open_button")}
+        {attachments.length > 0 ? <span className="attachment-count-badge">{attachments.length}</span> : null}
+        {pendingCount > 0 ? <span className="attachment-pending-badge">{pendingCount}</span> : null}
+      </button>
+    );
+
+    if (!open) {
+      return trigger;
+    }
+
     return (
-      <section className="attachment-panel" aria-label={t("attachments.section_title")}>
-        <div className="attachment-panel-header">
-          <h2>{t("attachments.section_title")}</h2>
-          <button type="button" onClick={() => void handlePickFile()}>
-            {t("attachments.add_button")}
-          </button>
-        </div>
-        <p className="hint attachment-dropzone">{t("attachments.dropzone_hint")}</p>
+      <>
+        {trigger}
+        <Modal title={t("attachments.section_title")} onClose={() => onOpenChange(false)}>
+          <div className="attachment-panel-body">
+            <button type="button" onClick={() => void handlePickFile()}>
+              {t("attachments.add_button")}
+            </button>
+            <p className="hint attachment-dropzone">{t("attachments.dropzone_hint")}</p>
 
-        {loadError ? (
-          <p className="error" role="alert">
-            {loadError}
-          </p>
-        ) : null}
-        {itemError ? (
-          <p className="error" role="alert">
-            {itemError}
-          </p>
-        ) : null}
+            {loadError ? (
+              <p className="error" role="alert">
+                {loadError}
+              </p>
+            ) : null}
+            {itemError ? (
+              <p className="error" role="alert">
+                {itemError}
+              </p>
+            ) : null}
 
-        {queue.length > 0 ? (
-          <ul className="attachment-upload-queue">
-            {queue.map((item) => (
-              <li key={item.id} className={`attachment-upload-item status-${item.status}`}>
-                <span className="attachment-upload-name">{item.name}</span>
-                <span className="attachment-upload-status">
-                  {item.status === "error"
-                    ? item.errorText
-                    : item.status === "uploading"
-                      ? t("attachments.uploading")
-                      : t("attachments.queued")}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {pendingCount > 0 ? (
-          <button type="button" className="link-button" onClick={cancelPending}>
-            {t("attachments.cancel_pending_button")}
-          </button>
-        ) : null}
+            {queue.length > 0 ? (
+              <ul className="attachment-upload-queue">
+                {queue.map((item) => (
+                  <li key={item.id} className={`attachment-upload-item status-${item.status}`}>
+                    <span className="attachment-upload-name">{item.name}</span>
+                    <span className="attachment-upload-status">
+                      {item.status === "error"
+                        ? item.errorText
+                        : item.status === "uploading"
+                          ? t("attachments.uploading")
+                          : t("attachments.queued")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {pendingCount > 0 ? (
+              <button type="button" className="link-button" onClick={cancelPending}>
+                {t("attachments.cancel_pending_button")}
+              </button>
+            ) : null}
 
-        {attachments.length === 0 && queue.length === 0 ? (
-          <p className="hint">{t("attachments.empty")}</p>
-        ) : (
-          <ul className="attachment-list">
-            {attachments.map((attachment) => {
-              const preview = previews[attachment.blob_id];
-              return (
-                <li key={attachment.blob_id} className="attachment-row">
-                  {preview ? (
-                    <img
-                      className="attachment-thumbnail"
-                      src={preview}
-                      alt={attachment.display_name}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setViewingBlobId(attachment.blob_id)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setViewingBlobId(attachment.blob_id);
-                        }
-                      }}
-                    />
-                  ) : (
-                    <span className="attachment-thumbnail attachment-thumbnail-placeholder" aria-hidden="true" />
-                  )}
-                  <span className="attachment-name">{attachment.display_name}</span>
-                  <span className="attachment-size">{formatBytes(attachment.size_bytes)}</span>
-                  <KebabMenu
-                    label={`${t("attachments.actions")}: ${attachment.display_name}`}
-                    items={[
-                      { label: t("attachments.save_button"), onSelect: () => void handleSave(attachment) },
-                      {
-                        label: t("attachments.remove_button"),
-                        onSelect: () => void handleRemove(attachment.blob_id),
-                        destructive: true,
-                      },
-                    ]}
-                  />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
+            {attachments.length === 0 && queue.length === 0 ? (
+              <p className="hint">{t("attachments.empty")}</p>
+            ) : (
+              <ul className="attachment-list">
+                {attachments.map((attachment) => {
+                  const preview = previews[attachment.blob_id];
+                  return (
+                    <li key={attachment.blob_id} className="attachment-row">
+                      {preview ? (
+                        <img
+                          className="attachment-thumbnail"
+                          src={preview}
+                          alt={attachment.display_name}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setViewingBlobId(attachment.blob_id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setViewingBlobId(attachment.blob_id);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <span className="attachment-thumbnail attachment-thumbnail-placeholder" aria-hidden="true" />
+                      )}
+                      <span className="attachment-name">{attachment.display_name}</span>
+                      <span className="attachment-size">{formatBytes(attachment.size_bytes)}</span>
+                      <KebabMenu
+                        label={`${t("attachments.actions")}: ${attachment.display_name}`}
+                        items={[
+                          { label: t("attachments.save_button"), onSelect: () => void handleSave(attachment) },
+                          {
+                            label: t("attachments.remove_button"),
+                            onSelect: () => void handleRemove(attachment.blob_id),
+                            destructive: true,
+                          },
+                        ]}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </Modal>
         {viewingBlobId && previews[viewingBlobId] ? (
           <Modal
             title={attachments.find((attachment) => attachment.blob_id === viewingBlobId)?.display_name ?? ""}
@@ -413,7 +443,7 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
             <img className="lightbox-image" src={previews[viewingBlobId]} alt="" />
           </Modal>
         ) : null}
-      </section>
+      </>
     );
   },
 );

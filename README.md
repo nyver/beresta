@@ -162,7 +162,12 @@ the per-user Windows Run key, with a UI warning when a stale entry from a
 different install path is detected. Closing the main window hides it to
 the tray instead of exiting whenever the tray started successfully; the
 tray menu's "Quit" (or a failed tray/hotkey startup, logged to the
-console) is what actually ends the process. A separate Synchronization
+console) is what actually ends the process. A named single-instance lock
+held for the process lifetime stops a second launch from opening a
+duplicate window, tray icon, and hotkey registration; launching again
+while Beresta is already running instead brings the existing main window
+to the foreground (or, if it is hidden to the tray, leaves it there - the
+tray icon is already the right way to reach it). A separate Synchronization
 entry now renders the shared disabled/offline/active/current/failed state
 model and listens for `sync:status` events without blocking local editing.
 In the current local-only phase it truthfully shows the active local device,

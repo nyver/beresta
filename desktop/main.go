@@ -23,6 +23,17 @@ var assets embed.FS
 const autostartFlag = "--autostart"
 
 func main() {
+	// The single-instance check must run before anything else: once a
+	// second process starts registering its own tray icon and hotkey, or
+	// opens the same account database as the first, undoing that is much
+	// harder than never doing it.
+	if alreadyRunning, err := acquireSingleInstanceLock(); err != nil {
+		log.Printf("single-instance check unavailable: %v", err)
+	} else if alreadyRunning {
+		activateRunningInstance()
+		return
+	}
+
 	app := newApp()
 
 	// The tray icon, context menu, and global hotkey are started here,

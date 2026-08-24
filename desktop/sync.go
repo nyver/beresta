@@ -120,7 +120,6 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	if previous != nil {
 		previous.Detach()
 	}
-	a.emit(EventSyncStatus, string(transport.StatusActive))
 	return ServerConnectionInfo{Enabled: true, URL: request.URL, SecurityMode: request.SecurityMode, Fingerprint: request.Fingerprint, Diagnostics: diagnostics}, nil
 }
 
@@ -139,6 +138,7 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 		return nil, nil, err
 	}
 	var lastSnapshot uint64
+	var lastCatalogDigest [32]byte
 	var lastReviewed model.ID
 	worker, err := coresync.NewWorker(workspaceID, repository, httpTransport, processor, coresync.WorkerOptions{
 		Prepare: func(ctx context.Context) error { return refreshRemoteDevices(ctx, acc, httpTransport, workspaceID) },
@@ -157,14 +157,19 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 			_, err = httpTransport.AcknowledgeSnapshot(ctx, ack)
 			return err
 		},
-		ReviewSnapshot: func(ctx context.Context, cursor coresync.Cursor) error {
+		ReviewSnapshot: func(ctx context.Context, _ coresync.Cursor) error {
 			snapshot, err := httpTransport.LatestSnapshot(ctx, workspaceID)
 			if errors.Is(err, transport.ErrNotFound) {
 				return nil
 			}
-			if err != nil || snapshot.ID == lastReviewed || snapshot.BaseSequence > cursor.LastSequence {
+			if err != nil || snapshot.ID == lastReviewed {
 				return err
 			}
+			// A snapshot whose base is ahead of the local cursor is precisely
+			// the recovery path for a newly joined client: ApplyWorkspaceSnapshot
+			// replays the missing authenticated operations and advances that
+			// cursor atomically. Skipping it left a joined workspace empty even
+			// though the server had returned its snapshot.
 			ack, err := acc.ApplyWorkspaceSnapshot(ctx, snapshot, repository, processor)
 			if err != nil {
 				return err
@@ -175,8 +180,18 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 			lastReviewed = snapshot.ID
 			return nil
 		},
+		SyncAttachments: func(ctx context.Context) error {
+			return acc.SynchronizeWorkspaceAttachments(ctx, workspaceID, httpTransport)
+		},
 		PublishSnapshot: func(ctx context.Context, cursor coresync.Cursor) error {
-			if cursor.LastSequence <= lastSnapshot || (lastSnapshot != 0 && cursor.LastSequence-lastSnapshot < 1000) {
+			catalogDigest, err := acc.WorkspaceCatalogDigest(ctx, workspaceID)
+			if err != nil {
+				return err
+			}
+			if cursor.LastSequence <= lastSnapshot && catalogDigest == lastCatalogDigest {
+				return nil
+			}
+			if lastSnapshot != 0 && cursor.LastSequence-lastSnapshot < 1000 && catalogDigest == lastCatalogDigest {
 				return nil
 			}
 			snapshot, err := acc.CreateWorkspaceSnapshot(ctx, workspaceID, repository)
@@ -194,6 +209,7 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 				return err
 			}
 			lastSnapshot = cursor.LastSequence
+			lastCatalogDigest = catalogDigest
 			lastReviewed = snapshot.ID
 			return nil
 		},
@@ -202,10 +218,18 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 			switch progress.Phase {
 			case coresync.PhaseCurrent:
 				status = transport.StatusCurrent
+				httpTransport.CompleteSync()
+				a.setSyncError("")
 			case coresync.PhaseBackoff:
 				status = transport.StatusOffline
+				httpTransport.SyncOffline()
+				a.setSyncError(progress.ErrorDetail)
 			case coresync.PhaseQuarantine:
 				status = transport.StatusFailed
+				httpTransport.SyncFailed()
+				a.setSyncError(progress.ErrorDetail)
+			default:
+				httpTransport.BeginSync()
 			}
 			a.emit(EventSyncStatus, string(status))
 		},
@@ -214,6 +238,13 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 		return nil, nil, err
 	}
 	return worker, repository, nil
+}
+
+func (a *App) setSyncError(detail string) {
+	a.mu.Lock()
+	a.syncErrorDetail = detail
+	a.mu.Unlock()
+	a.emit(EventSyncError, detail)
 }
 
 // attachWorkspaceSync builds a sync worker for workspaceID and swaps it into
@@ -283,7 +314,9 @@ func (a *App) DisableServer() error {
 	}
 	a.mu.Lock()
 	a.settings, a.transport, a.httpTransport, a.syncCoordinator, a.syncRepository = next, transport.NewLocal(), nil, nil, nil
+	a.syncErrorDetail = ""
 	a.mu.Unlock()
+	a.emit(EventSyncError, "")
 	a.emit(EventSyncStatus, string(transport.StatusDisabled))
 	return nil
 }
@@ -364,6 +397,27 @@ func (a *App) RetrySyncQuarantine(operationID string) error {
 	}
 	if coordinator != nil {
 		coordinator.Trigger()
+	}
+	return nil
+}
+
+// SyncNow starts an immediate synchronization cycle for the currently active
+// workspace. Coordinator.Trigger coalesces concurrent requests, so repeated
+// calls cannot create overlapping pull/push cycles.
+func (a *App) SyncNow() error {
+	a.mu.Lock()
+	coordinator, remote := a.syncCoordinator, a.httpTransport
+	a.mu.Unlock()
+	if coordinator == nil || remote == nil {
+		return &AppError{Code: ErrCodeInvalidInput, Message: "server synchronization is disabled"}
+	}
+	remote.BeginSync()
+	a.emit(EventSyncStatus, string(transport.StatusActive))
+	if !coordinator.Trigger() {
+		remote.SyncFailed()
+		a.setSyncError("synchronization worker is not running")
+		a.emit(EventSyncStatus, string(transport.StatusFailed))
+		return &AppError{Code: ErrCodeInternal, Message: "synchronization worker is not running"}
 	}
 	return nil
 }

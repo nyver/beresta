@@ -19,7 +19,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/model"
+	"github.com/beresta-app/beresta/core/store"
 	coresync "github.com/beresta-app/beresta/core/sync"
 	"github.com/gorilla/websocket"
 )
@@ -136,6 +138,26 @@ func (h *HTTP) BeginSync() {
 	h.setStatus(StatusActive)
 }
 
+// CompleteSync marks the complete pull/apply/push cycle current. Individual
+// successful HTTP requests must not do this: receiving a snapshot is not a
+// successful synchronization until its authenticated contents were applied.
+func (h *HTTP) CompleteSync() {
+	h.setStatus(StatusCurrent)
+}
+
+// SyncOffline records a retryable worker failure after its network request
+// has completed. This keeps a stale successful request from masking an
+// unapplied or otherwise failed sync cycle as "current".
+func (h *HTTP) SyncOffline() {
+	h.setStatus(StatusOffline)
+}
+
+// SyncFailed records a non-retryable synchronization failure, such as a
+// quarantined operation.
+func (h *HTTP) SyncFailed() {
+	h.setStatus(StatusFailed)
+}
+
 func (h *HTTP) Pull(ctx context.Context, workspaceID model.ID, cursor coresync.Cursor, limit int) (coresync.PullPage, error) {
 	if limit <= 0 || limit > h.config.MaxOperationsPerBatch {
 		return coresync.PullPage{}, errors.New("transport: invalid pull limit")
@@ -202,6 +224,60 @@ func (h *HTTP) Push(ctx context.Context, workspaceID model.ID, operations []core
 		results[index] = coresync.PushResult{OpID: id, Sequence: uint64(accepted.Sequence), Duplicate: accepted.Duplicate}
 	}
 	return results, nil
+}
+
+// GetAttachment returns opaque attachment metadata from the server. A missing
+// blob is reported as exists=false so the account layer can upload its local
+// ciphertext without treating it as a synchronization failure.
+func (h *HTTP) GetAttachment(ctx context.Context, workspaceID model.ID, blobID store.BlobID) (account.RemoteAttachment, bool, error) {
+	path := "/v1/blobs/" + hex.EncodeToString(blobID[:]) + "?" + url.Values{"workspace_id": {workspaceID.String()}}.Encode()
+	var response blobInfoJSON
+	if err := h.doJSON(ctx, http.MethodGet, path, nil, &response, true); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return account.RemoteAttachment{}, false, nil
+		}
+		return account.RemoteAttachment{}, false, err
+	}
+	attachment, err := response.toRemoteAttachment(workspaceID, blobID)
+	if err != nil {
+		return account.RemoteAttachment{}, false, err
+	}
+	return attachment, true, nil
+}
+
+func (h *HTTP) BeginAttachment(ctx context.Context, workspaceID model.ID, blobID store.BlobID, keyID, manifest []byte, totalBytes int64, chunks []account.AttachmentChunk) (account.RemoteAttachment, error) {
+	request := struct {
+		WorkspaceID       string      `json:"workspace_id"`
+		BlobID            string      `json:"blob_id"`
+		KeyID             string      `json:"key_id"`
+		EncryptedManifest []byte      `json:"encrypted_manifest"`
+		TotalBytes        int64       `json:"total_bytes"`
+		Chunks            []BlobChunk `json:"chunks"`
+	}{workspaceID.String(), hex.EncodeToString(blobID[:]), hex.EncodeToString(keyID), manifest, totalBytes, attachmentChunksToBlobChunks(chunks)}
+	var response blobInfoJSON
+	if err := h.doJSON(ctx, http.MethodPost, "/v1/blobs/init", request, &response, true); err != nil {
+		return account.RemoteAttachment{}, err
+	}
+	return response.toRemoteAttachment(workspaceID, blobID)
+}
+
+func (h *HTTP) PutAttachmentChunk(ctx context.Context, workspaceID model.ID, blobID store.BlobID, index uint32, contents []byte) error {
+	path := "/v1/blobs/" + hex.EncodeToString(blobID[:]) + "/chunks/" + strconv.FormatUint(uint64(index), 10) + "?" + url.Values{"workspace_id": {workspaceID.String()}}.Encode()
+	return h.doBytes(ctx, http.MethodPut, path, contents)
+}
+
+func (h *HTTP) CompleteAttachment(ctx context.Context, workspaceID model.ID, blobID store.BlobID) (account.RemoteAttachment, error) {
+	path := "/v1/blobs/" + hex.EncodeToString(blobID[:]) + "/complete?" + url.Values{"workspace_id": {workspaceID.String()}}.Encode()
+	var response blobInfoJSON
+	if err := h.doJSON(ctx, http.MethodPost, path, nil, &response, true); err != nil {
+		return account.RemoteAttachment{}, err
+	}
+	return response.toRemoteAttachment(workspaceID, blobID)
+}
+
+func (h *HTTP) ReadAttachmentChunk(ctx context.Context, workspaceID model.ID, blobID store.BlobID, index uint32) ([]byte, error) {
+	path := "/v1/blobs/" + hex.EncodeToString(blobID[:]) + "/chunks/" + strconv.FormatUint(uint64(index), 10) + "?" + url.Values{"workspace_id": {workspaceID.String()}}.Encode()
+	return h.getBytes(ctx, path, BlobChunkBytes+64)
 }
 
 func (h *HTTP) Subscribe(ctx context.Context, workspaceID model.ID) (<-chan coresync.Cursor, error) {
@@ -287,7 +363,6 @@ func (h *HTTP) doJSON(ctx context.Context, method, path string, input, output an
 		if err != nil {
 			return err
 		}
-		h.setStatus(StatusCurrent)
 		return nil
 	}
 	return ErrAuthentication
@@ -390,7 +465,7 @@ func (h *HTTP) ensureSession(ctx context.Context, forceRefresh bool) error {
 		return ErrAuthentication
 	}
 	h.mu.Lock()
-	h.session, h.sessionEnd, h.status = session.Token, session.ExpiresAt, StatusCurrent
+	h.session, h.sessionEnd = session.Token, session.ExpiresAt
 	h.mu.Unlock()
 	return nil
 }
@@ -458,6 +533,43 @@ type operationChangesJSON struct {
 	Cursor      int64           `json:"cursor"`
 	CursorEpoch int64           `json:"cursor_epoch"`
 	Operations  []operationJSON `json:"operations"`
+}
+
+func attachmentChunksToBlobChunks(chunks []account.AttachmentChunk) []BlobChunk {
+	result := make([]BlobChunk, len(chunks))
+	for index, chunk := range chunks {
+		result[index] = BlobChunk{Index: int(chunk.Index), Bytes: chunk.Bytes, SHA256: hex.EncodeToString(chunk.SHA256)}
+	}
+	return result
+}
+
+func (value blobInfoJSON) toRemoteAttachment(workspaceID model.ID, blobID store.BlobID) (account.RemoteAttachment, error) {
+	if value.WorkspaceID != workspaceID.String() || value.BlobID != hex.EncodeToString(blobID[:]) || value.TotalBytes < 0 || (value.State != "staging" && value.State != "complete") {
+		return account.RemoteAttachment{}, errors.New("transport: malformed blob response")
+	}
+	keyID, err := hex.DecodeString(value.KeyID)
+	if err != nil || len(keyID) != 16 || hex.EncodeToString(keyID) != value.KeyID {
+		return account.RemoteAttachment{}, errors.New("transport: malformed blob key identifier")
+	}
+	chunks := make([]account.AttachmentChunk, len(value.Chunks))
+	for index, chunk := range value.Chunks {
+		if chunk.Index < 0 || chunk.Bytes <= 0 || chunk.Index != index {
+			return account.RemoteAttachment{}, errors.New("transport: malformed blob chunk response")
+		}
+		digest, err := hex.DecodeString(chunk.SHA256)
+		if err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != chunk.SHA256 {
+			return account.RemoteAttachment{}, errors.New("transport: malformed blob chunk digest")
+		}
+		chunks[index] = account.AttachmentChunk{Index: uint32(chunk.Index), Bytes: chunk.Bytes, SHA256: digest}
+	}
+	uploaded := make(map[uint32]bool, len(value.Uploaded))
+	for _, index := range value.Uploaded {
+		if index < 0 || index >= len(chunks) {
+			return account.RemoteAttachment{}, errors.New("transport: malformed uploaded blob chunks")
+		}
+		uploaded[uint32(index)] = true
+	}
+	return account.RemoteAttachment{KeyID: keyID, Manifest: append([]byte(nil), value.EncryptedManifest...), Bytes: value.TotalBytes, Complete: value.State == "complete", Chunks: chunks, Uploaded: uploaded}, nil
 }
 
 func operationFromWire(operation coresync.WireOperation) operationJSON {

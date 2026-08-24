@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -18,7 +19,30 @@ import (
 	coresync "github.com/beresta-app/beresta/core/sync"
 )
 
-var snapshotArchiveMagic = [4]byte{'B', 'S', 'N', '1'}
+var (
+	snapshotArchiveMagic        = [4]byte{'B', 'S', 'N', '1'}
+	snapshotCatalogArchiveMagic = [4]byte{'B', 'S', 'N', '2'}
+)
+
+// snapshotCatalog carries structural workspace state that is not represented
+// by note operations, along with note-to-notebook assignments needed to
+// repair clients that received older creation operations. The payload remains
+// inside the encrypted and signed snapshot ciphertext.
+type snapshotCatalog struct {
+	Notebooks       []store.Notebook         `json:"notebooks"`
+	Tags            []store.Tag              `json:"tags"`
+	Attachments     []store.Attachment       `json:"attachments"`
+	NoteAssignments []snapshotNoteAssignment `json:"note_assignments"`
+}
+
+// snapshotNoteAssignment is the notebook LWW register of a note. It keeps
+// snapshots compact while allowing a newer client to restore assignments from
+// history written before note creation emitted a metadata operation.
+type snapshotNoteAssignment struct {
+	NoteID        model.ID  `json:"note_id"`
+	NotebookID    model.ID  `json:"notebook_id"`
+	NotebookClock model.HLC `json:"notebook_clock"`
+}
 
 // CreateWorkspaceSnapshot publishes a complete authenticated replay archive
 // of the operation history currently known at a contiguous server cursor.
@@ -36,7 +60,11 @@ func (a *Account) CreateWorkspaceSnapshot(ctx context.Context, workspaceID model
 	if err != nil {
 		return coresync.Snapshot{}, err
 	}
-	payload, err := encodeSnapshotOperations(operations)
+	catalog, err := snapshotCatalogForWorkspace(ctx, db, workspaceID)
+	if err != nil {
+		return coresync.Snapshot{}, err
+	}
+	payload, err := encodeWorkspaceSnapshotArchive(operations, catalog)
 	if err != nil {
 		return coresync.Snapshot{}, err
 	}
@@ -136,7 +164,7 @@ func (a *Account) ApplyWorkspaceSnapshot(ctx context.Context, snapshot coresync.
 		return coresync.SnapshotAcknowledgement{}, err
 	}
 	defer clear(payload)
-	operations, err := decodeSnapshotOperations(payload)
+	operations, catalog, err := decodeWorkspaceSnapshotArchive(payload)
 	if err != nil || len(operations) == 0 || operations[0].Sequence != 1 || uint64(len(operations)) != snapshot.BaseSequence || operations[len(operations)-1].Sequence != snapshot.BaseSequence {
 		return coresync.SnapshotAcknowledgement{}, errors.New("account: snapshot operation archive is incomplete")
 	}
@@ -147,11 +175,17 @@ func (a *Account) ApplyWorkspaceSnapshot(ctx context.Context, snapshot coresync.
 	if cursor.Epoch != snapshot.CursorEpoch {
 		return coresync.SnapshotAcknowledgement{}, errors.New("account: snapshot cursor epoch mismatch")
 	}
+	if err := applySnapshotCatalog(ctx, db, snapshot.WorkspaceID, catalog); err != nil {
+		return coresync.SnapshotAcknowledgement{}, err
+	}
 	if cursor.LastSequence < snapshot.BaseSequence {
 		start := sort.Search(len(operations), func(i int) bool { return operations[i].Sequence > cursor.LastSequence })
 		if err := repository.ApplyPage(ctx, coresync.Cursor{WorkspaceID: snapshot.WorkspaceID, LastSequence: snapshot.BaseSequence, Epoch: snapshot.CursorEpoch}, operations[start:], processor, time.Now()); err != nil {
 			return coresync.SnapshotAcknowledgement{}, err
 		}
+	}
+	if err := applySnapshotNoteAssignments(ctx, db, snapshot.WorkspaceID, catalog.NoteAssignments); err != nil {
+		return coresync.SnapshotAcknowledgement{}, err
 	}
 	ack := coresync.SnapshotAcknowledgement{SnapshotID: snapshot.ID, WorkspaceID: snapshot.WorkspaceID, DeviceID: deviceID,
 		BaseSequence: snapshot.BaseSequence, CiphertextHash: append([]byte(nil), snapshot.CiphertextHash...)}
@@ -216,6 +250,191 @@ func snapshotOperations(ctx context.Context, db *sql.DB, workspaceID model.ID, b
 		operations = append(operations, op)
 	}
 	return operations, nil
+}
+
+func snapshotCatalogForWorkspace(ctx context.Context, db *sql.DB, workspaceID model.ID) (snapshotCatalog, error) {
+	notebooks, err := store.ListNotebooks(ctx, db, workspaceID)
+	if err != nil {
+		return snapshotCatalog{}, err
+	}
+	tags, err := store.ListTags(ctx, db, workspaceID)
+	if err != nil {
+		return snapshotCatalog{}, err
+	}
+	attachments, err := store.ListAttachments(ctx, db, workspaceID)
+	if err != nil {
+		return snapshotCatalog{}, err
+	}
+	notes, err := store.ListNotes(ctx, db, workspaceID)
+	if err != nil {
+		return snapshotCatalog{}, err
+	}
+	assignments := make([]snapshotNoteAssignment, 0, len(notes))
+	for _, note := range notes {
+		if note.NotebookID.Value.IsZero() {
+			continue
+		}
+		assignments = append(assignments, snapshotNoteAssignment{
+			NoteID: note.ID, NotebookID: note.NotebookID.Value, NotebookClock: note.NotebookID.Clock,
+		})
+	}
+	sort.Slice(notebooks, func(i, j int) bool { return bytes.Compare(notebooks[i].ID.Bytes(), notebooks[j].ID.Bytes()) < 0 })
+	sort.Slice(tags, func(i, j int) bool { return bytes.Compare(tags[i].ID.Bytes(), tags[j].ID.Bytes()) < 0 })
+	sort.Slice(attachments, func(i, j int) bool {
+		return bytes.Compare(attachments[i].BlobID.Bytes(), attachments[j].BlobID.Bytes()) < 0
+	})
+	sort.Slice(assignments, func(i, j int) bool {
+		return bytes.Compare(assignments[i].NoteID.Bytes(), assignments[j].NoteID.Bytes()) < 0
+	})
+	return snapshotCatalog{Notebooks: notebooks, Tags: tags, Attachments: attachments, NoteAssignments: assignments}, nil
+}
+
+// WorkspaceCatalogDigest returns a stable fingerprint of structural workspace
+// state. Sync workers use it to publish a fresh snapshot when cataloged
+// notebook, tag, attachment, or note-assignment state changes.
+func (a *Account) WorkspaceCatalogDigest(ctx context.Context, workspaceID model.ID) ([sha256.Size]byte, error) {
+	db, _, _, _, err := a.workspaceSession(workspaceID)
+	if err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	catalog, err := snapshotCatalogForWorkspace(ctx, db, workspaceID)
+	if err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	payload, err := json.Marshal(catalog)
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("account: encode workspace catalog digest: %w", err)
+	}
+	return sha256.Sum256(payload), nil
+}
+
+func applySnapshotCatalog(ctx context.Context, db *sql.DB, workspaceID model.ID, catalog snapshotCatalog) error {
+	transaction, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("account: begin snapshot catalog transaction: %w", err)
+	}
+	defer transaction.Rollback()
+
+	// Insert every notebook at the workspace root first. This establishes all
+	// parent rows before the second pass restores the real tree edges.
+	for _, notebook := range catalog.Notebooks {
+		if notebook.WorkspaceID != workspaceID {
+			return errors.New("account: snapshot notebook workspace mismatch")
+		}
+		root := notebook
+		root.ParentID = model.Nil
+		if err := store.UpsertSnapshotNotebook(ctx, transaction, root); err != nil {
+			return err
+		}
+	}
+	for _, notebook := range catalog.Notebooks {
+		if err := store.UpsertSnapshotNotebook(ctx, transaction, notebook); err != nil {
+			return err
+		}
+	}
+	for _, tag := range catalog.Tags {
+		if tag.WorkspaceID != workspaceID {
+			return errors.New("account: snapshot tag workspace mismatch")
+		}
+		if err := store.UpsertSnapshotTag(ctx, transaction, tag); err != nil {
+			return err
+		}
+	}
+	for _, attachment := range catalog.Attachments {
+		if attachment.WorkspaceID != workspaceID {
+			return errors.New("account: snapshot attachment workspace mismatch")
+		}
+		if _, err := store.CreateAttachment(ctx, transaction, workspaceID, attachment.BlobID, attachment.KeyID, attachment.Manifest, attachment.SizeBytes, attachment.ChunkCount, attachment.CreatedUnixMS); err != nil {
+			return err
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("account: commit snapshot catalog: %w", err)
+	}
+	return nil
+}
+
+// applySnapshotNoteAssignments runs after the operation archive: the archive
+// materializes a note row, then this catalog supplement restores its notebook
+// register when older history lacked the creation-time metadata operation.
+func applySnapshotNoteAssignments(ctx context.Context, db *sql.DB, workspaceID model.ID, assignments []snapshotNoteAssignment) error {
+	transaction, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("account: begin snapshot note assignments transaction: %w", err)
+	}
+	defer transaction.Rollback()
+	for _, assignment := range assignments {
+		if assignment.NoteID.IsZero() || assignment.NotebookID.IsZero() || assignment.NotebookClock.IsZero() {
+			return errors.New("account: invalid snapshot note assignment")
+		}
+		note, err := store.GetNote(ctx, transaction, assignment.NoteID)
+		if errors.Is(err, store.ErrNotFound) {
+			// The assignment can only be meaningful once its note has arrived;
+			// a later snapshot that contains that note will replay it again.
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if note.WorkspaceID != workspaceID {
+			return errors.New("account: snapshot note assignment workspace mismatch")
+		}
+		if err := store.SetNoteNotebook(ctx, transaction, assignment.NoteID, assignment.NotebookID, assignment.NotebookClock); err != nil {
+			return err
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("account: commit snapshot note assignments: %w", err)
+	}
+	return nil
+}
+
+func encodeWorkspaceSnapshotArchive(operations []coresync.WireOperation, catalog snapshotCatalog) ([]byte, error) {
+	operationsPayload, err := encodeSnapshotOperations(operations)
+	if err != nil {
+		return nil, err
+	}
+	catalogPayload, err := json.Marshal(catalog)
+	if err != nil {
+		return nil, fmt.Errorf("account: encode snapshot catalog: %w", err)
+	}
+	result := append([]byte(nil), snapshotCatalogArchiveMagic[:]...)
+	result = binary.BigEndian.AppendUint32(result, uint32(len(operationsPayload)))
+	result = append(result, operationsPayload...)
+	result = binary.BigEndian.AppendUint32(result, uint32(len(catalogPayload)))
+	result = append(result, catalogPayload...)
+	return result, nil
+}
+
+func decodeWorkspaceSnapshotArchive(payload []byte) ([]coresync.WireOperation, snapshotCatalog, error) {
+	if len(payload) >= len(snapshotArchiveMagic) && bytes.Equal(payload[:len(snapshotArchiveMagic)], snapshotArchiveMagic[:]) {
+		operations, err := decodeSnapshotOperations(payload)
+		return operations, snapshotCatalog{}, err
+	}
+	if len(payload) < len(snapshotCatalogArchiveMagic)+8 || !bytes.Equal(payload[:len(snapshotCatalogArchiveMagic)], snapshotCatalogArchiveMagic[:]) {
+		return nil, snapshotCatalog{}, errors.New("account: malformed snapshot archive")
+	}
+	offset := len(snapshotCatalogArchiveMagic)
+	operationsLength := int(binary.BigEndian.Uint32(payload[offset : offset+4]))
+	offset += 4
+	if operationsLength <= 0 || operationsLength > len(payload)-offset-4 {
+		return nil, snapshotCatalog{}, errors.New("account: invalid snapshot operation archive length")
+	}
+	operations, err := decodeSnapshotOperations(payload[offset : offset+operationsLength])
+	if err != nil {
+		return nil, snapshotCatalog{}, err
+	}
+	offset += operationsLength
+	catalogLength := int(binary.BigEndian.Uint32(payload[offset : offset+4]))
+	offset += 4
+	if catalogLength < 0 || catalogLength != len(payload)-offset {
+		return nil, snapshotCatalog{}, errors.New("account: invalid snapshot catalog length")
+	}
+	var catalog snapshotCatalog
+	if err := json.Unmarshal(payload[offset:], &catalog); err != nil {
+		return nil, snapshotCatalog{}, errors.New("account: malformed snapshot catalog")
+	}
+	return operations, catalog, nil
 }
 
 func encodeSnapshotOperations(operations []coresync.WireOperation) ([]byte, error) {

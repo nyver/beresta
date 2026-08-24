@@ -27,6 +27,13 @@ String describeFailure(Strings strings, Object failure) {
   return "$base ($failure)";
 }
 
+// Sync requests are intentionally best-effort at lifecycle boundaries and
+// after local writes: the coordinator coalesces concurrent triggers and
+// retries transport failures in the background.
+void requestCurrentWorkspaceSync(CoreGateway gateway) {
+  unawaited(gateway.syncNow().catchError((_) {}));
+}
+
 /// Maps a core/transport.Status value ("disabled", "offline", "active",
 /// "current", "failed") to the icon shown next to it in the sync UI.
 IconData syncStatusIcon(String status) {
@@ -126,6 +133,12 @@ class _AppLifecycleLockState extends State<AppLifecycleLock>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      requestCurrentWorkspaceSync(widget.gateway);
+    }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       if (!obscured) setState(() => obscured = true);
@@ -147,7 +160,7 @@ class _AppLifecycleLockState extends State<AppLifecycleLock>
     try {
       final status = await widget.gateway.status();
       if (status["unlocked"] == true) {
-        unawaited(widget.gateway.syncNow().catchError((_) {}));
+        requestCurrentWorkspaceSync(widget.gateway);
       } else {
         widget.onSessionLocked();
       }
@@ -159,6 +172,7 @@ class _AppLifecycleLockState extends State<AppLifecycleLock>
 
   @override
   void dispose() {
+    requestCurrentWorkspaceSync(widget.gateway);
     WidgetsBinding.instance.removeObserver(this);
     lockTimer?.cancel();
     super.dispose();
@@ -426,11 +440,13 @@ class _NotesShellState extends State<NotesShell> {
   Timer? syncEventsTimer;
   int eventCursor = 0;
   bool pollingEvents = false;
+  bool syncingWorkspace = false;
 
   @override
   void initState() {
     super.initState();
     refresh();
+    requestCurrentWorkspaceSync(widget.gateway);
     refreshSyncStatus();
     syncStatusTimer = Timer.periodic(
       const Duration(seconds: 5),
@@ -476,6 +492,47 @@ class _NotesShellState extends State<NotesShell> {
           error = widget.strings("offline");
         });
       }
+    }
+  }
+
+  Future<void> syncCurrentWorkspace() async {
+    if (syncingWorkspace) return;
+    setState(() {
+      syncingWorkspace = true;
+      error = null;
+    });
+    try {
+      await widget.gateway.syncNow();
+      var synchronized = false;
+      for (var attempt = 0; attempt < 30; attempt++) {
+        final status = await widget.gateway.syncStatus();
+        if (status == "current") {
+          synchronized = true;
+          break;
+        }
+        if (status == "offline" || status == "failed" || status == "disabled") {
+          break;
+        }
+        await Future<void>.delayed(const Duration(seconds: 1));
+      }
+      if (!mounted) return;
+      if (synchronized) {
+        await refresh();
+      } else {
+        final detail = await widget.gateway.syncError();
+        setState(
+          () => error = detail.isEmpty
+              ? widget.strings("workspace_sync_pending")
+              : "${widget.strings("sync_error_details")}: $detail",
+        );
+      }
+      await refreshSyncStatus();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    } finally {
+      if (mounted) setState(() => syncingWorkspace = false);
     }
   }
 
@@ -551,8 +608,15 @@ class _NotesShellState extends State<NotesShell> {
         actions: [
           IconButton(
             tooltip: widget.strings("sync"),
-            onPressed: () => widget.gateway.syncNow().catchError((_) {}),
-            icon: const Icon(Icons.sync),
+            onPressed: syncingWorkspace ? null : syncCurrentWorkspace,
+            icon:
+                syncingWorkspace
+                    ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                    : const Icon(Icons.sync),
           ),
           IconButton(
             tooltip:
@@ -701,7 +765,7 @@ class _NotesShellState extends State<NotesShell> {
                                 : Icons.description_outlined,
                           ),
                           title: Text(
-                            title.isEmpty ? widget.strings("new_note") : title,
+                            title.isEmpty ? widget.strings("untitled") : title,
                           ),
                           subtitle: Text(
                             DateTime.fromMillisecondsSinceEpoch(
@@ -724,9 +788,10 @@ class _NotesShellState extends State<NotesShell> {
         tooltip: widget.strings("new_note"),
         onPressed: () async {
           final created = await widget.gateway.createNote(
-            widget.strings("new_note"),
+            widget.strings("untitled"),
             notebookId: selectedNotebook ?? "",
           );
+          requestCurrentWorkspaceSync(widget.gateway);
           await openEditor(created["id"] as String);
         },
         icon: const Icon(Icons.add),
@@ -874,6 +939,7 @@ class _NotesShellState extends State<NotesShell> {
     if (name == null || name.isEmpty) return;
     try {
       await widget.gateway.createNotebook(name, parentId: parentId);
+      requestCurrentWorkspaceSync(widget.gateway);
       await refresh();
     } catch (failure) {
       if (mounted) {
@@ -913,6 +979,7 @@ class _NotesShellState extends State<NotesShell> {
     if (confirmed != true) return;
     try {
       await widget.gateway.deleteNotebook(id, true);
+      requestCurrentWorkspaceSync(widget.gateway);
       if (selectedNotebook == id) selectedNotebook = null;
       await refresh();
     } catch (failure) {
@@ -999,6 +1066,7 @@ class _NotesShellState extends State<NotesShell> {
     if (target == null) return;
     try {
       await widget.gateway.moveNote(noteId, target);
+      requestCurrentWorkspaceSync(widget.gateway);
       await refresh();
     } catch (failure) {
       if (mounted) {
@@ -1032,6 +1100,7 @@ class _ServerSheetState extends State<ServerSheet> {
   String? copied;
   bool sharingBusy = false;
   String syncStatusValue = "disabled";
+  String syncErrorDetail = "";
   List<Map<String, dynamic>> workspaces = const [];
   Timer? syncStatusTimer;
 
@@ -1070,8 +1139,16 @@ class _ServerSheetState extends State<ServerSheet> {
 
   Future<void> refreshSyncStatus() async {
     try {
-      final value = await widget.gateway.syncStatus();
-      if (mounted) setState(() => syncStatusValue = value);
+      final values = await Future.wait([
+        widget.gateway.syncStatus(),
+        widget.gateway.syncError(),
+      ]);
+      if (mounted) {
+        setState(() {
+          syncStatusValue = values[0];
+          syncErrorDetail = values[1];
+        });
+      }
     } catch (_) {
       // Keep showing the last known status; the periodic timer retries.
     }
@@ -1143,6 +1220,13 @@ class _ServerSheetState extends State<ServerSheet> {
               ),
             ],
           ),
+          if (syncErrorDetail.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SelectableText(
+              "${widget.strings("sync_error_details")}: $syncErrorDetail",
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
           const SizedBox(height: 12),
           TextField(
             controller: url,
@@ -1784,6 +1868,7 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> toggleTag(String tagId, bool present) async {
     try {
       await widget.gateway.setNoteTag(widget.noteId, tagId, present);
+      requestCurrentWorkspaceSync(widget.gateway);
       await refreshTags();
     } catch (failure) {
       if (mounted) {
@@ -1899,6 +1984,7 @@ class _EditorScreenState extends State<EditorScreen> {
     setState(() => capturingPhoto = true);
     try {
       await widget.gateway.capturePhoto(widget.noteId);
+      requestCurrentWorkspaceSync(widget.gateway);
       await refreshAttachments();
     } catch (failure) {
       if (mounted) {
@@ -1913,6 +1999,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<void> save() async {
     await widget.gateway.saveNote(widget.noteId, title.text, body.text);
+    requestCurrentWorkspaceSync(widget.gateway);
     if (mounted) setState(() => dirty = false);
   }
 
@@ -2091,7 +2178,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
       context: context,
       builder:
           (dialogContext) => AlertDialog(
-            title: Text(widget.strings("delete_photo")),
+            title: Text(widget.strings("delete_attachment")),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, false),
@@ -2107,6 +2194,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
     if (confirmed != true) return;
     try {
       await widget.gateway.removeAttachmentData(widget.noteId, widget.blobId);
+      requestCurrentWorkspaceSync(widget.gateway);
       widget.onDeleted();
     } catch (failure) {
       if (mounted) {
@@ -2120,75 +2208,101 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
   @override
   Widget build(BuildContext context) {
     final isImage = widget.mediaType.startsWith("image/");
-    return GestureDetector(
-      onTap:
-          isImage
-              ? () => showDialog<void>(
-                context: context,
-                builder:
-                    (_) => Dialog(
-                      child: FutureBuilder<Uint8List>(
-                        future: bytes,
-                        builder: (context, snapshot) {
-                          if (snapshot.hasError) {
-                            return SizedBox(
-                              height: 200,
-                              child: Center(
-                                child: Icon(
-                                  Icons.broken_image_outlined,
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                              ),
-                            );
-                          }
-                          if (!snapshot.hasData) {
-                            return const SizedBox(
-                              height: 200,
-                              child: Center(child: CircularProgressIndicator()),
-                            );
-                          }
-                          return InteractiveViewer(
-                            child: Image.memory(snapshot.data!),
-                          );
-                        },
+    return Stack(
+      children: [
+        GestureDetector(
+          onTap:
+              isImage
+                  ? () => showDialog<void>(
+                    context: context,
+                    builder:
+                        (_) => Dialog(
+                          child: FutureBuilder<Uint8List>(
+                            future: bytes,
+                            builder: (context, snapshot) {
+                              if (snapshot.hasError) {
+                                return SizedBox(
+                                  height: 200,
+                                  child: Center(
+                                    child: Icon(
+                                      Icons.broken_image_outlined,
+                                      color:
+                                          Theme.of(context).colorScheme.error,
+                                    ),
+                                  ),
+                                );
+                              }
+                              if (!snapshot.hasData) {
+                                return const SizedBox(
+                                  height: 200,
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                );
+                              }
+                              return InteractiveViewer(
+                                child: Image.memory(snapshot.data!),
+                              );
+                            },
+                          ),
+                        ),
+                  )
+                  : null,
+          onLongPress: confirmDelete,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 96,
+              height: 96,
+              child: FutureBuilder<Uint8List>(
+                future: bytes,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return const ColoredBox(
+                      color: Color(0x11000000),
+                      child: Center(child: Icon(Icons.broken_image_outlined)),
+                    );
+                  }
+                  if (!snapshot.hasData) {
+                    return const ColoredBox(
+                      color: Color(0x11000000),
+                      child: Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                    ),
-              )
-              : null,
-      onLongPress: confirmDelete,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: SizedBox(
-          width: 96,
-          height: 96,
-          child: FutureBuilder<Uint8List>(
-            future: bytes,
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return const ColoredBox(
-                  color: Color(0x11000000),
-                  child: Center(child: Icon(Icons.broken_image_outlined)),
-                );
-              }
-              if (!snapshot.hasData) {
-                return const ColoredBox(
-                  color: Color(0x11000000),
-                  child: Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                );
-              }
-              if (!isImage) {
-                return const ColoredBox(
-                  color: Color(0x11000000),
-                  child: Center(child: Icon(Icons.insert_drive_file_outlined)),
-                );
-              }
-              return Image.memory(snapshot.data!, fit: BoxFit.cover);
-            },
+                    );
+                  }
+                  if (!isImage) {
+                    return const ColoredBox(
+                      color: Color(0x11000000),
+                      child: Center(
+                        child: Icon(Icons.insert_drive_file_outlined),
+                      ),
+                    );
+                  }
+                  return Image.memory(snapshot.data!, fit: BoxFit.cover);
+                },
+              ),
+            ),
           ),
         ),
-      ),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: Material(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            elevation: 2,
+            shape: const CircleBorder(),
+            child: IconButton(
+              tooltip: widget.strings("delete"),
+              constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              onPressed: confirmDelete,
+              icon: const Icon(Icons.delete_outline, size: 20),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2232,6 +2346,7 @@ class RevisionSheet extends StatelessWidget {
                     noteId,
                     revision["id"] as String,
                   );
+                  requestCurrentWorkspaceSync(gateway);
                   await onRestored();
                 },
                 child: Text(strings("restore")),

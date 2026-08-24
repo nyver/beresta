@@ -48,6 +48,7 @@ export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
 
 export function mockSyncStatus(status = "disabled") {
   appMock.SyncStatus.mockResolvedValue(status);
+  appMock.SyncError.mockResolvedValue("");
   appMock.ListSyncDevices.mockResolvedValue([]);
   appMock.ListSyncQuarantine.mockResolvedValue([]);
   appMock.ExportIdentity.mockResolvedValue("beresta://identity?user=test&key=00");

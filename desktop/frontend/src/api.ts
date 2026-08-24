@@ -65,6 +65,8 @@ import {
   SetTagDeleted,
   ShareWorkspace,
   Status,
+  SyncError,
+  SyncNow,
   SyncStatus,
   UnlockAccount,
   UpdateSavedSearch,
@@ -183,6 +185,16 @@ export async function syncStatus(): Promise<SyncStatusValue> {
     return status as SyncStatusValue;
   }
   throw new Error(`unknown synchronization status: ${status}`);
+}
+
+/** Starts a pull/push cycle for the active workspace immediately. */
+export async function syncNow(): Promise<void> {
+  return SyncNow();
+}
+
+/** Returns the bounded diagnostic detail from the latest failed sync cycle. */
+export async function syncError(): Promise<string> {
+  return SyncError();
 }
 
 export interface ConnectServerRequest {

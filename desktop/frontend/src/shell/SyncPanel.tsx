@@ -15,6 +15,7 @@ import {
   revokeSyncDevice,
   setActiveWorkspace,
   shareWorkspace,
+  syncError,
   syncStatus,
   type QuarantineEntry,
   type ServerDiagnostics,
@@ -28,6 +29,7 @@ import { useI18n } from "../i18n";
 import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
 
 const EVENT_SYNC_STATUS = "sync:status";
+const EVENT_SYNC_ERROR = "sync:error";
 const EVENT_WORKSPACE_CHANGED = "workspace:changed";
 const KNOWN_STATUSES: readonly SyncStatusValue[] = ["disabled", "offline", "active", "current", "failed"];
 
@@ -47,6 +49,7 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
   const { t, errorMessage } = useI18n();
   const [status, setStatus] = useState<SyncStatusValue | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncErrorDetail, setSyncErrorDetail] = useState("");
   const [url, setUrl] = useState("");
   const [invite, setInvite] = useState("");
   const [fingerprint, setFingerprint] = useState("");
@@ -102,8 +105,8 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
 
   const loadStatus = useCallback(() => {
     setError(null);
-    syncStatus()
-      .then(async (next) => { setStatus(next); await loadDetails(next); })
+    Promise.all([syncStatus(), syncError()])
+      .then(async ([next, detail]) => { setStatus(next); setSyncErrorDetail(detail); await loadDetails(next); })
       .catch((thrown: unknown) => setError(errorMessage(unwrapError(thrown))));
   }, [errorMessage, loadDetails]);
 
@@ -117,12 +120,15 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
         setError(errorMessage({ code: "internal", message: "unknown synchronization status" }));
       }
     });
+    EventsOn(EVENT_SYNC_ERROR, (detail: unknown) => {
+      if (typeof detail === "string") setSyncErrorDetail(detail);
+    });
     EventsOn(EVENT_WORKSPACE_CHANGED, () => {
       loadStatus();
       onWorkspaceChanged?.();
     });
     loadStatus();
-    return () => { EventsOff(EVENT_SYNC_STATUS); EventsOff(EVENT_WORKSPACE_CHANGED); };
+    return () => { EventsOff(EVENT_SYNC_STATUS); EventsOff(EVENT_SYNC_ERROR); EventsOff(EVENT_WORKSPACE_CHANGED); };
   }, [errorMessage, loadDetails, loadStatus, onWorkspaceChanged]);
 
   async function handleShareWorkspace() {
@@ -221,7 +227,7 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
         {error ? (
           <div className="sync-status-error"><p role="alert">{error}</p><button type="button" onClick={loadStatus}>{t("common.retry")}</button></div>
         ) : status === null ? <p>{t("common.loading")}</p> : (
-          <div className={`sync-status-card sync-status-${status}`}><span className="sync-status-dot" aria-hidden="true" /><div><strong>{t(`sync.status_${status}`)}</strong><p>{t(`sync.status_${status}_description`)}</p></div></div>
+          <><div className={`sync-status-card sync-status-${status}`}><span className="sync-status-dot" aria-hidden="true" /><div><strong>{t(`sync.status_${status}`)}</strong><p>{t(`sync.status_${status}_description`)}</p></div></div>{syncErrorDetail ? <p className="sync-error-detail" role="status"><strong>{t("sync.error_details_label")}</strong> {syncErrorDetail}</p> : null}</>
         )}
       </section>
 

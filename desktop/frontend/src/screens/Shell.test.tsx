@@ -242,6 +242,25 @@ describe("Shell", () => {
     expect(within(dialog).getByText("sync.status_disabled")).toBeInTheDocument();
   });
 
+  it("starts an immediate synchronization cycle for the active workspace", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    appMock.SyncNow.mockResolvedValue(undefined);
+    mockSyncStatus("current");
+    renderShell();
+
+    const button = await screen.findByRole("button", { name: "sync.force_button" });
+    await waitFor(() => expect(button).toBeEnabled());
+    await userEvent.setup().click(button);
+
+    expect(appMock.SyncNow).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: "sync.force_button" })).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
+  });
+
   it("changes the auto-lock duration through the Settings modal and persists it", async () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);

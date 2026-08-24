@@ -14,6 +14,9 @@ const (
 	// EventSyncStatus carries the current transport.Status string whenever
 	// synchronization status is queried or changes.
 	EventSyncStatus = "sync:status"
+	// EventSyncError carries a bounded diagnostic string from the latest
+	// failed synchronization cycle, or an empty string after a full success.
+	EventSyncError = "sync:error"
 	// EventQuickNoteOpen carries no payload; it fires whenever the global
 	// quick-note hotkey is pressed or the tray menu's "Quick Note" item is
 	// selected, after the main window has already been shown/restored.

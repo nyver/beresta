@@ -42,6 +42,45 @@ void main() {
     expect(gateway.savedBody, "Offline paragraph");
   });
 
+  testWidgets("new and untitled notes use the desktop title", (tester) async {
+    final gateway = FakeGateway(unlocked: true)
+      ..listedNotes = [
+        {...FakeGateway.noteFixture, "title": ""},
+      ];
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Untitled"), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+    expect(gateway.createdNoteTitle, "Untitled");
+  });
+
+  testWidgets("attachment can be deleted from its visible action", (
+    tester,
+  ) async {
+    final gateway = FakeGateway(unlocked: true)
+      ..attachmentList = [
+        {"blob_id": "attachment-1", "media_type": "application/pdf"},
+      ];
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text("Offline note"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.delete_outline));
+    await tester.pumpAndSettle();
+    expect(find.text("Delete this attachment?"), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, "Delete"));
+    await tester.pumpAndSettle();
+    expect(
+      gateway.removedAttachment,
+      ("018f0000-0000-7000-8000-000000000001", "attachment-1"),
+    );
+  });
+
   testWidgets("background transition does not expose note text", (
     tester,
   ) async {
@@ -100,6 +139,42 @@ void main() {
 
     expect(find.text("Shared from desktop"), findsOneWidget);
   });
+
+  testWidgets("sync button refreshes the current workspace collection", (
+    tester,
+  ) async {
+    final gateway =
+        FakeGateway(unlocked: true)
+          ..listedNotes = []
+          ..syncStatusValue = "current";
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    gateway.listedNotes = [
+      {...gateway.note, "title": "Downloaded after refresh"},
+    ];
+    final syncCallsBeforeTap = gateway.syncNowCalls;
+    await tester.tap(find.byIcon(Icons.sync));
+    await tester.pumpAndSettle();
+
+    expect(gateway.syncNowCalls, syncCallsBeforeTap + 1);
+    expect(find.text("Downloaded after refresh"), findsOneWidget);
+  });
+
+  testWidgets("syncs when the app opens and moves to the background", (
+    tester,
+  ) async {
+    final gateway = FakeGateway(unlocked: true);
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+    final syncCallsAfterOpen = gateway.syncNowCalls;
+
+    expect(syncCallsAfterOpen, greaterThanOrEqualTo(1));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+
+    expect(gateway.syncNowCalls, greaterThan(syncCallsAfterOpen));
+  });
 }
 
 class FakeGateway implements CoreGateway {
@@ -107,7 +182,11 @@ class FakeGateway implements CoreGateway {
 
   bool unlocked;
   String savedBody = "";
+  String createdNoteTitle = "";
+  (String, String)? removedAttachment;
+  List<Map<String, dynamic>> attachmentList = [];
   String syncStatusValue = "disabled";
+  int syncNowCalls = 0;
   late List<Map<String, dynamic>> listedNotes = [note];
   final events = <Map<String, dynamic>>[];
   Map<String, dynamic> connectionInfo = {
@@ -116,7 +195,7 @@ class FakeGateway implements CoreGateway {
     "security_mode": "pinned",
     "fingerprint": "",
   };
-  final note = <String, dynamic>{
+  static const noteFixture = <String, dynamic>{
     "id": "018f0000-0000-7000-8000-000000000001",
     "workspace_id": "018f0000-0000-7000-8000-000000000002",
     "notebook_id": "",
@@ -126,6 +205,7 @@ class FakeGateway implements CoreGateway {
     "deleted": false,
     "created_unix_ms": 1710000000000,
   };
+  final note = Map<String, dynamic>.from(noteFixture);
 
   @override
   Future<Map<String, dynamic>> status() async => {"unlocked": unlocked};
@@ -149,7 +229,10 @@ class FakeGateway implements CoreGateway {
   Future<Map<String, dynamic>> createNote(
     String title, {
     String notebookId = "",
-  }) async => note;
+  }) async {
+    createdNoteTitle = title;
+    return note;
+  }
   @override
   Future<Map<String, dynamic>> getNote(String id) async => {
     "note": note,
@@ -177,11 +260,16 @@ class FakeGateway implements CoreGateway {
   Future<void> deleteNotebook(String id, bool deleted) async {}
   @override
   Future<List<Map<String, dynamic>>> listNoteAttachments(String noteId) async =>
-      [];
+      attachmentList;
   @override
   Future<Uint8List> readAttachmentData(String blobId) async => Uint8List(0);
   @override
-  Future<void> removeAttachmentData(String noteId, String blobId) async {}
+  Future<void> removeAttachmentData(String noteId, String blobId) async {
+    removedAttachment = (noteId, blobId);
+    attachmentList = attachmentList
+        .where((attachment) => attachment["blob_id"] != blobId)
+        .toList();
+  }
   @override
   Future<List<Map<String, dynamic>>> listTags() async => [];
   @override
@@ -200,13 +288,15 @@ class FakeGateway implements CoreGateway {
   @override
   Future<void> restoreRevision(String noteId, String revisionId) async {}
   @override
-  Future<void> syncNow() async {}
+  Future<void> syncNow() async => syncNowCalls++;
   @override
   Future<void> connectServer(Map<String, dynamic> config) async {}
   @override
   Future<void> disconnectServer() async {}
   @override
   Future<String> syncStatus() async => syncStatusValue;
+  @override
+  Future<String> syncError() async => "";
   @override
   Future<Map<String, dynamic>> syncConnectionInfo() async => connectionInfo;
   @override

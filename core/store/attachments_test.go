@@ -38,6 +38,29 @@ func TestCreateAttachmentDedupesOnBlobID(t *testing.T) {
 	}
 }
 
+func TestCreateAttachmentHydratesSynchronizedPlaceholder(t *testing.T) {
+	db := repoTestDB(t)
+	ctx := context.Background()
+	workspaceID := seedWorkspace(t, db)
+	blobID := testBlobID(t, 11)
+
+	placeholder, err := EnsureAttachmentPlaceholder(ctx, db, workspaceID, blobID, 1000)
+	if err != nil {
+		t.Fatalf("EnsureAttachmentPlaceholder() error = %v", err)
+	}
+	if !placeholder.IsPlaceholder() {
+		t.Fatal("EnsureAttachmentPlaceholder() did not create a placeholder")
+	}
+
+	hydrated, err := CreateAttachment(ctx, db, workspaceID, blobID, []byte("key"), []byte("manifest"), 42, 1, 2000)
+	if err != nil {
+		t.Fatalf("CreateAttachment() error = %v", err)
+	}
+	if hydrated.IsPlaceholder() || string(hydrated.Manifest) != "manifest" || hydrated.SizeBytes != 42 || hydrated.ChunkCount != 1 {
+		t.Fatalf("CreateAttachment() did not hydrate placeholder: %+v", hydrated)
+	}
+}
+
 func TestGetAttachmentNotFound(t *testing.T) {
 	db := repoTestDB(t)
 	_, err := GetAttachment(context.Background(), db, testBlobID(t, 2))

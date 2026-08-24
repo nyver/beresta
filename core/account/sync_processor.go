@@ -242,6 +242,13 @@ func (v *verifiedNoteOperation) applyMetadata(ctx context.Context, tx store.Exec
 	case coresync.NoteMetadataKindNotebook:
 		return store.SetNoteNotebook(ctx, tx, op.NoteID, op.NotebookID, v.wire.Clock)
 	case coresync.NoteMetadataKindTag:
+		// Tag definitions are structural workspace state and may not yet be
+		// materialized on a newly connected client. Preserve the membership
+		// operation with a hidden placeholder instead of quarantining the
+		// whole workspace on note_tags' foreign key.
+		if err := store.EnsureTagPlaceholder(ctx, tx, v.wire.WorkspaceID, op.TagID, v.wire.Clock); err != nil {
+			return err
+		}
 		return store.SetNoteTag(ctx, tx, op.NoteID, op.TagID, op.TagPresent, v.wire.Clock)
 	case coresync.NoteMetadataKindFlags:
 		return store.SetNoteFlags(ctx, tx, op.NoteID, op.Flags, v.wire.Clock)
@@ -250,6 +257,14 @@ func (v *verifiedNoteOperation) applyMetadata(ctx context.Context, tx store.Exec
 	case coresync.NoteMetadataKindAttachment:
 		blobID, err := store.ParseBlobID(op.AttachmentBlobID)
 		if err != nil {
+			return err
+		}
+		// Attachment-reference operations carry only the content-addressed
+		// blob ID. A newly connected device can therefore receive the note
+		// operation before the attachment catalog is available locally. Keep
+		// a placeholder row to satisfy the relationship's foreign key and,
+		// crucially, allow the rest of the workspace history to be applied.
+		if _, err := store.EnsureAttachmentPlaceholder(ctx, tx, v.wire.WorkspaceID, blobID, int64(v.wire.Clock.PhysicalMS)); err != nil {
 			return err
 		}
 		return store.SetNoteAttachment(ctx, tx, op.NoteID, blobID, op.AttachmentPresent, v.wire.Clock, int64(v.wire.Clock.PhysicalMS))

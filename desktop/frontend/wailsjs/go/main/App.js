@@ -286,6 +286,14 @@ export function Status() {
   return window['go']['main']['App']['Status']();
 }
 
+export function SyncError() {
+  return window['go']['main']['App']['SyncError']();
+}
+
+export function SyncNow() {
+  return window['go']['main']['App']['SyncNow']();
+}
+
 export function SyncStatus() {
   return window['go']['main']['App']['SyncStatus']();
 }

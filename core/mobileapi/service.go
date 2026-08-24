@@ -34,18 +34,19 @@ type mobileEvent struct {
 // error. Long operations are canceled by request ID; UI events are polled in
 // bounded batches instead of invoking callbacks on foreign threads.
 type Service struct {
-	mu          sync.Mutex
-	root        context.Context
-	cancelRoot  context.CancelFunc
-	wrapper     *deviceWrapper
-	account     *account.Account
-	workspaceID model.ID
-	requests    map[string]context.CancelFunc
-	events      []mobileEvent
-	nextEvent   uint64
-	coordinator *coresync.Coordinator
-	remote      *transport.HTTP
-	repository  *store.SyncRepository
+	mu              sync.Mutex
+	root            context.Context
+	cancelRoot      context.CancelFunc
+	wrapper         *deviceWrapper
+	account         *account.Account
+	workspaceID     model.ID
+	requests        map[string]context.CancelFunc
+	events          []mobileEvent
+	nextEvent       uint64
+	coordinator     *coresync.Coordinator
+	remote          *transport.HTTP
+	repository      *store.SyncRepository
+	syncErrorDetail string
 	// syncGeneration is bumped by DisconnectServer so a ConnectServer call
 	// already in flight (in particular reconnectSavedServer's background
 	// attempt after unlock) can detect that the user disconnected while it
@@ -170,7 +171,7 @@ func (s *Service) activate(value *account.Account) (string, error) {
 	}
 	s.mu.Lock()
 	previous, coordinator := s.account, s.coordinator
-	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = value, activeWorkspace, nil, nil, nil
+	s.account, s.workspaceID, s.coordinator, s.remote, s.repository, s.syncErrorDetail = value, activeWorkspace, nil, nil, nil, ""
 	s.mu.Unlock()
 	if coordinator != nil {
 		coordinator.Detach()
@@ -205,7 +206,7 @@ func (s *Service) reconnectSavedServer(value *account.Account) {
 func (s *Service) Lock() error {
 	s.mu.Lock()
 	value, coordinator := s.account, s.coordinator
-	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = nil, model.Nil, nil, nil, nil
+	s.account, s.workspaceID, s.coordinator, s.remote, s.repository, s.syncErrorDetail = nil, model.Nil, nil, nil, nil, ""
 	s.mu.Unlock()
 	if coordinator != nil {
 		coordinator.Detach()
@@ -979,7 +980,6 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 	if previous != nil {
 		previous.Detach()
 	}
-	s.emit("sync_status", map[string]string{"status": string(transport.StatusActive)})
 	return nil
 }
 
@@ -998,6 +998,7 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 		return nil, nil, err
 	}
 	var lastSnapshot uint64
+	var lastCatalogDigest [32]byte
 	var lastReviewed model.ID
 	worker, err := coresync.NewWorker(workspaceID, repository, remote, processor, coresync.WorkerOptions{
 		Prepare: func(ctx context.Context) error { return refreshMobileDevices(ctx, value, remote, workspaceID) },
@@ -1016,14 +1017,18 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 			_, err = remote.AcknowledgeSnapshot(ctx, ack)
 			return err
 		},
-		ReviewSnapshot: func(ctx context.Context, cursor coresync.Cursor) error {
+		ReviewSnapshot: func(ctx context.Context, _ coresync.Cursor) error {
 			snapshot, err := remote.LatestSnapshot(ctx, workspaceID)
 			if errors.Is(err, transport.ErrNotFound) {
 				return nil
 			}
-			if err != nil || snapshot.ID == lastReviewed || snapshot.BaseSequence > cursor.LastSequence {
+			if err != nil || snapshot.ID == lastReviewed {
 				return err
 			}
+			// Apply a snapshot ahead of the local cursor as well as one at or
+			// behind it. The account method replays only the missing verified
+			// operations; skipping an ahead snapshot stranded a newly joined
+			// workspace with no notes or notebooks.
 			ack, err := value.ApplyWorkspaceSnapshot(ctx, snapshot, repository, processor)
 			if err != nil {
 				return err
@@ -1034,8 +1039,18 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 			lastReviewed = snapshot.ID
 			return nil
 		},
+		SyncAttachments: func(ctx context.Context) error {
+			return value.SynchronizeWorkspaceAttachments(ctx, workspaceID, remote)
+		},
 		PublishSnapshot: func(ctx context.Context, cursor coresync.Cursor) error {
-			if cursor.LastSequence <= lastSnapshot || (lastSnapshot != 0 && cursor.LastSequence-lastSnapshot < 1000) {
+			catalogDigest, err := value.WorkspaceCatalogDigest(ctx, workspaceID)
+			if err != nil {
+				return err
+			}
+			if cursor.LastSequence <= lastSnapshot && catalogDigest == lastCatalogDigest {
+				return nil
+			}
+			if lastSnapshot != 0 && cursor.LastSequence-lastSnapshot < 1000 && catalogDigest == lastCatalogDigest {
 				return nil
 			}
 			snapshot, err := value.CreateWorkspaceSnapshot(ctx, workspaceID, repository)
@@ -1053,6 +1068,7 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 				return err
 			}
 			lastSnapshot = cursor.LastSequence
+			lastCatalogDigest = catalogDigest
 			lastReviewed = snapshot.ID
 			return nil
 		},
@@ -1061,13 +1077,21 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 			switch progress.Phase {
 			case coresync.PhaseCurrent:
 				status = transport.StatusCurrent
+				remote.CompleteSync()
+				s.setSyncError("")
 			case coresync.PhaseBackoff:
 				status = transport.StatusOffline
+				remote.SyncOffline()
+				s.setSyncError(progress.ErrorDetail)
 			case coresync.PhaseQuarantine:
 				status = transport.StatusFailed
+				remote.SyncFailed()
+				s.setSyncError(progress.ErrorDetail)
+			default:
+				remote.BeginSync()
 			}
 			s.emit("sync_status", map[string]string{"status": string(status)})
-			s.emit("sync_progress", map[string]any{"workspace_id": progress.WorkspaceID.String(), "phase": progress.Phase, "pulled": progress.Pulled, "pushed": progress.Pushed, "cursor": progress.Cursor, "retry_ms": progress.RetryIn.Milliseconds(), "error_class": progress.ErrorClass})
+			s.emit("sync_progress", map[string]any{"workspace_id": progress.WorkspaceID.String(), "phase": progress.Phase, "pulled": progress.Pulled, "pushed": progress.Pushed, "cursor": progress.Cursor, "retry_ms": progress.RetryIn.Milliseconds(), "error_class": progress.ErrorClass, "error_detail": progress.ErrorDetail})
 			if progress.Phase == coresync.PhaseCurrent {
 				s.emit("workspace_synced", map[string]string{"workspace_id": progress.WorkspaceID.String()})
 			}
@@ -1077,6 +1101,13 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 		return nil, nil, err
 	}
 	return worker, repository, nil
+}
+
+func (s *Service) setSyncError(detail string) {
+	s.mu.Lock()
+	s.syncErrorDetail = detail
+	s.mu.Unlock()
+	s.emit("sync_error", map[string]string{"detail": detail})
 }
 
 // attachWorkspaceSync builds a sync worker for workspaceID and swaps it into
@@ -1115,13 +1146,52 @@ func (s *Service) attachWorkspaceSync(value *account.Account, workspaceID model.
 }
 
 func (s *Service) SyncNow() error {
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
-	coordinator := s.coordinator
+	coordinator, remote, repository := s.coordinator, s.remote, s.repository
 	s.mu.Unlock()
-	if coordinator == nil {
+	if coordinator == nil || remote == nil {
 		return errors.New("mobileapi: server synchronization is disabled")
 	}
-	coordinator.Trigger()
+	// A manually requested sync is also an explicit retry request. Keep the
+	// encrypted operation intact, but release it from quarantine so a worker
+	// rebuilt after a fixed client version can verify it again. If it remains
+	// invalid it is immediately quarantined again and never applied.
+	if repository != nil {
+		entries, listErr := repository.ListQuarantine(s.root, workspaceID)
+		if listErr != nil {
+			return listErr
+		}
+		for _, entry := range entries {
+			if retryErr := repository.RetryQuarantined(s.root, workspaceID, entry.OperationID); retryErr != nil {
+				return retryErr
+			}
+		}
+	}
+	if !coordinator.Enabled() {
+		if err := s.attachWorkspaceSync(value, workspaceID); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		coordinator, remote = s.coordinator, s.remote
+		s.mu.Unlock()
+		if coordinator == nil || remote == nil {
+			return errors.New("mobileapi: synchronization worker did not start")
+		}
+	}
+	// Set the transport state before waking the worker so callers can wait for
+	// this specific manually requested cycle instead of observing a stale
+	// "current" status from the previous one.
+	remote.BeginSync()
+	if !coordinator.Trigger() {
+		remote.SyncFailed()
+		const detail = "synchronization worker is not running"
+		s.setSyncError(detail)
+		return errors.New("mobileapi: " + detail)
+	}
 	return nil
 }
 
@@ -1132,7 +1202,7 @@ func (s *Service) SyncNow() error {
 func (s *Service) DisconnectServer() error {
 	s.mu.Lock()
 	coordinator, value := s.coordinator, s.account
-	s.coordinator, s.remote, s.repository = nil, nil, nil
+	s.coordinator, s.remote, s.repository, s.syncErrorDetail = nil, nil, nil, ""
 	s.syncGeneration++
 	s.mu.Unlock()
 	if coordinator != nil {
@@ -1149,6 +1219,7 @@ func (s *Service) DisconnectServer() error {
 		}
 	}
 	s.emit("sync_status", map[string]string{"status": string(transport.StatusDisabled)})
+	s.emit("sync_error", map[string]string{"detail": ""})
 	return nil
 }
 
@@ -1164,6 +1235,15 @@ func (s *Service) SyncStatus() (string, error) {
 		return string(transport.StatusDisabled), nil
 	}
 	return string(remote.Status(s.root)), nil
+}
+
+// SyncError returns the diagnostic detail from the latest failed full sync
+// cycle. It is intentionally bounded by core/sync and contains no key or
+// operation payload material.
+func (s *Service) SyncError() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.syncErrorDetail
 }
 
 // SyncConnectionInfo returns the last server connection configured on this

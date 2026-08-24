@@ -92,6 +92,9 @@ type Progress struct {
 	Cursor      uint64
 	RetryIn     time.Duration
 	ErrorClass  string
+	// ErrorDetail is a bounded, diagnostic-only description. It never
+	// contains operation ciphertext or key material.
+	ErrorDetail string
 }
 
 type WorkerOptions struct {
@@ -105,6 +108,7 @@ type WorkerOptions struct {
 	Prepare         func(context.Context) error
 	Bootstrap       func(context.Context) error
 	ReviewSnapshot  func(context.Context, Cursor) error
+	SyncAttachments func(context.Context) error
 	PublishSnapshot func(context.Context, Cursor) error
 }
 
@@ -162,7 +166,7 @@ func (w *Worker) SyncOnce(ctx context.Context) error {
 		return err
 	}
 	if blocked {
-		w.emit(Progress{WorkspaceID: w.workspace, Phase: PhaseQuarantine, ErrorClass: "quarantined_operation"})
+		w.emit(Progress{WorkspaceID: w.workspace, Phase: PhaseQuarantine, ErrorClass: "quarantined_operation", ErrorDetail: "a quarantined operation is blocking synchronization"})
 		return ErrWorkspaceQuarantined
 	}
 
@@ -202,7 +206,7 @@ func (w *Worker) SyncOnce(ctx context.Context) error {
 					if quarantineErr := w.repository.Quarantine(ctx, bad.Operation, bad.Class, w.options.Now()); quarantineErr != nil {
 						return errors.Join(err, quarantineErr)
 					}
-					w.emit(Progress{WorkspaceID: w.workspace, Phase: PhaseQuarantine, Cursor: cursor.LastSequence, ErrorClass: bad.Class})
+					w.emit(Progress{WorkspaceID: w.workspace, Phase: PhaseQuarantine, Cursor: cursor.LastSequence, ErrorClass: bad.Class, ErrorDetail: syncErrorDetail(bad.Err)})
 					return ErrWorkspaceQuarantined
 				}
 				return fmt.Errorf("sync: apply page: %w", err)
@@ -216,6 +220,11 @@ func (w *Worker) SyncOnce(ctx context.Context) error {
 	if w.options.ReviewSnapshot != nil {
 		if err := w.options.ReviewSnapshot(ctx, cursor); err != nil {
 			return fmt.Errorf("sync: review snapshot: %w", err)
+		}
+	}
+	if w.options.SyncAttachments != nil {
+		if err := w.options.SyncAttachments(ctx); err != nil {
+			return fmt.Errorf("sync: attachments: %w", err)
 		}
 	}
 
@@ -279,7 +288,7 @@ func (w *Worker) Run(ctx context.Context, triggers <-chan struct{}) error {
 			return err
 		}
 		delay := w.options.Jitter(backoff)
-		w.emit(Progress{WorkspaceID: w.workspace, Phase: PhaseBackoff, RetryIn: delay, ErrorClass: classifySyncError(err)})
+		w.emit(Progress{WorkspaceID: w.workspace, Phase: PhaseBackoff, RetryIn: delay, ErrorClass: classifySyncError(err), ErrorDetail: syncErrorDetail(err)})
 		timer.Reset(delay)
 		if backoff < w.options.MaxBackoff/2 {
 			backoff *= 2
@@ -371,4 +380,16 @@ func classifySyncError(err error) string {
 	default:
 		return "transient_transport"
 	}
+}
+
+func syncErrorDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	const maxDetailBytes = 512
+	message := err.Error()
+	if len(message) <= maxDetailBytes {
+		return message
+	}
+	return message[:maxDetailBytes-3] + "..."
 }

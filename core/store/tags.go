@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -37,6 +38,73 @@ func CreateTag(ctx context.Context, exec Executor, workspaceID model.ID, name st
 		return Tag{}, fmt.Errorf("store: insert tag: %w", err)
 	}
 	return Tag{ID: id, WorkspaceID: workspaceID, Name: name, CreatedAt: clock}, nil
+}
+
+// UpsertSnapshotTag materializes an authenticated tag catalog row from a
+// workspace snapshot, replacing a sync-created placeholder with its real
+// name and deletion state when necessary.
+func UpsertSnapshotTag(ctx context.Context, exec Executor, tag Tag) error {
+	if err := validateName(tag.Name, maxTagNameBytes); err != nil {
+		return err
+	}
+	if tag.ID.IsZero() || tag.WorkspaceID.IsZero() {
+		return errors.New("store: invalid snapshot tag")
+	}
+	if _, err := exec.ExecContext(ctx, `
+		INSERT INTO tags (
+			id, workspace_id, name, created_physical_ms, created_logical, created_device_id,
+			deleted, deleted_physical_ms, deleted_logical, deleted_device_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			workspace_id = excluded.workspace_id,
+			name = excluded.name,
+			created_physical_ms = excluded.created_physical_ms,
+			created_logical = excluded.created_logical,
+			created_device_id = excluded.created_device_id,
+			deleted = excluded.deleted,
+			deleted_physical_ms = excluded.deleted_physical_ms,
+			deleted_logical = excluded.deleted_logical,
+			deleted_device_id = excluded.deleted_device_id`,
+		tag.ID.Bytes(), tag.WorkspaceID.Bytes(), tag.Name, tag.CreatedAt.PhysicalMS, tag.CreatedAt.Logical, tag.CreatedAt.DeviceID.Bytes(),
+		tag.Deleted, nullableClockPhysical(tag.Deleted, tag.DeletedClock), nullableClockLogical(tag.Deleted, tag.DeletedClock), nullableClockDevice(tag.Deleted, tag.DeletedClock),
+	); err != nil {
+		return fmt.Errorf("store: upsert snapshot tag: %w", err)
+	}
+	return nil
+}
+
+// EnsureTagPlaceholder creates a hidden tombstoned tag when a synchronized
+// note-tag operation arrives before the matching tag catalog row. This keeps
+// the membership register durable without exposing a guessed tag name in the
+// user interface.
+func EnsureTagPlaceholder(ctx context.Context, exec Executor, workspaceID, tagID model.ID, clock model.HLC) error {
+	if tagID.IsZero() {
+		return errors.New("store: tag placeholder ID is zero")
+	}
+	name := "sync-pending-" + hex.EncodeToString(tagID.Bytes())
+	if _, err := exec.ExecContext(ctx,
+		`INSERT INTO tags (
+			id, workspace_id, name, created_physical_ms, created_logical, created_device_id,
+			deleted, deleted_physical_ms, deleted_logical, deleted_device_id
+		) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING`,
+		tagID.Bytes(), workspaceID.Bytes(), name, clock.PhysicalMS, clock.Logical, clock.DeviceID.Bytes(),
+		clock.PhysicalMS, clock.Logical, clock.DeviceID.Bytes(),
+	); err != nil {
+		return fmt.Errorf("store: insert tag placeholder: %w", err)
+	}
+	var storedWorkspaceID []byte
+	if err := exec.QueryRowContext(ctx, `SELECT workspace_id FROM tags WHERE id = ?`, tagID.Bytes()).Scan(&storedWorkspaceID); err != nil {
+		return fmt.Errorf("store: get tag placeholder workspace: %w", err)
+	}
+	storedWorkspace, err := model.ParseID(storedWorkspaceID)
+	if err != nil {
+		return fmt.Errorf("store: stored tag placeholder workspace ID: %w", err)
+	}
+	if storedWorkspace != workspaceID {
+		return ErrWrongWorkspace
+	}
+	return nil
 }
 
 // SetTagDeleted applies an LWW update to a tag's tombstone flag. Existing

@@ -39,21 +39,36 @@ func (c *Coordinator) Attach(worker *Worker) error {
 	c.cancel, c.worker = cancel, worker
 	c.trigger = make(chan struct{}, 1)
 	c.done = make(chan error, 1)
-	go func(done chan<- error, triggers <-chan struct{}) { done <- worker.Run(ctx, triggers) }(c.done, c.trigger)
+	done := c.done
+	go func(done chan<- error, triggers <-chan struct{}) {
+		done <- worker.Run(ctx, triggers)
+		// A quarantined worker exits permanently. Clear its live state so a
+		// foreground sync request cannot be accepted into an unread trigger
+		// channel and leave the UI indefinitely showing "Synchronizing".
+		c.mu.Lock()
+		if c.done == done {
+			c.cancel, c.worker, c.trigger, c.done = nil, nil, nil, nil
+		}
+		c.mu.Unlock()
+	}(done, c.trigger)
 	c.trigger <- struct{}{}
 	return nil
 }
 
-func (c *Coordinator) Trigger() {
+// Trigger queues a new cycle and reports whether a worker is still running.
+// A false result means the caller must reattach or surface the terminal sync
+// error instead of pretending the request is in progress.
+func (c *Coordinator) Trigger() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.trigger == nil {
-		return
+		return false
 	}
 	select {
 	case c.trigger <- struct{}{}:
 	default:
 	}
+	return true
 }
 
 func (c *Coordinator) Detach() {

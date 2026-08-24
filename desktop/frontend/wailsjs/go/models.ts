@@ -9,7 +9,7 @@ export namespace main {
 	    static createFrom(source: any = {}) {
 	        return new AccountInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.account_id = source["account_id"];
@@ -779,8 +779,8 @@ export namespace main {
 	        this.member_count = source["member_count"];
 	    }
 	}
-
 }
+
 export namespace transport {
 	
 	export class Diagnostics {

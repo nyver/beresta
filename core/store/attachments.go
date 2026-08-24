@@ -29,6 +29,12 @@ type Attachment struct {
 	OrphanedUnixMS *int64
 }
 
+// IsPlaceholder reports whether this row only preserves a synchronized
+// reference and does not yet have an encrypted manifest or blob content.
+func (a Attachment) IsPlaceholder() bool {
+	return len(a.Manifest) == 0
+}
+
 // CreateAttachment durably records one attachment's metadata row. It is
 // dedup-safe: attachment identity is content-addressed by BlobID (see
 // core/crypto.ComputeBlobID), so if the same plaintext was ever attached
@@ -41,12 +47,45 @@ func CreateAttachment(ctx context.Context, exec Executor, workspaceID model.ID, 
 	if _, err := exec.ExecContext(ctx,
 		`INSERT INTO attachments (blob_id, workspace_id, key_id, manifest, size_bytes, chunk_count, created_unix_ms)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(blob_id) DO NOTHING`,
+		 ON CONFLICT(blob_id) DO UPDATE SET
+			workspace_id = excluded.workspace_id,
+			key_id = excluded.key_id,
+			manifest = excluded.manifest,
+			size_bytes = excluded.size_bytes,
+			chunk_count = excluded.chunk_count,
+			created_unix_ms = excluded.created_unix_ms
+		 WHERE length(attachments.manifest) = 0
+		   AND length(excluded.manifest) > 0
+		   AND attachments.workspace_id = excluded.workspace_id`,
 		blobID.Bytes(), workspaceID.Bytes(), keyID, manifest, int64(sizeBytes), chunkCount, nowUnixMS,
 	); err != nil {
 		return Attachment{}, fmt.Errorf("store: insert attachment: %w", err)
 	}
 	return GetAttachment(ctx, exec, blobID)
+}
+
+// EnsureAttachmentPlaceholder records the smallest valid catalog row needed
+// to preserve a synchronized note-to-blob reference when this device has not
+// yet received that blob's encrypted manifest. It deliberately contains no
+// manifest or content and CreateAttachment upgrades it atomically when the
+// real catalog entry later becomes available.
+func EnsureAttachmentPlaceholder(ctx context.Context, exec Executor, workspaceID model.ID, blobID BlobID, nowUnixMS int64) (Attachment, error) {
+	if _, err := exec.ExecContext(ctx,
+		`INSERT INTO attachments (blob_id, workspace_id, key_id, manifest, size_bytes, chunk_count, created_unix_ms)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(blob_id) DO NOTHING`,
+		blobID.Bytes(), workspaceID.Bytes(), []byte{}, []byte{}, 0, 0, nowUnixMS,
+	); err != nil {
+		return Attachment{}, fmt.Errorf("store: insert attachment placeholder: %w", err)
+	}
+	attachment, err := GetAttachment(ctx, exec, blobID)
+	if err != nil {
+		return Attachment{}, err
+	}
+	if attachment.WorkspaceID != workspaceID {
+		return Attachment{}, ErrWrongWorkspace
+	}
+	return attachment, nil
 }
 
 // GetAttachment returns one attachment's metadata row.
@@ -57,6 +96,31 @@ func GetAttachment(ctx context.Context, exec Executor, blobID BlobID) (Attachmen
 		blobID.Bytes(),
 	)
 	return scanAttachment(row)
+}
+
+// ListAttachments returns every attachment catalog row in one workspace,
+// including currently orphaned rows. Snapshot replication uses the complete
+// catalog so later note-reference operations can be applied safely.
+func ListAttachments(ctx context.Context, exec Executor, workspaceID model.ID) ([]Attachment, error) {
+	rows, err := exec.QueryContext(ctx,
+		`SELECT blob_id, workspace_id, key_id, manifest, size_bytes, chunk_count, created_unix_ms, orphaned_unix_ms
+		 FROM attachments WHERE workspace_id = ?`, workspaceID.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("store: list attachments: %w", err)
+	}
+	defer rows.Close()
+	attachments := []Attachment{}
+	for rows.Next() {
+		attachment, err := scanAttachment(rows)
+		if err != nil {
+			return nil, err
+		}
+		attachments = append(attachments, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list attachments: %w", err)
+	}
+	return attachments, nil
 }
 
 // ListOrphanedAttachments returns every attachment in a workspace that lost

@@ -57,6 +57,55 @@ func TestCreateNotePersistsRowFTSAndOutboxOperation(t *testing.T) {
 	}
 }
 
+func TestCreateNoteInNotebookAppendsNotebookAssignmentOperation(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+	notebook, err := created.CreateNotebook(ctx, workspaceID, model.Nil, "Projects")
+	if err != nil {
+		t.Fatalf("CreateNotebook: %v", err)
+	}
+	note, err := created.CreateNote(ctx, workspaceID, notebook.ID, "Launch plan")
+	if err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+
+	var outboxCount int
+	if err := created.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox WHERE workspace_id = ?`, workspaceID.Bytes()).Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if outboxCount != 2 {
+		t.Fatalf("outbox count = %d, want 2", outboxCount)
+	}
+
+	var opID, ciphertext, nonce, keyID []byte
+	if err := created.db.QueryRowContext(ctx,
+		`SELECT op_id, ciphertext, nonce, key_id FROM outbox WHERE workspace_id = ? ORDER BY id DESC LIMIT 1`, workspaceID.Bytes(),
+	).Scan(&opID, &ciphertext, &nonce, &keyID); err != nil {
+		t.Fatal(err)
+	}
+	entry := created.workspaceKeys[workspaceID]
+	opPlaintext, err := corecrypto.OpenObject(entry.Key, corecrypto.EncryptedObject{Metadata: corecrypto.ObjectMetadata{
+		SchemaVersion: corecrypto.SchemaVersionV1, CryptoProfile: corecrypto.CryptoProfileV1,
+		WorkspaceID: workspaceID.Bytes(), ObjectID: opID, ObjectType: corecrypto.ObjectTypeOperationPayload, KeyID: keyID,
+	}, Nonce: nonce, Ciphertext: ciphertext})
+	if err != nil {
+		t.Fatalf("open notebook assignment operation: %v", err)
+	}
+	defer opPlaintext.Close()
+	var decoded sync.NoteMetadataOperation
+	if err := opPlaintext.Use(func(data []byte) error {
+		var decodeErr error
+		decoded, decodeErr = sync.DecodeNoteMetadataOperation(data)
+		return decodeErr
+	}); err != nil {
+		t.Fatalf("decode notebook assignment operation: %v", err)
+	}
+	if decoded.Kind != sync.NoteMetadataKindNotebook || decoded.NoteID != note.ID || decoded.NotebookID != notebook.ID {
+		t.Fatalf("decoded operation = %+v", decoded)
+	}
+}
+
 func TestNoteMetadataMutationsPersistAndAppendOutboxOperations(t *testing.T) {
 	ctx := context.Background()
 	created := createTestAccount(t)

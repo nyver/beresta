@@ -40,6 +40,20 @@ describe("SyncPanel", () => {
     expect(await screen.findByText("sync.status_offline")).toBeInTheDocument();
   });
 
+  it("shows the diagnostic detail for a failed synchronization cycle", async () => {
+    mockLocaleCatalog();
+    mockSyncStatus("failed");
+    appMock.SyncError.mockResolvedValue("sync: review snapshot: signature verification failed");
+    render(
+      <I18nProvider>
+        <SyncPanel deviceId="device-123" />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("sync.error_details_label")).toBeInTheDocument();
+    expect(screen.getByText("sync: review snapshot: signature verification failed")).toBeInTheDocument();
+  });
+
   it("shows only the real local device and current-phase placeholders", async () => {
     renderPanel();
 

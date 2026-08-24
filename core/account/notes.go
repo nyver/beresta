@@ -45,6 +45,21 @@ func (a *Account) CreateNote(ctx context.Context, workspaceID, notebookID model.
 	if err := writeOutboxOperation(ctx, tx, entry, devicePrivate, workspaceID, deviceID, clock, payload); err != nil {
 		return model.Note{}, err
 	}
+	// A note-body operation creates the replica row, while notebook assignment
+	// is a separate LWW register. Publish the latter in the same transaction so
+	// a note created directly inside a notebook stays filed there on every
+	// device.
+	if !notebookID.IsZero() {
+		metadataPayload, err := sync.EncodeNoteMetadataOperation(sync.NoteMetadataOperation{
+			NoteID: note.ID, Kind: sync.NoteMetadataKindNotebook, NotebookID: notebookID,
+		})
+		if err != nil {
+			return model.Note{}, fmt.Errorf("account: encode note notebook operation: %w", err)
+		}
+		if err := writeOutboxOperation(ctx, tx, entry, devicePrivate, workspaceID, deviceID, clock, metadataPayload); err != nil {
+			return model.Note{}, err
+		}
+	}
 	if err := store.AdvanceDeviceClock(ctx, tx, deviceID, clock); err != nil {
 		return model.Note{}, err
 	}

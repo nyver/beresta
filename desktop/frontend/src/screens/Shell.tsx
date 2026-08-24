@@ -13,6 +13,7 @@ import {
   noteTagsByWorkspace,
   searchByTag,
   setNoteTag,
+  syncNow,
   syncStatus,
   updateSettings,
   unwrapError,
@@ -96,6 +97,7 @@ export function Shell({ account, onLocked }: ShellProps) {
   // never disagree; loaded once and kept live via the same "sync:status"
   // event SyncPanel itself listens for.
   const [syncStatusValue, setSyncStatusValue] = useState<SyncStatusValue | null>(null);
+  const [forcingSync, setForcingSync] = useState(false);
   // Set only when syncStatusValue transitions to "current", so the status
   // line can show a static "synced at HH:MM" - see SaveStatusLine's doc
   // comment on why this is not a live-ticking relative time.
@@ -173,17 +175,30 @@ export function Shell({ account, onLocked }: ShellProps) {
 
   useEffect(() => {
     if (!ready) return;
+    let disposed = false;
     function applyStatus(next: SyncStatusValue) {
+      if (disposed) return;
       setSyncStatusValue(next);
       if (next === "current") setSyncedAt(Date.now());
     }
-    syncStatus()
-      .then(applyStatus)
-      .catch(() => {});
+    const refreshStatus = () => {
+      syncStatus()
+        .then(applyStatus)
+        .catch(() => {});
+    };
+    refreshStatus();
+    // Events normally update this state as phases advance. Polling the
+    // bound transport status as well prevents the visual state from staying
+    // on "Synchronizing" if an event is missed while the worker completes.
+    const interval = window.setInterval(refreshStatus, 5_000);
     EventsOn(EVENT_SYNC_STATUS, (next: unknown) => {
       if (typeof next === "string") applyStatus(next as SyncStatusValue);
     });
-    return () => EventsOff(EVENT_SYNC_STATUS);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      EventsOff(EVENT_SYNC_STATUS);
+    };
   }, [ready]);
 
   useEffect(() => {
@@ -395,6 +410,23 @@ export function Shell({ account, onLocked }: ShellProps) {
     }
   }
 
+  async function handleSyncNow() {
+    if (forcingSync) return;
+    setForcingSync(true);
+    try {
+      await syncNow();
+      // The event emitted by SyncNow updates this too in the desktop
+      // runtime. Set it locally as well so the control immediately reflects
+      // the requested cycle even if event delivery is delayed.
+      setSyncStatusValue("active");
+    } catch {
+      setSyncStatusValue("failed");
+      setSyncModalOpen(true);
+    } finally {
+      setForcingSync(false);
+    }
+  }
+
   // Configurable automatic lock (task 5.8): resets on any user activity
   // and locks after autoLockMinutes of none. 0/null disarms it. handleLock
   // is read through a ref rather than listed as a dependency so this
@@ -499,6 +531,17 @@ export function Shell({ account, onLocked }: ShellProps) {
           >
             <span className="sync-status-dot" aria-hidden="true" />
             {syncStatusValue ? t(`sync.status_${syncStatusValue}`) : t("sync.open_button")}
+          </button>
+          <button
+            type="button"
+            className="icon-button sync-now-button"
+            aria-label={t("sync.force_button")}
+            title={t("sync.force_button")}
+            aria-busy={forcingSync}
+            disabled={forcingSync || syncStatusValue === null || syncStatusValue === "disabled"}
+            onClick={() => void handleSyncNow()}
+          >
+            <span aria-hidden="true">↻</span>
           </button>
           <button
             type="button"

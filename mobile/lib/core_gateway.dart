@@ -31,6 +31,7 @@ abstract interface class CoreGateway {
   Future<void> connectServer(Map<String, dynamic> config);
   Future<void> disconnectServer();
   Future<String> syncStatus();
+  Future<String> syncError();
   Future<Map<String, dynamic>> syncConnectionInfo();
   Future<String> exportIdentity();
   Future<String> shareWorkspace(String identityCode);
@@ -188,6 +189,9 @@ class MethodChannelCore implements CoreGateway {
 
   @override
   Future<String> syncStatus() async => await _invoke("syncStatus") as String;
+
+  @override
+  Future<String> syncError() async => await _invoke("syncError") as String;
 
   @override
   Future<Map<String, dynamic>> syncConnectionInfo() async =>

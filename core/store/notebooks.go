@@ -38,6 +38,27 @@ type Notebook struct {
 	CreatedAt    model.HLC
 }
 
+func nullableClockPhysical(set bool, clock model.HLC) any {
+	if !set {
+		return nil
+	}
+	return clock.PhysicalMS
+}
+
+func nullableClockLogical(set bool, clock model.HLC) any {
+	if !set {
+		return nil
+	}
+	return clock.Logical
+}
+
+func nullableClockDevice(set bool, clock model.HLC) any {
+	if !set {
+		return nil
+	}
+	return clock.DeviceID.Bytes()
+}
+
 // CreateNotebook inserts a new notebook. A zero parentID files it at the
 // workspace root; a non-zero parentID must reference an existing,
 // non-deleted notebook in the same workspace. clock is used for the
@@ -78,6 +99,50 @@ func CreateNotebook(ctx context.Context, exec Executor, workspaceID, parentID mo
 		ID: id, WorkspaceID: workspaceID, ParentID: parentID, ParentClock: clock,
 		Name: name, NameClock: clock, CreatedAt: clock,
 	}, nil
+}
+
+// UpsertSnapshotNotebook materializes an authenticated notebook catalog row
+// from a workspace snapshot. Callers must insert every row with a root parent
+// first, then call it again with the real parents after the tree exists.
+func UpsertSnapshotNotebook(ctx context.Context, exec Executor, notebook Notebook) error {
+	if err := validateName(notebook.Name, maxNotebookNameBytes); err != nil {
+		return err
+	}
+	if notebook.ID.IsZero() || notebook.WorkspaceID.IsZero() {
+		return errors.New("store: invalid snapshot notebook")
+	}
+	if _, err := exec.ExecContext(ctx, `
+		INSERT INTO notebooks (
+			id, workspace_id, parent_id, parent_physical_ms, parent_logical, parent_device_id,
+			name, name_physical_ms, name_logical, name_device_id,
+			deleted, deleted_physical_ms, deleted_logical, deleted_device_id,
+			created_physical_ms, created_logical, created_device_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			workspace_id = excluded.workspace_id,
+			parent_id = excluded.parent_id,
+			parent_physical_ms = excluded.parent_physical_ms,
+			parent_logical = excluded.parent_logical,
+			parent_device_id = excluded.parent_device_id,
+			name = excluded.name,
+			name_physical_ms = excluded.name_physical_ms,
+			name_logical = excluded.name_logical,
+			name_device_id = excluded.name_device_id,
+			deleted = excluded.deleted,
+			deleted_physical_ms = excluded.deleted_physical_ms,
+			deleted_logical = excluded.deleted_logical,
+			deleted_device_id = excluded.deleted_device_id,
+			created_physical_ms = excluded.created_physical_ms,
+			created_logical = excluded.created_logical,
+			created_device_id = excluded.created_device_id`,
+		notebook.ID.Bytes(), notebook.WorkspaceID.Bytes(), idColumn(notebook.ParentID), notebook.ParentClock.PhysicalMS, notebook.ParentClock.Logical, notebook.ParentClock.DeviceID.Bytes(),
+		notebook.Name, notebook.NameClock.PhysicalMS, notebook.NameClock.Logical, notebook.NameClock.DeviceID.Bytes(),
+		notebook.Deleted, nullableClockPhysical(notebook.Deleted, notebook.DeletedClock), nullableClockLogical(notebook.Deleted, notebook.DeletedClock), nullableClockDevice(notebook.Deleted, notebook.DeletedClock),
+		notebook.CreatedAt.PhysicalMS, notebook.CreatedAt.Logical, notebook.CreatedAt.DeviceID.Bytes(),
+	); err != nil {
+		return fmt.Errorf("store: upsert snapshot notebook: %w", err)
+	}
+	return nil
 }
 
 // RenameNotebook applies an LWW update to a notebook's name. A stale clock

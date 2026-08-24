@@ -28,6 +28,7 @@ type App struct {
 	httpTransport   *transport.HTTP
 	syncCoordinator *coresync.Coordinator
 	syncRepository  *store.SyncRepository
+	syncErrorDetail string
 	settings        AppSettings
 
 	// keyWrapperFactory builds the platform keystore.Wrapper used to
@@ -322,6 +323,7 @@ func (a *App) lockAccount() error {
 	a.httpTransport = nil
 	a.syncCoordinator = nil
 	a.syncRepository = nil
+	a.syncErrorDetail = ""
 	a.mu.Unlock()
 	if coordinator != nil {
 		coordinator.Detach()
@@ -350,6 +352,16 @@ func (a *App) SyncStatus() string {
 	status := string(t.Status(ctx))
 	a.emit(EventSyncStatus, status)
 	return status
+}
+
+// SyncError returns the bounded diagnostic detail from the most recent
+// failed synchronization cycle. It is cleared only after a full successful
+// cycle, disconnect, or lock; individual successful HTTP requests do not
+// hide an unapplied sync error.
+func (a *App) SyncError() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.syncErrorDetail
 }
 
 // keyWrapper builds the platform keystore.Wrapper used to wrap/unwrap the

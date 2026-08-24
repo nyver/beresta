@@ -1591,9 +1591,8 @@ li:hover > .tree-row-delete,
   padding: 0.35rem 0.6rem;
 }
 
-/* Topbar's compact synchronization status pill (replaces the old plain
-   "Sync" button - task: state visible at a glance instead of a button to
-   press). Color-coded via the same .sync-status-{value} modifier classes
+/* Topbar's compact synchronization status pill and the adjacent forced-sync
+   control. The pill is color-coded via the same .sync-status-{value} modifier classes
    SyncPanel's own status card uses on .sync-status-dot, so the two never
    drift out of sync with each other visually. */
 .sync-status-pill {
@@ -1612,6 +1611,23 @@ li:hover > .tree-row-delete,
 
 .sync-status-pill:hover {
   background: #f1eee6;
+}
+
+.sync-error-detail {
+  margin: 0.5rem 0 0;
+  overflow-wrap: anywhere;
+  color: #8b3327;
+  font-size: 0.85rem;
+}
+
+.sync-now-button[aria-busy="true"] span {
+  animation: sync-now-spin 0.8s linear infinite;
+}
+
+@keyframes sync-now-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .key-protection-hint {

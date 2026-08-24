@@ -34,6 +34,9 @@ var (
 	// be completed; the caller must wait for garbage collection (task 4.9)
 	// to reclaim the orphaned blob before retrying.
 	ErrAttachmentBlobOrphaned = errors.New("account: attachment content already published without a manifest; wait for garbage collection")
+	// ErrAttachmentUnavailable reports an attachment reference whose encrypted
+	// manifest and content have not been received by this device yet.
+	ErrAttachmentUnavailable = errors.New("account: attachment content is not available on this device")
 )
 
 // AddAttachment encrypts and durably publishes plaintext as one attachment
@@ -87,8 +90,25 @@ func (a *Account) AddAttachment(ctx context.Context, workspaceID, noteID model.I
 	attachment, err := store.GetAttachment(ctx, db, blobID)
 	switch {
 	case err == nil:
+		if attachment.WorkspaceID != workspaceID {
+			return store.Attachment{}, store.ErrWrongWorkspace
+		}
 		// Already published and recorded by an earlier attach (possibly for
-		// a different note); reuse it.
+		// a different note); reuse it. A synchronized reference without its
+		// manifest is a placeholder, so publish and upgrade it instead.
+		if attachment.IsPlaceholder() {
+			published, existsErr := a.blobs.Exists(blobID)
+			if existsErr != nil {
+				return store.Attachment{}, existsErr
+			}
+			if published {
+				return store.Attachment{}, ErrAttachmentBlobOrphaned
+			}
+			attachment, err = a.publishAndRecordAttachment(ctx, db, entry, workspaceID, blobID, staged, totalSize, displayName, mediaType)
+			if err != nil {
+				return store.Attachment{}, err
+			}
+		}
 	case errors.Is(err, store.ErrNotFound):
 		published, existsErr := a.blobs.Exists(blobID)
 		if existsErr != nil {
@@ -154,6 +174,12 @@ func (a *Account) ListNoteAttachments(ctx context.Context, workspaceID, noteID m
 		if row.WorkspaceID != workspaceID {
 			return nil, store.ErrWrongWorkspace
 		}
+		// A remote reference may arrive before its encrypted attachment
+		// catalog. It remains stored and can be hydrated later, but must not
+		// make the note view fail in the meantime.
+		if row.IsPlaceholder() {
+			continue
+		}
 		metadata := corecrypto.AttachmentMetadata{
 			SchemaVersion: corecrypto.AttachmentSchemaVersion,
 			CryptoProfile: corecrypto.CryptoProfileV1,
@@ -210,6 +236,9 @@ func readAttachmentFrom(ctx context.Context, sourceDB store.Executor, sourceBlob
 	}
 	if row.WorkspaceID != workspaceID {
 		return "", "", store.ErrWrongWorkspace
+	}
+	if row.IsPlaceholder() {
+		return "", "", ErrAttachmentUnavailable
 	}
 
 	metadata := corecrypto.AttachmentMetadata{

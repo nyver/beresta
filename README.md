@@ -154,8 +154,11 @@ the attachment blob store for a device that cannot or should not be
 unlocked normally - the windows-desktop-client spec's revocation-response
 primitive, usable today as a manual reset since no sync transport exists
 yet to deliver an actual revocation signal. The desktop app also runs a
-native system-tray icon with a "Quick Note" / "Show Beresta" / "Quit"
-context menu, a configurable global quick-note hotkey (default
+native system-tray icon - extracted from the running executable's own
+embedded icon (`shell32.dll`'s `ExtractIconExW`) rather than a generic
+stock icon, so it matches the app the same way the taskbar and Alt+Tab
+already do - with a "Quick Note" / "Show Beresta" / "Quit" context menu, a
+configurable global quick-note hotkey (default
 `Ctrl+Shift+N`, changeable from the Backups & Data dialog) that opens a
 focused capture surface and brings the main window forward even while it
 is hidden, and an opt-in "launch at sign-in" autostart toggle backed by

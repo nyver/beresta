@@ -22,6 +22,7 @@ package traymenu
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"syscall"
@@ -54,8 +55,10 @@ var (
 	procTrackPopupMenu      = user32.NewProc("TrackPopupMenu")
 	procSetForegroundWindow = user32.NewProc("SetForegroundWindow")
 	procGetCursorPos        = user32.NewProc("GetCursorPos")
+	procDestroyIcon         = user32.NewProc("DestroyIcon")
 
 	procShellNotifyIconW = shell32.NewProc("Shell_NotifyIconW")
+	procExtractIconExW   = shell32.NewProc("ExtractIconExW")
 )
 
 // Win32 constants used below. Only the subset this package actually
@@ -203,6 +206,15 @@ type Controller struct {
 	className *uint16
 	nid       notifyIconData
 	menu      uintptr
+	// icon and iconOwned are used by wndProc's wmDestroy case to release
+	// the icon handle loadAppIcon returned - but only when it is actually
+	// caller-owned (iconOwned, an ExtractIconExW result). Its fallback, the
+	// stock IDI_APPLICATION icon, is a shared system resource; MSDN warns
+	// that destroying a shared icon can invalidate it for any other code
+	// still using it, so that path leaves iconOwned false and the icon
+	// untouched, exactly as this code did before loadAppIcon existed.
+	icon      uintptr
+	iconOwned bool
 	handlers  Handlers
 	done      chan struct{}
 
@@ -294,7 +306,9 @@ func (c *Controller) run(ready chan<- error) {
 		return
 	}
 
-	icon, _, _ := procLoadIconW.Call(0, uintptr(idiApplication))
+	icon, iconOwned := loadAppIcon()
+	c.icon = icon
+	c.iconOwned = iconOwned
 	cursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 
 	wcex := wndClassEx{
@@ -340,6 +354,52 @@ func (c *Controller) run(ready chan<- error) {
 
 	ready <- nil
 	c.messageLoop()
+}
+
+// loadAppIcon extracts the small icon already embedded in the running
+// executable - the same one Explorer, Alt+Tab, and the taskbar show for
+// Beresta (Wails' build embeds desktop/build/windows/icon.ico as a
+// resource) - so the tray icon matches the app instead of showing the
+// generic stock IDI_APPLICATION icon. LoadIconW/LoadImageW cannot read an
+// icon resource out of an executable's resource section by path; only
+// shell32's ExtractIconExW does, which is why this reaches for shell32
+// instead of the simpler user32 icon-loading calls used elsewhere in this
+// file. Falls back to the stock icon on any failure - a wrong-looking icon
+// is a cosmetic problem, never a reason to block tray/hotkey startup. The
+// returned bool reports whether the caller now owns the icon handle (and
+// so must eventually DestroyIcon it) - see Controller.iconOwned.
+func loadAppIcon() (uintptr, bool) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return stockApplicationIcon(), false
+	}
+	pathPtr, err := syscall.UTF16PtrFromString(exePath)
+	if err != nil {
+		return stockApplicationIcon(), false
+	}
+	var large, small uintptr
+	count, _, _ := procExtractIconExW.Call(
+		uintptr(unsafe.Pointer(pathPtr)),
+		0, // the first icon group in the executable - its main app icon
+		uintptr(unsafe.Pointer(&large)),
+		uintptr(unsafe.Pointer(&small)),
+		1,
+	)
+	if large != 0 {
+		// Only the small icon is used (tray icons render at small-icon
+		// size); the large one this same call always also extracts is
+		// destroyed immediately rather than leaked.
+		procDestroyIcon.Call(large)
+	}
+	if int32(count) <= 0 || small == 0 {
+		return stockApplicationIcon(), false
+	}
+	return small, true
+}
+
+func stockApplicationIcon() uintptr {
+	icon, _, _ := procLoadIconW.Call(0, uintptr(idiApplication))
+	return icon
 }
 
 func (c *Controller) addTrayIcon(icon uintptr) error {
@@ -495,6 +555,9 @@ func (c *Controller) wndProc(hwnd uintptr, message uint32, wParam, lParam uintpt
 		c.removeTrayIcon()
 		procDestroyMenu.Call(c.menu)
 		procUnregisterClassW.Call(uintptr(unsafe.Pointer(c.className)), c.instance)
+		if c.iconOwned {
+			procDestroyIcon.Call(c.icon)
+		}
 		procPostQuitMessage.Call(0)
 		return 0
 	}

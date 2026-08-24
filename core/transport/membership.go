@@ -101,6 +101,36 @@ type RemoteKeyEnvelope struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// FindKeyEnvelope returns the envelope from envelopes (a GetKeyEnvelopes
+// result) whose key ID matches keyID, tolerating a malformed key_id string
+// from the server by treating it as a non-match rather than failing the
+// whole lookup. Both desktop and mobile use this to redeem an
+// AcceptWorkspaceGrant code: it matches the key ID the sharer's
+// ShareWorkspace/AddMember pair recorded server-side against the sealed
+// envelope the recipient needs to open locally.
+func FindKeyEnvelope(envelopes []RemoteKeyEnvelope, keyID []byte) ([]byte, bool) {
+	target := hex.EncodeToString(keyID)
+	for _, candidate := range envelopes {
+		if candidate.KeyID == target {
+			return candidate.Envelope, true
+		}
+	}
+	return nil, false
+}
+
+// SelfRole finds selfUserID's own row in members (a ListMembers result) and
+// returns its role ("owner" or "member"), or "unknown" if selfUserID is not
+// present (a transient membership-listing inconsistency, not expected in
+// steady state).
+func SelfRole(members []RemoteMember, selfUserID string) string {
+	for _, member := range members {
+		if member.UserID == selfUserID {
+			return member.Role
+		}
+	}
+	return "unknown"
+}
+
 // GetKeyEnvelopes returns every envelope the server has stored for this
 // device's user in one workspace, current and historical.
 func (h *HTTP) GetKeyEnvelopes(ctx context.Context, workspaceID string) ([]RemoteKeyEnvelope, error) {

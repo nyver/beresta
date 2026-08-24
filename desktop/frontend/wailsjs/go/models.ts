@@ -61,6 +61,7 @@ export namespace main {
 	    sync_server_url: string;
 	    sync_security_mode: string;
 	    sync_fingerprint: string;
+	    active_workspace_id: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -78,6 +79,7 @@ export namespace main {
 	        this.sync_server_url = source["sync_server_url"];
 	        this.sync_security_mode = source["sync_security_mode"];
 	        this.sync_fingerprint = source["sync_fingerprint"];
+	        this.active_workspace_id = source["active_workspace_id"];
 	    }
 	}
 	export class AttachmentDTO {
@@ -720,6 +722,24 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.database_path = source["database_path"];
 	        this.passphrase = source["passphrase"];
+	    }
+	}
+	export class WorkspaceSummaryDTO {
+	    workspace_id: string;
+	    role: string;
+	    active: boolean;
+	    member_count?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceSummaryDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.workspace_id = source["workspace_id"];
+	        this.role = source["role"];
+	        this.active = source["active"];
+	        this.member_count = source["member_count"];
 	    }
 	}
 

@@ -1,33 +1,46 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  acceptWorkspaceGrant,
   connectServer,
   diagnoseServer,
   disableServer,
+  exportIdentity,
   listSyncDevices,
   listSyncQuarantine,
+  listWorkspaces,
   retrySyncQuarantine,
   revokeSyncDevice,
+  setActiveWorkspace,
+  shareWorkspace,
   syncStatus,
   type QuarantineEntry,
   type ServerDiagnostics,
   type SyncDevice,
   type SyncStatusValue,
+  type WorkspaceSummary,
   unwrapError,
 } from "../api";
 import { useI18n } from "../i18n";
 import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
 
 const EVENT_SYNC_STATUS = "sync:status";
+const EVENT_WORKSPACE_CHANGED = "workspace:changed";
 const KNOWN_STATUSES: readonly SyncStatusValue[] = ["disabled", "offline", "active", "current", "failed"];
 
 function isSyncStatus(value: unknown): value is SyncStatusValue {
   return typeof value === "string" && KNOWN_STATUSES.includes(value as SyncStatusValue);
 }
 
-export interface SyncPanelProps { deviceId: string; }
+export interface SyncPanelProps {
+  deviceId: string;
+  /** Called whenever the active workspace changes (joining a shared
+   * workspace, or switching between held ones), so the parent screen can
+   * reload notes/notebooks/tags scoped to the newly active workspace. */
+  onWorkspaceChanged?: () => void;
+}
 
-export function SyncPanel({ deviceId }: SyncPanelProps) {
+export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
   const { t, errorMessage } = useI18n();
   const [status, setStatus] = useState<SyncStatusValue | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,19 +53,35 @@ export function SyncPanel({ deviceId }: SyncPanelProps) {
   const [diagnostics, setDiagnostics] = useState<ServerDiagnostics | null>(null);
   const [devices, setDevices] = useState<SyncDevice[]>([]);
   const [quarantine, setQuarantine] = useState<QuarantineEntry[]>([]);
+  const [identityCode, setIdentityCode] = useState("");
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [peerIdentityCode, setPeerIdentityCode] = useState("");
+  const [grantCode, setGrantCode] = useState("");
+  const [peerGrantCode, setPeerGrantCode] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
+  const [sharingBusy, setSharingBusy] = useState(false);
 
   const loadDetails = useCallback(async (nextStatus: SyncStatusValue) => {
     if (nextStatus === "disabled") {
       setDevices([]);
       setQuarantine([]);
       setDiagnostics(null);
+      setWorkspaces([]);
+      setIdentityCode("");
       return;
     }
-    const [deviceRows, journalRows] = await Promise.all([listSyncDevices(), listSyncQuarantine()]);
+    const [deviceRows, journalRows, identity, workspaceRows] = await Promise.all([
+      listSyncDevices(),
+      listSyncQuarantine(),
+      exportIdentity(),
+      listWorkspaces(),
+    ]);
     // Treat malformed bridge results as empty collections instead of letting
     // one bad response crash the entire settings surface.
     setDevices(Array.isArray(deviceRows) ? deviceRows : []);
     setQuarantine(Array.isArray(journalRows) ? journalRows : []);
+    setIdentityCode(typeof identity === "string" ? identity : "");
+    setWorkspaces(Array.isArray(workspaceRows) ? workspaceRows : []);
   }, []);
 
   const loadStatus = useCallback(() => {
@@ -72,9 +101,61 @@ export function SyncPanel({ deviceId }: SyncPanelProps) {
         setError(errorMessage({ code: "internal", message: "unknown synchronization status" }));
       }
     });
+    EventsOn(EVENT_WORKSPACE_CHANGED, () => {
+      loadStatus();
+      onWorkspaceChanged?.();
+    });
     loadStatus();
-    return () => EventsOff(EVENT_SYNC_STATUS);
-  }, [errorMessage, loadDetails, loadStatus]);
+    return () => { EventsOff(EVENT_SYNC_STATUS); EventsOff(EVENT_WORKSPACE_CHANGED); };
+  }, [errorMessage, loadDetails, loadStatus, onWorkspaceChanged]);
+
+  async function handleShareWorkspace() {
+    setSharingBusy(true);
+    setError(null);
+    try {
+      const code = await shareWorkspace(peerIdentityCode.trim());
+      setGrantCode(code);
+      setPeerIdentityCode("");
+    } catch (thrown) {
+      setError(errorMessage(unwrapError(thrown)));
+    } finally { setSharingBusy(false); }
+  }
+
+  async function handleAcceptWorkspaceGrant() {
+    setSharingBusy(true);
+    setError(null);
+    try {
+      await acceptWorkspaceGrant(peerGrantCode.trim());
+      setPeerGrantCode("");
+      loadStatus();
+      onWorkspaceChanged?.();
+    } catch (thrown) {
+      setError(errorMessage(unwrapError(thrown)));
+    } finally { setSharingBusy(false); }
+  }
+
+  async function handleSwitchWorkspace(workspaceId: string) {
+    setSharingBusy(true);
+    setError(null);
+    try {
+      await setActiveWorkspace(workspaceId);
+      loadStatus();
+      onWorkspaceChanged?.();
+    } catch (thrown) {
+      setError(errorMessage(unwrapError(thrown)));
+    } finally { setSharingBusy(false); }
+  }
+
+  async function handleCopy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(text);
+      setTimeout(() => setCopied((current) => (current === text ? null : current)), 2000);
+    } catch {
+      // Clipboard access can be denied by the OS; the code remains visible
+      // and selectable in its own read-only textarea as a fallback.
+    }
+  }
 
   async function connect() {
     setBusy(true);
@@ -153,6 +234,78 @@ export function SyncPanel({ deviceId }: SyncPanelProps) {
         ))}
         {status === "disabled" && <p>{t("sync.devices_unavailable")}</p>}
       </section>
+
+      {status !== "disabled" && status !== null ? (
+        <section aria-labelledby="sync-workspaces-title">
+          <h3 id="sync-workspaces-title">{t("sync.workspaces_title")}</h3>
+          {workspaces.map((workspace) => (
+            <div className="sync-device-row" key={workspace.workspace_id}>
+              <div>
+                <strong>
+                  {t(`sync.workspace_role_${workspace.role === "owner" || workspace.role === "member" ? workspace.role : "unknown"}`)}
+                </strong>
+                <code>{workspace.workspace_id}</code>
+                {typeof workspace.member_count === "number" && (
+                  <p>{workspace.member_count} {t("sync.workspace_members_label")}</p>
+                )}
+              </div>
+              {workspace.active ? (
+                <span>{t("sync.workspace_active_badge")}</span>
+              ) : (
+                <button type="button" disabled={sharingBusy} onClick={() => void handleSwitchWorkspace(workspace.workspace_id)}>
+                  {t("sync.workspace_switch_button")}
+                </button>
+              )}
+            </div>
+          ))}
+
+          <div className="sync-connect-form">
+            <h4>{t("sync.export_identity_title")}</h4>
+            <p>{t("sync.export_identity_description")}</p>
+            <label>
+              {t("sync.export_identity_title")}
+              <textarea readOnly value={identityCode} onFocus={(event) => event.currentTarget.select()} />
+            </label>
+            <button type="button" onClick={() => void handleCopy(identityCode)} disabled={!identityCode}>
+              {copied === identityCode ? t("sync.copied_label") : t("sync.copy_button")}
+            </button>
+          </div>
+
+          <div className="sync-connect-form">
+            <h4>{t("sync.share_workspace_title")}</h4>
+            <label>
+              {t("sync.paste_identity_label")}
+              <textarea value={peerIdentityCode} onChange={(event) => setPeerIdentityCode(event.target.value)} />
+            </label>
+            <button type="button" disabled={sharingBusy || !peerIdentityCode} onClick={() => void handleShareWorkspace()}>
+              {t("sync.share_workspace_button")}
+            </button>
+            {grantCode ? (
+              <>
+                <label>
+                  {t("sync.grant_code_label")}
+                  <textarea readOnly value={grantCode} onFocus={(event) => event.currentTarget.select()} />
+                </label>
+                <p>{t("sync.grant_code_description")}</p>
+                <button type="button" onClick={() => void handleCopy(grantCode)}>
+                  {copied === grantCode ? t("sync.copied_label") : t("sync.copy_button")}
+                </button>
+              </>
+            ) : null}
+          </div>
+
+          <div className="sync-connect-form">
+            <h4>{t("sync.join_workspace_title")}</h4>
+            <label>
+              {t("sync.paste_grant_label")}
+              <textarea value={peerGrantCode} onChange={(event) => setPeerGrantCode(event.target.value)} />
+            </label>
+            <button type="button" disabled={sharingBusy || !peerGrantCode} onClick={() => void handleAcceptWorkspaceGrant()}>
+              {t("sync.join_workspace_button")}
+            </button>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

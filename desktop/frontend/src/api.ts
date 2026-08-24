@@ -1,4 +1,5 @@
 import {
+  AcceptWorkspaceGrant,
   AddAttachmentFromBytes,
   AddAttachmentFromFile,
   AutostartStatus,
@@ -18,6 +19,7 @@ import {
   DisableServer,
   DiffRevisions,
   EnsureDailyBackup,
+  ExportIdentity,
   ExportNotes,
   GetNoteDocument,
   GetSettings,
@@ -32,6 +34,7 @@ import {
   ListSyncDevices,
   ListSyncQuarantine,
   ListTags,
+  ListWorkspaces,
   LockAccount,
   MoveNotebook,
   NoteTagsByWorkspace,
@@ -53,10 +56,12 @@ import {
   SaveAttachmentToFile,
   Search,
   SearchByTag,
+  SetActiveWorkspace,
   SetNoteNotebook,
   SetNotebookDeleted,
   SetNoteTag,
   SetTagDeleted,
+  ShareWorkspace,
   Status,
   SyncStatus,
   UnlockAccount,
@@ -238,6 +243,52 @@ export async function listSyncQuarantine(): Promise<QuarantineEntry[]> {
 
 export async function retrySyncQuarantine(operationId: string): Promise<void> {
   await RetrySyncQuarantine(operationId);
+}
+
+export interface WorkspaceSummary {
+  workspace_id: string;
+  role: string;
+  active: boolean;
+  member_count?: number;
+}
+
+/**
+ * exportIdentity returns this account's own beresta://identity code: paste
+ * it to whoever owns a workspace you want to join, so they can call
+ * shareWorkspace with it (see desktop/workspaces.go's App.ExportIdentity).
+ */
+export async function exportIdentity(): Promise<string> {
+  return ExportIdentity();
+}
+
+/**
+ * shareWorkspace grants the account behind identityCode (a peer's
+ * exportIdentity code) membership in this account's active workspace, and
+ * returns a beresta://grant code to hand back to them so they can call
+ * acceptWorkspaceGrant. Requires server synchronization to already be
+ * enabled.
+ */
+export async function shareWorkspace(identityCode: string): Promise<string> {
+  return ShareWorkspace(identityCode);
+}
+
+/**
+ * acceptWorkspaceGrant redeems a grant code from shareWorkspace, adding the
+ * shared workspace to this account and making it active. Requires server
+ * synchronization to already be enabled.
+ */
+export async function acceptWorkspaceGrant(
+  grantCode: string,
+): Promise<WorkspaceSummary> {
+  return AcceptWorkspaceGrant(grantCode) as Promise<WorkspaceSummary>;
+}
+
+export async function listWorkspaces(): Promise<WorkspaceSummary[]> {
+  return ListWorkspaces() as Promise<WorkspaceSummary[]>;
+}
+
+export async function setActiveWorkspace(workspaceId: string): Promise<void> {
+  await SetActiveWorkspace(workspaceId);
 }
 
 /**

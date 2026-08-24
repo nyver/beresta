@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "../i18n";
 import { appMock, runtimeMock } from "../setupTests";
@@ -60,5 +60,98 @@ describe("SyncPanel", () => {
     await userEvent.setup().click(await screen.findByRole("button", { name: "common.retry" }));
 
     expect(await screen.findByText("sync.status_current")).toBeInTheDocument();
+  });
+
+  it("shows this account's identity code and copies it on request", async () => {
+    // @testing-library/user-event installs its own navigator.clipboard stub
+    // as soon as setup() runs, which would shadow ours below; dispatch a
+    // plain DOM click instead so the component's own handler reaches the
+    // clipboard mock this test actually asserts against.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    renderPanel("active");
+
+    const identityField = (await screen.findByLabelText(
+      "sync.export_identity_title",
+    )) as HTMLTextAreaElement;
+    expect(identityField.value).toBe("beresta://identity?user=test&key=00");
+
+    const copyButton = screen.getByRole("button", { name: "sync.copy_button" }) as HTMLButtonElement;
+    await act(async () => {
+      copyButton.click();
+      await Promise.resolve();
+    });
+
+    expect(writeText).toHaveBeenCalledWith("beresta://identity?user=test&key=00");
+    expect(await screen.findByRole("button", { name: "sync.copied_label" })).toBeInTheDocument();
+  });
+
+  it("shares the workspace from a pasted identity code and shows the resulting grant code", async () => {
+    appMock.ShareWorkspace.mockResolvedValue("beresta://grant?workspace=w&key=k&authority=a&sig=s");
+    renderPanel("active");
+    const user = userEvent.setup();
+
+    await user.type(
+      await screen.findByLabelText("sync.paste_identity_label"),
+      "beresta://identity?user=peer&key=00",
+    );
+    await user.click(screen.getByRole("button", { name: "sync.share_workspace_button" }));
+
+    expect(appMock.ShareWorkspace).toHaveBeenCalledWith("beresta://identity?user=peer&key=00");
+    const grantField = (await screen.findByLabelText("sync.grant_code_label")) as HTMLTextAreaElement;
+    expect(grantField.value).toBe("beresta://grant?workspace=w&key=k&authority=a&sig=s");
+  });
+
+  it("joins a shared workspace from a pasted grant code and notifies the parent", async () => {
+    appMock.AcceptWorkspaceGrant.mockResolvedValue({
+      workspace_id: "shared-workspace",
+      role: "member",
+      active: true,
+      member_count: 2,
+    });
+    const onWorkspaceChanged = vi.fn();
+    mockLocaleCatalog();
+    mockSyncStatus("active");
+    render(
+      <I18nProvider>
+        <SyncPanel deviceId="device-123" onWorkspaceChanged={onWorkspaceChanged} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.type(
+      await screen.findByLabelText("sync.paste_grant_label"),
+      "beresta://grant?workspace=w&key=k&authority=a&sig=s",
+    );
+    await user.click(screen.getByRole("button", { name: "sync.join_workspace_button" }));
+
+    expect(appMock.AcceptWorkspaceGrant).toHaveBeenCalledWith(
+      "beresta://grant?workspace=w&key=k&authority=a&sig=s",
+    );
+    await waitFor(() => expect(onWorkspaceChanged).toHaveBeenCalled());
+  });
+
+  it("lists held workspaces and switches the active one", async () => {
+    mockLocaleCatalog();
+    mockSyncStatus("active");
+    // mockSyncStatus defaults ListWorkspaces to []; override it after, since
+    // renderPanel would otherwise re-apply that default on top of this.
+    appMock.ListWorkspaces.mockResolvedValue([
+      { workspace_id: "own-workspace", role: "owner", active: true },
+      { workspace_id: "shared-workspace", role: "member", active: false, member_count: 2 },
+    ]);
+    render(
+      <I18nProvider>
+        <SyncPanel deviceId="device-123" />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("own-workspace")).toBeInTheDocument();
+    expect(screen.getByText("shared-workspace")).toBeInTheDocument();
+    expect(screen.getByText("sync.workspace_active_badge")).toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "sync.workspace_switch_button" }));
+
+    expect(appMock.SetActiveWorkspace).toHaveBeenCalledWith("shared-workspace");
   });
 });

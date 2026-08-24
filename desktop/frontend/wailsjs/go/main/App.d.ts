@@ -3,6 +3,8 @@
 import {main} from '../models';
 import {transport} from '../models';
 
+export function AcceptWorkspaceGrant(arg1:string):Promise<main.WorkspaceSummaryDTO>;
+
 export function AddAttachmentFromBytes(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.AttachmentDTO>;
 
 export function AddAttachmentFromFile(arg1:string,arg2:string):Promise<main.AttachmentDTO>;
@@ -41,6 +43,8 @@ export function DisableServer():Promise<void>;
 
 export function EnsureDailyBackup(arg1:string):Promise<boolean>;
 
+export function ExportIdentity():Promise<string>;
+
 export function ExportNotes(arg1:string,arg2:Array<string>):Promise<main.ExportManifestDTO>;
 
 export function GetNote(arg1:string):Promise<main.NoteDTO>;
@@ -70,6 +74,8 @@ export function ListSyncDevices():Promise<Array<transport.RemoteDevice>>;
 export function ListSyncQuarantine():Promise<Array<main.SyncQuarantineDTO>>;
 
 export function ListTags():Promise<Array<main.TagDTO>>;
+
+export function ListWorkspaces():Promise<Array<main.WorkspaceSummaryDTO>>;
 
 export function LockAccount():Promise<void>;
 
@@ -119,6 +125,8 @@ export function Search(arg1:string):Promise<Array<main.SearchResultDTO>>;
 
 export function SearchByTag(arg1:string):Promise<Array<main.SearchResultDTO>>;
 
+export function SetActiveWorkspace(arg1:string):Promise<void>;
+
 export function SetNoteFlags(arg1:string,arg2:boolean,arg3:boolean):Promise<void>;
 
 export function SetNoteNotebook(arg1:string,arg2:string):Promise<void>;
@@ -128,6 +136,8 @@ export function SetNoteTag(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 export function SetNotebookDeleted(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetTagDeleted(arg1:string,arg2:boolean):Promise<void>;
+
+export function ShareWorkspace(arg1:string):Promise<string>;
 
 export function Status():Promise<main.AccountStatus>;
 

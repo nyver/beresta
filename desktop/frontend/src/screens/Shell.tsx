@@ -541,7 +541,7 @@ export function Shell({ account, onLocked }: ShellProps) {
 
       {syncModalOpen ? (
         <Modal title={t("sync.title")} onClose={() => setSyncModalOpen(false)}>
-          <SyncPanel deviceId={account.device_id} />
+          <SyncPanel deviceId={account.device_id} onWorkspaceChanged={loadAll} />
         </Modal>
       ) : null}
 

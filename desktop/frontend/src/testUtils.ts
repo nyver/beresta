@@ -38,6 +38,7 @@ export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
     sync_server_url: "",
     sync_security_mode: "pinned",
     sync_fingerprint: "",
+    active_workspace_id: "",
     ...overrides,
   };
   appMock.GetSettings.mockResolvedValue(settings);
@@ -49,6 +50,8 @@ export function mockSyncStatus(status = "disabled") {
   appMock.SyncStatus.mockResolvedValue(status);
   appMock.ListSyncDevices.mockResolvedValue([]);
   appMock.ListSyncQuarantine.mockResolvedValue([]);
+  appMock.ExportIdentity.mockResolvedValue("beresta://identity?user=test&key=00");
+  appMock.ListWorkspaces.mockResolvedValue([]);
 }
 
 export function mockAutostartStatus(overrides: Partial<main.AutostartStatusDTO> = {}) {

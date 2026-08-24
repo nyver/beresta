@@ -55,6 +55,21 @@ describe("Shell", () => {
     expect(screen.getByRole("main")).toHaveAccessibleName("shell.title");
   });
 
+  it("orders notes by their most recent modification time", async () => {
+    const older = fakeNote({ title: "Older note", updated_unix_ms: 100 });
+    const newer = fakeNote({ title: "Newer note", updated_unix_ms: 200 });
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([older, newer]);
+    renderShell();
+
+    const list = await screen.findByRole("listbox");
+    expect(within(list).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      expect.stringContaining("Newer note"),
+      expect.stringContaining("Older note"),
+    ]);
+  });
+
   it("excludes tombstoned notes from every view", async () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);
@@ -259,6 +274,30 @@ describe("Shell", () => {
       "aria-busy",
       "false",
     );
+  });
+
+  it("reloads note titles once when an incoming synchronization cycle completes", async () => {
+    const note = fakeNote({ title: "Before mobile rename" });
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([note]);
+    mockSyncStatus("active");
+    renderShell();
+
+    expect(await screen.findByText("Before mobile rename")).toBeInTheDocument();
+    await waitFor(() => expect(runtimeMock.EventsOnMultiple).toHaveBeenCalled());
+    const [, onSyncStatus] =
+      runtimeMock.EventsOnMultiple.mock.calls.find(([eventName]) => eventName === "sync:status") ?? [];
+    expect(onSyncStatus).toBeDefined();
+
+    appMock.ListNotes.mockResolvedValue([{ ...note, title: "Renamed on mobile" }]);
+    act(() => onSyncStatus?.("current"));
+
+    expect(await screen.findByText("Renamed on mobile")).toBeInTheDocument();
+    expect(appMock.ListNotes).toHaveBeenCalledTimes(2);
+
+    act(() => onSyncStatus?.("current"));
+    await waitFor(() => expect(appMock.ListNotes).toHaveBeenCalledTimes(2));
   });
 
   it("changes the auto-lock duration through the Settings modal and persists it", async () => {

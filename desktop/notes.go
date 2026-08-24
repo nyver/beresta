@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"sort"
 
 	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/model"
@@ -58,6 +59,14 @@ func noteDTOsWithMeta(notes []model.Note, meta map[model.ID]store.NoteListMeta) 
 		}
 		out[i] = dto
 	}
+	// Stable newest-first ordering is part of the desktop ListNotes contract.
+	// UUID ordering makes equal physical timestamps deterministic across clients.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedMS == out[j].UpdatedMS {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].UpdatedMS > out[j].UpdatedMS
+	})
 	return out
 }
 

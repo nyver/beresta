@@ -174,6 +174,37 @@ func TestBoundMethodsRequireUnlockedAccount(t *testing.T) {
 	}
 }
 
+func TestListNotesOrdersByLastModified(t *testing.T) {
+	a := newTestApp(t)
+	if _, err := a.CreateAccount(CreateAccountRequest{DatabasePath: testDatabasePath(t, a), Passphrase: "correct horse battery staple"}); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	first, err := a.CreateNote("", "First note")
+	if err != nil {
+		t.Fatalf("CreateNote(first): %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if _, err := a.CreateNote("", "Second note"); err != nil {
+		t.Fatalf("CreateNote(second): %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	update, format := encodedNoteUpdate(t, "edited last")
+	if err := a.CommitNoteBody(CommitNoteBodyRequest{NoteID: first.ID, UpdateBase64: update, UpdateFormat: format}); err != nil {
+		t.Fatalf("CommitNoteBody(first): %v", err)
+	}
+
+	listed, err := a.ListNotes()
+	if err != nil {
+		t.Fatalf("ListNotes: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("ListNotes count = %d, want 2", len(listed))
+	}
+	if listed[0].ID != first.ID {
+		t.Fatalf("first listed note = %+v, want last-edited note %s", listed[0], first.ID)
+	}
+}
+
 func TestNoteAndSearchLifecycle(t *testing.T) {
 	a := newTestApp(t)
 	dbPath := testDatabasePath(t, a)

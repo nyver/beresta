@@ -54,6 +54,13 @@ export interface ShellProps {
 
 type Selection = { kind: "all" } | { kind: "notebook"; id: string } | { kind: "tag"; id: string };
 
+function sortNotesByLastModified(notes: main.NoteDTO[]): main.NoteDTO[] {
+  return [...notes].sort((left, right) => {
+    if (left.updated_unix_ms === right.updated_unix_ms) return left.id.localeCompare(right.id);
+    return right.updated_unix_ms - left.updated_unix_ms;
+  });
+}
+
 /**
  * Shell is the desktop application's main screen: notebook tree, tag
  * navigation, a note list, and the Yjs-backed body editor, all wired to
@@ -98,6 +105,10 @@ export function Shell({ account, onLocked }: ShellProps) {
   // event SyncPanel itself listens for.
   const [syncStatusValue, setSyncStatusValue] = useState<SyncStatusValue | null>(null);
   const [forcingSync, setForcingSync] = useState(false);
+  // Avoid refetching the entire workspace for every status poll that keeps
+  // reporting "current". It is reset while a new cycle is active so the
+  // next successful cycle reloads incoming remote changes exactly once.
+  const syncWasCurrentRef = useRef(false);
   // Set only when syncStatusValue transitions to "current", so the status
   // line can show a static "synced at HH:MM" - see SaveStatusLine's doc
   // comment on why this is not a live-ticking relative time.
@@ -179,7 +190,18 @@ export function Shell({ account, onLocked }: ShellProps) {
     function applyStatus(next: SyncStatusValue) {
       if (disposed) return;
       setSyncStatusValue(next);
-      if (next === "current") setSyncedAt(Date.now());
+      if (next === "current") {
+        const becameCurrent = !syncWasCurrentRef.current;
+        syncWasCurrentRef.current = true;
+        setSyncedAt(Date.now());
+        // The sync worker applies remote operations to the local database,
+        // but React state is independent of that database. Reload the
+        // workspace once the cycle has applied successfully so, for example,
+        // a title changed on mobile appears in the desktop note list.
+        if (becameCurrent) loadAll();
+      } else {
+        syncWasCurrentRef.current = false;
+      }
     }
     const refreshStatus = () => {
       syncStatus()
@@ -199,7 +221,7 @@ export function Shell({ account, onLocked }: ShellProps) {
       window.clearInterval(interval);
       EventsOff(EVENT_SYNC_STATUS);
     };
-  }, [ready]);
+  }, [ready, loadAll]);
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? "1" : "0");
@@ -249,14 +271,14 @@ export function Shell({ account, onLocked }: ShellProps) {
     const live = notes.filter((note) => !note.deleted);
     switch (selection.kind) {
       case "all":
-        return live;
+        return sortNotesByLastModified(live);
       case "notebook":
         // Exact match only: a selected notebook does not (yet) include
         // its descendants' notes. A future revision may want to, but
         // that is a product decision, not implied by this task.
-        return live.filter((note) => note.notebook_id === selection.id);
+        return sortNotesByLastModified(live.filter((note) => note.notebook_id === selection.id));
       case "tag":
-        return tagNotes;
+        return sortNotesByLastModified(tagNotes);
     }
   }, [notes, tagNotes, selection, searchResults]);
 

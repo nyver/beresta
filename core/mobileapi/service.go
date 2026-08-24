@@ -903,13 +903,38 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 	if err := refreshMobileDevices(ctx, value, remote); err != nil {
 		return err
 	}
-	repository, err := store.NewSyncRepository(value.DB(), "http")
+	worker, repository, err := s.buildWorkspaceWorker(value, workspaceID, remote)
 	if err != nil {
 		return err
 	}
+	coordinator := coresync.NewCoordinator(s.root)
+	if err := coordinator.Attach(worker); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	previous := s.coordinator
+	s.coordinator, s.remote, s.repository = coordinator, remote, repository
+	s.mu.Unlock()
+	if previous != nil {
+		previous.Detach()
+	}
+	s.emit("sync_status", map[string]string{"status": "active"})
+	return nil
+}
+
+// buildWorkspaceWorker constructs (without attaching) the sync worker for
+// one workspace against remote: a fresh SyncRepository/SyncProcessor pair
+// and the Prepare/Bootstrap/ReviewSnapshot/PublishSnapshot/Progress hooks
+// every workspace sync worker needs. ConnectServer and attachWorkspaceSync
+// both call this so the hook wiring is defined once.
+func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model.ID, remote *transport.HTTP) (*coresync.Worker, *store.SyncRepository, error) {
+	repository, err := store.NewSyncRepository(value.DB(), "http")
+	if err != nil {
+		return nil, nil, err
+	}
 	processor, err := account.NewSyncProcessor(value, account.SyncProcessorOptions{})
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	var lastSnapshot uint64
 	var lastReviewed model.ID
@@ -975,6 +1000,29 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 		},
 	})
 	if err != nil {
+		return nil, nil, err
+	}
+	return worker, repository, nil
+}
+
+// attachWorkspaceSync builds a sync worker for workspaceID and swaps it into
+// s's live sync state, detaching whatever coordinator was previously
+// attached and making workspaceID the cached active workspace
+// (s.workspaceID) every workspace-scoped method resolves through
+// accountState. It requires sync to already be enabled (s.remote set by a
+// prior ConnectServer); ShareWorkspace, AcceptWorkspaceGrant, and
+// SetActiveWorkspace use this to redirect the running sync worker at a
+// different workspace without re-registering or re-diagnosing the server
+// connection.
+func (s *Service) attachWorkspaceSync(value *account.Account, workspaceID model.ID) error {
+	s.mu.Lock()
+	remote := s.remote
+	s.mu.Unlock()
+	if remote == nil {
+		return errors.New("mobileapi: server synchronization is disabled")
+	}
+	worker, repository, err := s.buildWorkspaceWorker(value, workspaceID, remote)
+	if err != nil {
 		return err
 	}
 	coordinator := coresync.NewCoordinator(s.root)
@@ -983,12 +1031,11 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 	}
 	s.mu.Lock()
 	previous := s.coordinator
-	s.coordinator, s.remote, s.repository = coordinator, remote, repository
+	s.workspaceID, s.coordinator, s.repository = workspaceID, coordinator, repository
 	s.mu.Unlock()
 	if previous != nil {
 		previous.Detach()
 	}
-	s.emit("sync_status", map[string]string{"status": "active"})
 	return nil
 }
 

@@ -58,6 +58,8 @@ const (
 	ErrCodeBackupCorrupt        = "backup_corrupt"
 	ErrCodeInsufficientSpace    = "insufficient_space"
 	ErrCodeAlreadyExists        = "already_exists"
+	ErrCodeWorkspaceNotHeld     = "workspace_not_held"
+	ErrCodeShareNotFound        = "share_not_found"
 	ErrCodeInternal             = "internal"
 )
 
@@ -90,6 +92,8 @@ func mapError(err error) error {
 		return &AppError{Code: ErrCodeNoLocalAccount, Message: "No local account exists at this location."}
 	case errors.Is(err, account.ErrUnknownWorkspace):
 		return &AppError{Code: ErrCodeUnknownWorkspace, Message: "Unknown workspace."}
+	case errors.Is(err, account.ErrAlreadyMember):
+		return &AppError{Code: ErrCodeAlreadyExists, Message: "This device already holds a different key for this workspace."}
 	case errors.Is(err, account.ErrBackupCorrupt):
 		return &AppError{Code: ErrCodeBackupCorrupt, Message: "This backup failed verification and cannot be restored."}
 	case errors.Is(err, account.ErrInsufficientBackupCapacity):

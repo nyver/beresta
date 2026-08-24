@@ -105,10 +105,14 @@ func (a *App) currentAccount() (*account.Account, error) {
 	return a.account, nil
 }
 
-// primaryWorkspace returns the current account's sole workspace ID.
-// Multi-workspace sharing (tasks.md phase 9) does not exist yet, so every
+// primaryWorkspace returns the current account's active workspace ID: every
 // bound method that is implicitly workspace-scoped resolves it this way
-// instead of asking the frontend to track and pass it.
+// instead of asking the frontend to track and pass it. Once an account holds
+// more than one workspace (see core/account.Account.ShareWorkspace /
+// AcceptWorkspaceShare), "active" is whichever one settings.ActiveWorkspaceID
+// names, chosen via SetActiveWorkspace or AcceptWorkspaceGrant; before either
+// has ever run, or if that preference no longer names a workspace this
+// account holds, it falls back to a deterministic pick.
 func (a *App) primaryWorkspace() (*account.Account, model.ID, error) {
 	acc, err := a.currentAccount()
 	if err != nil {
@@ -121,14 +125,33 @@ func (a *App) primaryWorkspace() (*account.Account, model.ID, error) {
 	if len(ids) == 0 {
 		return nil, model.ID{}, ErrLocked
 	}
-	return acc, primaryWorkspaceID(ids), nil
+	a.mu.Lock()
+	preferred := a.settings.ActiveWorkspaceID
+	a.mu.Unlock()
+	return acc, resolveActiveWorkspace(ids, preferred), nil
+}
+
+// resolveActiveWorkspace picks preferred out of ids when it names one of
+// them, else falls back to primaryWorkspaceID's deterministic pick. ids must
+// be non-empty.
+func resolveActiveWorkspace(ids []model.ID, preferred string) model.ID {
+	if preferred != "" {
+		if id, err := model.ParseIDString(preferred); err == nil {
+			for _, candidate := range ids {
+				if candidate == id {
+					return candidate
+				}
+			}
+		}
+	}
+	return primaryWorkspaceID(ids)
 }
 
 // primaryWorkspaceID picks one workspace ID deterministically out of ids
 // (the lexicographically smallest), so every caller that needs "the"
-// workspace - primaryWorkspace and describeAccount alike - agrees on the
-// same one for the lifetime of one unlocked account, even though
-// Account.Workspaces has no defined order. ids must be non-empty.
+// workspace agrees on the same one whenever no ActiveWorkspaceID preference
+// applies, even though Account.Workspaces has no defined order. ids must be
+// non-empty.
 func primaryWorkspaceID(ids []model.ID) model.ID {
 	workspaceID := ids[0]
 	for _, id := range ids[1:] {

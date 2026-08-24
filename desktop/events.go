@@ -18,6 +18,11 @@ const (
 	// quick-note hotkey is pressed or the tray menu's "Quick Note" item is
 	// selected, after the main window has already been shown/restored.
 	EventQuickNoteOpen = "quicknote:open"
+	// EventWorkspaceChanged carries no payload; it fires whenever
+	// SetActiveWorkspace or AcceptWorkspaceGrant changes which workspace is
+	// active, so the frontend knows to reload notes/notebooks/tags instead
+	// of showing state scoped to the previously active workspace.
+	EventWorkspaceChanged = "workspace:changed"
 )
 
 // emit forwards a Wails runtime event, but only once startup(ctx) has

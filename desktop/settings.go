@@ -55,6 +55,14 @@ type AppSettings struct {
 	SyncServerURL    string `json:"sync_server_url"`
 	SyncSecurityMode string `json:"sync_security_mode"`
 	SyncFingerprint  string `json:"sync_fingerprint"`
+	// ActiveWorkspaceID is which of the account's workspaces (see
+	// core/account.Account.Workspaces) bound methods act against, chosen via
+	// SetActiveWorkspace or AcceptWorkspaceGrant. Empty means "no preference
+	// yet"; primaryWorkspace falls back to a deterministic pick, and a value
+	// that no longer names a workspace this account holds (a stale
+	// preference from before a share was revoked, for example) falls back
+	// the same way rather than failing.
+	ActiveWorkspaceID string `json:"active_workspace_id"`
 }
 
 func defaultSettings() AppSettings {

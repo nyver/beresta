@@ -92,13 +92,50 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	if err := refreshRemoteDevices(ctx, acc, httpTransport); err != nil {
 		return ServerConnectionInfo{}, mapError(err)
 	}
-	repository, err := store.NewSyncRepository(acc.DB(), "http")
+	worker, repository, err := a.buildWorkspaceWorker(acc, workspaceID, httpTransport)
 	if err != nil {
 		return ServerConnectionInfo{}, mapError(err)
 	}
+
+	a.mu.Lock()
+	next := a.settings
+	next.SyncEnabled, next.SyncServerURL, next.SyncSecurityMode, next.SyncFingerprint = true, request.URL, request.SecurityMode, request.Fingerprint
+	a.mu.Unlock()
+	if err := next.validate(); err != nil {
+		return ServerConnectionInfo{}, err
+	}
+	if err := saveSettings(next); err != nil {
+		return ServerConnectionInfo{}, mapError(err)
+	}
+
+	coordinator := coresync.NewCoordinator(a.requestContext())
+	if err := coordinator.Attach(worker); err != nil {
+		return ServerConnectionInfo{}, mapError(err)
+	}
+	a.mu.Lock()
+	previous := a.syncCoordinator
+	a.settings, a.transport, a.httpTransport, a.syncCoordinator, a.syncRepository = next, httpTransport, httpTransport, coordinator, repository
+	a.mu.Unlock()
+	if previous != nil {
+		previous.Detach()
+	}
+	a.emit(EventSyncStatus, string(transport.StatusActive))
+	return ServerConnectionInfo{Enabled: true, URL: request.URL, SecurityMode: request.SecurityMode, Fingerprint: request.Fingerprint, Diagnostics: diagnostics}, nil
+}
+
+// buildWorkspaceWorker constructs (without attaching) the sync worker for
+// one workspace against httpTransport: a fresh SyncRepository/SyncProcessor
+// pair and the Prepare/Bootstrap/ReviewSnapshot/PublishSnapshot/Progress
+// hooks every workspace sync worker needs. ConnectServer, SetActiveWorkspace,
+// and AcceptWorkspaceGrant all call this so the hook wiring is defined once.
+func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, httpTransport *transport.HTTP) (*coresync.Worker, *store.SyncRepository, error) {
+	repository, err := store.NewSyncRepository(acc.DB(), "http")
+	if err != nil {
+		return nil, nil, err
+	}
 	processor, err := account.NewSyncProcessor(acc, account.SyncProcessorOptions{})
 	if err != nil {
-		return ServerConnectionInfo{}, mapError(err)
+		return nil, nil, err
 	}
 	var lastSnapshot uint64
 	var lastReviewed model.ID
@@ -173,33 +210,40 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 		},
 	})
 	if err != nil {
-		return ServerConnectionInfo{}, mapError(err)
+		return nil, nil, err
 	}
+	return worker, repository, nil
+}
 
+// attachWorkspaceSync builds a sync worker for workspaceID and swaps it into
+// a's live sync state, detaching whatever coordinator was previously
+// attached. It requires sync to already be enabled (a.httpTransport set by a
+// prior ConnectServer); SetActiveWorkspace and AcceptWorkspaceGrant use this
+// to redirect the running sync worker at a different workspace without
+// re-registering or re-diagnosing the server connection.
+func (a *App) attachWorkspaceSync(acc *account.Account, workspaceID model.ID) error {
 	a.mu.Lock()
-	next := a.settings
-	next.SyncEnabled, next.SyncServerURL, next.SyncSecurityMode, next.SyncFingerprint = true, request.URL, request.SecurityMode, request.Fingerprint
+	httpTransport := a.httpTransport
 	a.mu.Unlock()
-	if err := next.validate(); err != nil {
-		return ServerConnectionInfo{}, err
+	if httpTransport == nil {
+		return &AppError{Code: ErrCodeInvalidInput, Message: "server synchronization is disabled"}
 	}
-	if err := saveSettings(next); err != nil {
-		return ServerConnectionInfo{}, mapError(err)
+	worker, repository, err := a.buildWorkspaceWorker(acc, workspaceID, httpTransport)
+	if err != nil {
+		return mapError(err)
 	}
-
 	coordinator := coresync.NewCoordinator(a.requestContext())
 	if err := coordinator.Attach(worker); err != nil {
-		return ServerConnectionInfo{}, mapError(err)
+		return mapError(err)
 	}
 	a.mu.Lock()
 	previous := a.syncCoordinator
-	a.settings, a.transport, a.httpTransport, a.syncCoordinator, a.syncRepository = next, httpTransport, httpTransport, coordinator, repository
+	a.syncCoordinator, a.syncRepository = coordinator, repository
 	a.mu.Unlock()
 	if previous != nil {
 		previous.Detach()
 	}
-	a.emit(EventSyncStatus, string(transport.StatusActive))
-	return ServerConnectionInfo{Enabled: true, URL: request.URL, SecurityMode: request.SecurityMode, Fingerprint: request.Fingerprint, Diagnostics: diagnostics}, nil
+	return nil
 }
 
 func refreshRemoteDevices(ctx context.Context, acc *account.Account, remote *transport.HTTP) error {

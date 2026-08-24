@@ -34,6 +34,7 @@ import {
   ListSyncDevices,
   ListSyncQuarantine,
   ListTags,
+  ListWorkspaceMembers,
   ListWorkspaces,
   LockAccount,
   MoveNotebook,
@@ -52,6 +53,7 @@ import {
   RestoreWhole,
   RetrySyncQuarantine,
   RevokeSyncDevice,
+  RevokeWorkspaceMember,
   RevisionMarkdown,
   SaveAttachmentToFile,
   Search,
@@ -252,6 +254,13 @@ export interface WorkspaceSummary {
   member_count?: number;
 }
 
+export interface WorkspaceMember {
+  user_id: string;
+  display_name: string;
+  role: string;
+  revoked_at?: string;
+}
+
 /**
  * exportIdentity returns this account's own beresta://identity code: paste
  * it to whoever owns a workspace you want to join, so they can call
@@ -285,6 +294,14 @@ export async function acceptWorkspaceGrant(
 
 export async function listWorkspaces(): Promise<WorkspaceSummary[]> {
   return ListWorkspaces() as Promise<WorkspaceSummary[]>;
+}
+
+export async function listWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]> {
+  return ListWorkspaceMembers(workspaceId) as Promise<WorkspaceMember[]>;
+}
+
+export async function revokeWorkspaceMember(workspaceId: string, memberUserId: string): Promise<void> {
+  await RevokeWorkspaceMember(workspaceId, memberUserId);
 }
 
 export async function setActiveWorkspace(workspaceId: string): Promise<void> {

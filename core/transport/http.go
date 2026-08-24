@@ -129,6 +129,13 @@ func (h *HTTP) Status(context.Context) Status {
 	return h.status
 }
 
+// BeginSync marks a newly attached workspace worker as active until it has
+// completed its first cycle. This prevents a previous workspace's "current"
+// status from being presented as the initial state of a different workspace.
+func (h *HTTP) BeginSync() {
+	h.setStatus(StatusActive)
+}
+
 func (h *HTTP) Pull(ctx context.Context, workspaceID model.ID, cursor coresync.Cursor, limit int) (coresync.PullPage, error) {
 	if limit <= 0 || limit > h.config.MaxOperationsPerBatch {
 		return coresync.PullPage{}, errors.New("transport: invalid pull limit")

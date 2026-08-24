@@ -998,6 +998,7 @@ class _ServerSheetState extends State<ServerSheet> {
   String? copied;
   bool sharingBusy = false;
   String syncStatusValue = "disabled";
+  List<Map<String, dynamic>> workspaces = const [];
   Timer? syncStatusTimer;
 
   @override
@@ -1026,6 +1027,7 @@ class _ServerSheetState extends State<ServerSheet> {
           // No account context yet - the form simply stays empty.
         });
     refreshSyncStatus();
+    loadWorkspaces();
     syncStatusTimer = Timer.periodic(
       const Duration(seconds: 3),
       (_) => refreshSyncStatus(),
@@ -1039,6 +1041,28 @@ class _ServerSheetState extends State<ServerSheet> {
     } catch (_) {
       // Keep showing the last known status; the periodic timer retries.
     }
+  }
+
+  Future<void> loadWorkspaces() async {
+    try {
+      final values = await widget.gateway.listWorkspaces();
+      if (mounted) setState(() => workspaces = values);
+    } catch (_) {
+      // The account may not be unlocked yet. Keep any already loaded list
+      // visible and retry the next time this sheet is opened.
+    }
+  }
+
+  Future<bool> waitForInitialWorkspaceSync() async {
+    for (var attempt = 0; attempt < 30; attempt++) {
+      final status = await widget.gateway.syncStatus();
+      if (status == "current") return true;
+      if (status == "offline" || status == "failed" || status == "disabled") {
+        return false;
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    return false;
   }
 
   @override
@@ -1141,6 +1165,39 @@ class _ServerSheetState extends State<ServerSheet> {
                     },
             child: Text(widget.strings("disconnect")),
           ),
+          if (workspaces.isNotEmpty) ...[
+            const Divider(height: 32),
+            Text(
+              widget.strings("workspaces"),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            for (final workspace in workspaces)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  workspace["active"] == true
+                      ? Icons.folder_shared
+                      : Icons.folder_outlined,
+                ),
+                title: Text(workspace["workspace_id"] as String),
+                subtitle: Text(
+                  "${workspace["role"] == "owner" ? widget.strings("workspace_owner") : widget.strings("workspace_member")}"
+                  " · ${workspace["member_count"] ?? 0} ${widget.strings("workspace_members")}",
+                ),
+                trailing:
+                    workspace["active"] == true
+                        ? Text(widget.strings("workspace_active"))
+                        : TextButton(
+                          onPressed:
+                              sharingBusy
+                                  ? null
+                                  : () => setActiveWorkspace(
+                                    workspace["workspace_id"] as String,
+                                  ),
+                          child: Text(widget.strings("workspace_switch")),
+                        ),
+              ),
+          ],
           const Divider(height: 32),
           Text(
             widget.strings("your_identity"),
@@ -1239,9 +1296,38 @@ class _ServerSheetState extends State<ServerSheet> {
     });
     try {
       await widget.gateway.acceptWorkspaceGrant(peerGrant.text.trim());
+      final synchronized = await waitForInitialWorkspaceSync();
+      if (!mounted) return;
+      setState(() => peerGrant.clear());
+      await loadWorkspaces();
+      if (!mounted) return;
+      if (synchronized && context.mounted) Navigator.pop(context);
+      if (!synchronized) {
+        setState(() => error = widget.strings("workspace_sync_pending"));
+      }
+    } catch (failure) {
       if (mounted) {
-        setState(() => peerGrant.clear());
-        if (context.mounted) Navigator.pop(context);
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    } finally {
+      if (mounted) setState(() => sharingBusy = false);
+    }
+  }
+
+  Future<void> setActiveWorkspace(String workspaceID) async {
+    setState(() {
+      sharingBusy = true;
+      error = null;
+    });
+    try {
+      await widget.gateway.setActiveWorkspace(workspaceID);
+      final synchronized = await waitForInitialWorkspaceSync();
+      await loadWorkspaces();
+      if (synchronized && mounted && context.mounted) {
+        Navigator.pop(context);
+      }
+      if (!synchronized && mounted) {
+        setState(() => error = widget.strings("workspace_sync_pending"));
       }
     } catch (failure) {
       if (mounted) {
@@ -1265,6 +1351,7 @@ class _ServerSheetState extends State<ServerSheet> {
         "security_mode": securityMode,
         "device_name": "Android",
       });
+      await loadWorkspaces();
       if (mounted) Navigator.pop(context);
     } catch (failure) {
       if (mounted) {

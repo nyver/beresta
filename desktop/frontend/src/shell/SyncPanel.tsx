@@ -8,7 +8,9 @@ import {
   exportIdentity,
   listSyncDevices,
   listSyncQuarantine,
+  listWorkspaceMembers,
   listWorkspaces,
+  revokeWorkspaceMember,
   retrySyncQuarantine,
   revokeSyncDevice,
   setActiveWorkspace,
@@ -19,6 +21,7 @@ import {
   type SyncDevice,
   type SyncStatusValue,
   type WorkspaceSummary,
+  type WorkspaceMember,
   unwrapError,
 } from "../api";
 import { useI18n } from "../i18n";
@@ -55,6 +58,7 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
   const [quarantine, setQuarantine] = useState<QuarantineEntry[]>([]);
   const [identityCode, setIdentityCode] = useState("");
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [workspaceMembers, setWorkspaceMembers] = useState<Record<string, WorkspaceMember[]>>({});
   const [peerIdentityCode, setPeerIdentityCode] = useState("");
   const [grantCode, setGrantCode] = useState("");
   const [peerGrantCode, setPeerGrantCode] = useState("");
@@ -67,6 +71,7 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
       setQuarantine([]);
       setDiagnostics(null);
       setWorkspaces([]);
+      setWorkspaceMembers({});
       setIdentityCode("");
       return;
     }
@@ -82,6 +87,17 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
     setQuarantine(Array.isArray(journalRows) ? journalRows : []);
     setIdentityCode(typeof identity === "string" ? identity : "");
     setWorkspaces(Array.isArray(workspaceRows) ? workspaceRows : []);
+    const owned = Array.isArray(workspaceRows)
+      ? workspaceRows.filter((workspace) => workspace.role === "owner")
+      : [];
+    const memberRows = await Promise.all(owned.map(async (workspace) => [
+      workspace.workspace_id,
+      await listWorkspaceMembers(workspace.workspace_id).catch(() => []),
+    ] as const));
+    setWorkspaceMembers(Object.fromEntries(memberRows.map(([workspaceId, members]) => [
+      workspaceId,
+      Array.isArray(members) ? members : [],
+    ])));
   }, []);
 
   const loadStatus = useCallback(() => {
@@ -141,6 +157,17 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
       await setActiveWorkspace(workspaceId);
       loadStatus();
       onWorkspaceChanged?.();
+    } catch (thrown) {
+      setError(errorMessage(unwrapError(thrown)));
+    } finally { setSharingBusy(false); }
+  }
+
+  async function handleRevokeWorkspaceMember(workspaceId: string, memberUserId: string) {
+    setSharingBusy(true);
+    setError(null);
+    try {
+      await revokeWorkspaceMember(workspaceId, memberUserId);
+      await loadStatus();
     } catch (thrown) {
       setError(errorMessage(unwrapError(thrown)));
     } finally { setSharingBusy(false); }
@@ -239,23 +266,40 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
         <section aria-labelledby="sync-workspaces-title">
           <h3 id="sync-workspaces-title">{t("sync.workspaces_title")}</h3>
           {workspaces.map((workspace) => (
-            <div className="sync-device-row" key={workspace.workspace_id}>
-              <div>
-                <strong>
-                  {t(`sync.workspace_role_${workspace.role === "owner" || workspace.role === "member" ? workspace.role : "unknown"}`)}
-                </strong>
-                <code>{workspace.workspace_id}</code>
-                {typeof workspace.member_count === "number" && (
-                  <p>{workspace.member_count} {t("sync.workspace_members_label")}</p>
+            <div key={workspace.workspace_id}>
+              <div className="sync-device-row">
+                <div>
+                  <strong>
+                    {t(`sync.workspace_role_${workspace.role === "owner" || workspace.role === "member" ? workspace.role : "unknown"}`)}
+                  </strong>
+                  <code>{workspace.workspace_id}</code>
+                  {typeof workspace.member_count === "number" && (
+                    <p>{workspace.member_count} {t("sync.workspace_members_label")}</p>
+                  )}
+                </div>
+                {workspace.active ? (
+                  <span>{t("sync.workspace_active_badge")}</span>
+                ) : (
+                  <button type="button" disabled={sharingBusy} onClick={() => void handleSwitchWorkspace(workspace.workspace_id)}>
+                    {t("sync.workspace_switch_button")}
+                  </button>
                 )}
               </div>
-              {workspace.active ? (
-                <span>{t("sync.workspace_active_badge")}</span>
-              ) : (
-                <button type="button" disabled={sharingBusy} onClick={() => void handleSwitchWorkspace(workspace.workspace_id)}>
-                  {t("sync.workspace_switch_button")}
-                </button>
-              )}
+              {workspace.role === "owner" && workspaceMembers[workspace.workspace_id]
+                ?.filter((member) => !member.revoked_at)
+                .map((member) => (
+                  <div className="sync-device-row" key={member.user_id}>
+                    <div>
+                      <strong>{member.display_name || t("sync.workspace_client_unnamed")}</strong>
+                      <code>{member.user_id}</code>
+                    </div>
+                    {member.role === "owner" ? <span>{t("sync.workspace_owner_badge")}</span> : (
+                      <button type="button" disabled={sharingBusy} onClick={() => void handleRevokeWorkspaceMember(workspace.workspace_id, member.user_id)}>
+                        {t("sync.workspace_remove_member_button")}
+                      </button>
+                    )}
+                  </div>
+                ))}
             </div>
           ))}
 

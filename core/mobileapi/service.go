@@ -928,7 +928,7 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 			return err
 		}
 	}
-	if err := refreshMobileDevices(ctx, value, remote); err != nil {
+	if err := refreshMobileDevices(ctx, value, remote, workspaceID); err != nil {
 		return err
 	}
 	worker, repository, err := s.buildWorkspaceWorker(value, workspaceID, remote)
@@ -936,6 +936,7 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 		return err
 	}
 	coordinator := coresync.NewCoordinator(s.root)
+	remote.BeginSync()
 	if err := coordinator.Attach(worker); err != nil {
 		return err
 	}
@@ -988,9 +989,9 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 	var lastSnapshot uint64
 	var lastReviewed model.ID
 	worker, err := coresync.NewWorker(workspaceID, repository, remote, processor, coresync.WorkerOptions{
-		Prepare: func(ctx context.Context) error { return refreshMobileDevices(ctx, value, remote) },
+		Prepare: func(ctx context.Context) error { return refreshMobileDevices(ctx, value, remote, workspaceID) },
 		Bootstrap: func(ctx context.Context) error {
-			if err := refreshMobileDevices(ctx, value, remote); err != nil {
+			if err := refreshMobileDevices(ctx, value, remote, workspaceID); err != nil {
 				return err
 			}
 			snapshot, err := remote.LatestSnapshot(ctx, workspaceID)
@@ -1085,6 +1086,7 @@ func (s *Service) attachWorkspaceSync(value *account.Account, workspaceID model.
 		return err
 	}
 	coordinator := coresync.NewCoordinator(s.root)
+	remote.BeginSync()
 	if err := coordinator.Attach(worker); err != nil {
 		return err
 	}
@@ -1252,8 +1254,11 @@ func coalesce(actual, fallback error) error {
 	return fallback
 }
 
-func refreshMobileDevices(ctx context.Context, value *account.Account, remote *transport.HTTP) error {
-	rows, err := remote.ListDevices(ctx)
+func refreshMobileDevices(ctx context.Context, value *account.Account, remote *transport.HTTP, workspaceID model.ID) error {
+	// Shared-workspace operations are signed by every member's device. The
+	// account-wide device list contains only this user's devices and therefore
+	// cannot authenticate operations received from another workspace member.
+	rows, err := remote.ListWorkspaceMemberDevices(ctx, workspaceID.String())
 	if err != nil {
 		return err
 	}

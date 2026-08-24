@@ -22,6 +22,16 @@ type WorkspaceSummaryDTO struct {
 	MemberCount int    `json:"member_count,omitempty"`
 }
 
+// WorkspaceMemberDTO is one account with current or historical access to a
+// workspace. A removed member remains in the response as a revoked row so
+// the owner can see that access was intentionally withdrawn.
+type WorkspaceMemberDTO struct {
+	UserID      string     `json:"user_id"`
+	DisplayName string     `json:"display_name"`
+	Role        string     `json:"role"`
+	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
+}
+
 // ExportIdentity returns this account's identity as a beresta://identity
 // code: paste it to whoever owns a workspace you want to join, so they can
 // call ShareWorkspace with it.
@@ -140,7 +150,7 @@ func (a *App) AcceptWorkspaceGrant(grantCode string) (WorkspaceSummaryDTO, error
 
 	summary := WorkspaceSummaryDTO{WorkspaceID: workspaceID.String(), Active: true, Role: "unknown"}
 	if members, err := httpTransport.ListMembers(ctx, workspaceID.String()); err == nil {
-		summary.Role, summary.MemberCount = transport.SelfRole(members, acc.ID.String()), len(members)
+		summary.Role, summary.MemberCount = transport.SelfRole(members, acc.ID.String()), transport.ActiveMemberCount(members)
 	}
 	return summary, nil
 }
@@ -173,12 +183,69 @@ func (a *App) ListWorkspaces() ([]WorkspaceSummaryDTO, error) {
 		summary := WorkspaceSummaryDTO{WorkspaceID: id.String(), Active: id == activeID, Role: "unknown"}
 		if httpTransport != nil {
 			if members, err := httpTransport.ListMembers(ctx, id.String()); err == nil {
-				summary.Role, summary.MemberCount = transport.SelfRole(members, acc.ID.String()), len(members)
+				summary.Role, summary.MemberCount = transport.SelfRole(members, acc.ID.String()), transport.ActiveMemberCount(members)
 			}
 		}
 		summaries[i] = summary
 	}
 	return summaries, nil
+}
+
+// ListWorkspaceMembers returns the accounts connected to a workspace. The
+// server authorizes this only for an active workspace member; owners can use
+// RevokeWorkspaceMember to remove a non-owner account's future sync access.
+func (a *App) ListWorkspaceMembers(workspaceID string) ([]WorkspaceMemberDTO, error) {
+	if _, err := a.currentAccount(); err != nil {
+		return nil, mapError(err)
+	}
+	if _, err := parseID(workspaceID); err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	httpTransport := a.httpTransport
+	a.mu.Unlock()
+	if httpTransport == nil {
+		return nil, &AppError{Code: ErrCodeInvalidInput, Message: "Server synchronization is disabled."}
+	}
+	ctx, cancel := context.WithTimeout(a.requestContext(), 15*time.Second)
+	defer cancel()
+	members, err := httpTransport.ListMembers(ctx, workspaceID)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := make([]WorkspaceMemberDTO, len(members))
+	for i, member := range members {
+		result[i] = WorkspaceMemberDTO{UserID: member.UserID, DisplayName: member.DisplayName, Role: member.Role, RevokedAt: member.RevokedAt}
+	}
+	return result, nil
+}
+
+// RevokeWorkspaceMember removes a non-owner account from workspaceID. It
+// blocks that account's subsequent server synchronization; it cannot erase
+// notes or keys the account downloaded before removal.
+func (a *App) RevokeWorkspaceMember(workspaceID, memberUserID string) error {
+	if _, err := a.currentAccount(); err != nil {
+		return mapError(err)
+	}
+	if _, err := parseID(workspaceID); err != nil {
+		return err
+	}
+	if _, err := parseID(memberUserID); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	httpTransport := a.httpTransport
+	a.mu.Unlock()
+	if httpTransport == nil {
+		return &AppError{Code: ErrCodeInvalidInput, Message: "Server synchronization is disabled."}
+	}
+	ctx, cancel := context.WithTimeout(a.requestContext(), 30*time.Second)
+	defer cancel()
+	if err := httpTransport.RevokeMember(ctx, workspaceID, memberUserID); err != nil {
+		return mapError(err)
+	}
+	a.emit(EventWorkspaceChanged)
+	return nil
 }
 
 // SetActiveWorkspace changes which of the account's workspaces bound methods

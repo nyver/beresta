@@ -136,6 +136,42 @@ func TestServiceWorkspaceSharingAcrossTwoAccounts(t *testing.T) {
 		t.Fatal("expected the newly accepted workspace to become active")
 	}
 	sharedWorkspaceID := summary.WorkspaceID
+	if _, err := owner.CreateNote("create-shared-note", "", "Shared from desktop"); err != nil {
+		t.Fatalf("CreateNote(shared): %v", err)
+	}
+	if err := owner.SyncNow(); err != nil {
+		t.Fatalf("owner SyncNow: %v", err)
+	}
+	if err := joiner.SyncNow(); err != nil {
+		t.Fatalf("joiner SyncNow: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	sharedNoteReceived := false
+	for !sharedNoteReceived {
+		joinedNotesJSON, err := joiner.ListNotes("list-shared-notes")
+		if err != nil {
+			t.Fatalf("ListNotes(shared): %v", err)
+		}
+		for _, note := range decodeJSON[[]map[string]any](t, joinedNotesJSON) {
+			if note["title"] == "Shared from desktop" {
+				sharedNoteReceived = true
+				break
+			}
+		}
+		if sharedNoteReceived {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("shared note was not synchronized to the joining mobile service")
+		}
+		if err := owner.SyncNow(); err != nil {
+			t.Fatalf("owner SyncNow retry: %v", err)
+		}
+		if err := joiner.SyncNow(); err != nil {
+			t.Fatalf("joiner SyncNow retry: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 
 	joinerWorkspacesJSON, err := joiner.ListWorkspaces("list-joiner")
 	if err != nil {

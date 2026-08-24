@@ -743,6 +743,25 @@ export namespace main {
 	    }
 	}
 
+	export class WorkspaceMemberDTO {
+	    user_id: string;
+	    display_name: string;
+	    role: string;
+	    revoked_at?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceMemberDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.user_id = source["user_id"];
+	        this.display_name = source["display_name"];
+	        this.role = source["role"];
+	        this.revoked_at = source["revoked_at"];
+	    }
+	}
+
 }
 
 export namespace transport {
@@ -811,4 +830,3 @@ export namespace transport {
 	}
 
 }
-

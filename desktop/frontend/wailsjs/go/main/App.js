@@ -146,6 +146,10 @@ export function ListTags() {
   return window['go']['main']['App']['ListTags']();
 }
 
+export function ListWorkspaceMembers(arg1) {
+  return window['go']['main']['App']['ListWorkspaceMembers'](arg1);
+}
+
 export function ListWorkspaces() {
   return window['go']['main']['App']['ListWorkspaces']();
 }
@@ -228,6 +232,10 @@ export function RevisionMarkdown(arg1, arg2) {
 
 export function RevokeSyncDevice(arg1) {
   return window['go']['main']['App']['RevokeSyncDevice'](arg1);
+}
+
+export function RevokeWorkspaceMember(arg1, arg2) {
+  return window['go']['main']['App']['RevokeWorkspaceMember'](arg1, arg2);
 }
 
 export function RunGarbageCollection(arg1) {

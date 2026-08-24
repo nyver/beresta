@@ -140,6 +140,32 @@ func TestWorkspaceSharingAcrossTwoAccounts(t *testing.T) {
 		ownerWorkspaces[0].Role != "owner" || ownerWorkspaces[0].MemberCount != 2 {
 		t.Fatalf("owner workspaces = %+v", ownerWorkspaces)
 	}
+	members, err := owner.ListWorkspaceMembers(sharedWorkspaceID)
+	if err != nil {
+		t.Fatalf("ListWorkspaceMembers: %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("workspace members = %+v, want two active members", members)
+	}
+	var joinerMemberID string
+	for _, member := range members {
+		if member.Role == "member" && member.RevokedAt == nil {
+			joinerMemberID = member.UserID
+		}
+	}
+	if joinerMemberID == "" {
+		t.Fatalf("workspace members = %+v, want active joiner", members)
+	}
+	if err := owner.RevokeWorkspaceMember(sharedWorkspaceID, joinerMemberID); err != nil {
+		t.Fatalf("RevokeWorkspaceMember: %v", err)
+	}
+	ownerWorkspaces, err = owner.ListWorkspaces()
+	if err != nil {
+		t.Fatalf("ListWorkspaces(owner after removal): %v", err)
+	}
+	if ownerWorkspaces[0].MemberCount != 1 {
+		t.Fatalf("active member count after removal = %d, want 1", ownerWorkspaces[0].MemberCount)
+	}
 
 	if err := joiner.SetActiveWorkspace(joinerOwnWorkspaceID); err != nil {
 		t.Fatalf("SetActiveWorkspace(own): %v", err)

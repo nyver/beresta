@@ -131,6 +131,19 @@ func SelfRole(members []RemoteMember, selfUserID string) string {
 	return "unknown"
 }
 
+// ActiveMemberCount returns the number of members that still hold access to
+// a workspace. ListMembers also includes historical, revoked rows so clients
+// can distinguish a removed member from a transiently missing response.
+func ActiveMemberCount(members []RemoteMember) int {
+	count := 0
+	for _, member := range members {
+		if member.RevokedAt == nil {
+			count++
+		}
+	}
+	return count
+}
+
 // GetKeyEnvelopes returns every envelope the server has stored for this
 // device's user in one workspace, current and historical.
 func (h *HTTP) GetKeyEnvelopes(ctx context.Context, workspaceID string) ([]RemoteKeyEnvelope, error) {

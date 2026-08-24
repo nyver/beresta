@@ -89,7 +89,7 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	if !diagnostics.Reachable || !diagnostics.Authenticated {
 		return ServerConnectionInfo{}, mapError(errors.New("server connection diagnostics failed: " + diagnostics.ErrorClass))
 	}
-	if err := refreshRemoteDevices(ctx, acc, httpTransport); err != nil {
+	if err := refreshRemoteDevices(ctx, acc, httpTransport, workspaceID); err != nil {
 		return ServerConnectionInfo{}, mapError(err)
 	}
 	worker, repository, err := a.buildWorkspaceWorker(acc, workspaceID, httpTransport)
@@ -109,6 +109,7 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	}
 
 	coordinator := coresync.NewCoordinator(a.requestContext())
+	httpTransport.BeginSync()
 	if err := coordinator.Attach(worker); err != nil {
 		return ServerConnectionInfo{}, mapError(err)
 	}
@@ -140,9 +141,9 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 	var lastSnapshot uint64
 	var lastReviewed model.ID
 	worker, err := coresync.NewWorker(workspaceID, repository, httpTransport, processor, coresync.WorkerOptions{
-		Prepare: func(ctx context.Context) error { return refreshRemoteDevices(ctx, acc, httpTransport) },
+		Prepare: func(ctx context.Context) error { return refreshRemoteDevices(ctx, acc, httpTransport, workspaceID) },
 		Bootstrap: func(ctx context.Context) error {
-			if err := refreshRemoteDevices(ctx, acc, httpTransport); err != nil {
+			if err := refreshRemoteDevices(ctx, acc, httpTransport, workspaceID); err != nil {
 				return err
 			}
 			snapshot, err := httpTransport.LatestSnapshot(ctx, workspaceID)
@@ -233,6 +234,7 @@ func (a *App) attachWorkspaceSync(acc *account.Account, workspaceID model.ID) er
 		return mapError(err)
 	}
 	coordinator := coresync.NewCoordinator(a.requestContext())
+	httpTransport.BeginSync()
 	if err := coordinator.Attach(worker); err != nil {
 		return mapError(err)
 	}
@@ -246,8 +248,11 @@ func (a *App) attachWorkspaceSync(acc *account.Account, workspaceID model.ID) er
 	return nil
 }
 
-func refreshRemoteDevices(ctx context.Context, acc *account.Account, remote *transport.HTTP) error {
-	rows, err := remote.ListDevices(ctx)
+func refreshRemoteDevices(ctx context.Context, acc *account.Account, remote *transport.HTTP, workspaceID model.ID) error {
+	// Operations in a shared workspace can be signed by any member's device,
+	// not just another device owned by this account. Refresh the workspace
+	// device directory before every pull so those signatures can be verified.
+	rows, err := remote.ListWorkspaceMemberDevices(ctx, workspaceID.String())
 	if err != nil {
 		return err
 	}

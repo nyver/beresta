@@ -51,6 +51,7 @@ export function mockSyncStatus(status = "disabled") {
   appMock.ListSyncDevices.mockResolvedValue([]);
   appMock.ListSyncQuarantine.mockResolvedValue([]);
   appMock.ExportIdentity.mockResolvedValue("beresta://identity?user=test&key=00");
+  appMock.ListWorkspaceMembers.mockResolvedValue([]);
   appMock.ListWorkspaces.mockResolvedValue([]);
 }
 

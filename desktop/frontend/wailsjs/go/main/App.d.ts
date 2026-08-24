@@ -75,6 +75,8 @@ export function ListSyncQuarantine():Promise<Array<main.SyncQuarantineDTO>>;
 
 export function ListTags():Promise<Array<main.TagDTO>>;
 
+export function ListWorkspaceMembers(arg1:string):Promise<Array<main.WorkspaceMemberDTO>>;
+
 export function ListWorkspaces():Promise<Array<main.WorkspaceSummaryDTO>>;
 
 export function LockAccount():Promise<void>;
@@ -116,6 +118,8 @@ export function RetrySyncQuarantine(arg1:string):Promise<void>;
 export function RevisionMarkdown(arg1:string,arg2:string):Promise<string>;
 
 export function RevokeSyncDevice(arg1:string):Promise<void>;
+
+export function RevokeWorkspaceMember(arg1:string,arg2:string):Promise<void>;
 
 export function RunGarbageCollection(arg1:boolean):Promise<main.GCReportDTO>;
 

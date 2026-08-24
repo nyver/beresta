@@ -15,6 +15,15 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
+
+# Regenerates android/app/src/main/res/mipmap-*/ic_launcher.png from the
+# canonical brand icon (kept in sync with /icon.png and
+# desktop/assets/appicon.png). Re-run `dart run flutter_launcher_icons`
+# after replacing assets/icon/appicon.png.
+flutter_launcher_icons:
+  android: true
+  image_path: "assets/icon/appicon.png"

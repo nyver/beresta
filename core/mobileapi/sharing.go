@@ -132,7 +132,7 @@ func (s *Service) AcceptWorkspaceGrant(requestID, grantCode string) (string, err
 
 	summary := workspaceSummary{WorkspaceID: workspaceID.String(), Active: true, Role: "unknown"}
 	if members, err := remote.ListMembers(ctx, workspaceID.String()); err == nil {
-		summary.Role, summary.MemberCount = transport.SelfRole(members, value.ID.String()), len(members)
+		summary.Role, summary.MemberCount = transport.SelfRole(members, value.ID.String()), transport.ActiveMemberCount(members)
 	}
 	return marshal(summary)
 }
@@ -166,7 +166,7 @@ func (s *Service) ListWorkspaces(requestID string) (string, error) {
 		summary := workspaceSummary{WorkspaceID: id.String(), Active: id == activeID, Role: "unknown"}
 		if remote != nil {
 			if members, err := remote.ListMembers(ctx, id.String()); err == nil {
-				summary.Role, summary.MemberCount = transport.SelfRole(members, value.ID.String()), len(members)
+				summary.Role, summary.MemberCount = transport.SelfRole(members, value.ID.String()), transport.ActiveMemberCount(members)
 			}
 		}
 		summaries[i] = summary

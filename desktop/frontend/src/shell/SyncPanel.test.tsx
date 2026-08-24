@@ -154,4 +154,30 @@ describe("SyncPanel", () => {
 
     expect(appMock.SetActiveWorkspace).toHaveBeenCalledWith("shared-workspace");
   });
+
+  it("lets an owner disconnect an active workspace client", async () => {
+    mockLocaleCatalog();
+    mockSyncStatus("active");
+    appMock.ListWorkspaces.mockResolvedValue([
+      { workspace_id: "own-workspace", role: "owner", active: true, member_count: 2 },
+    ]);
+    appMock.ListWorkspaceMembers.mockResolvedValue([
+      { user_id: "owner-id", display_name: "Desktop owner", role: "owner" },
+      { user_id: "mobile-id", display_name: "Mobile client", role: "member" },
+    ]);
+    render(
+      <I18nProvider>
+        <SyncPanel deviceId="device-123" />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Mobile client")).toBeInTheDocument();
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: "sync.workspace_remove_member_button" }),
+    );
+    expect(appMock.RevokeWorkspaceMember).toHaveBeenCalledWith(
+      "own-workspace",
+      "mobile-id",
+    );
+  });
 });

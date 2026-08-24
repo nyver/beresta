@@ -22,6 +22,27 @@ accepts an invite code plus either a pinned SHA-256 certificate fingerprint or
 a certificate trusted by Android. Disabling the server removes only runtime
 transport state; the local collection and queued operations remain intact.
 
+Each invite code registers its own independent workspace, so connecting a
+second device with its own invite gives it its own empty collection on the
+same server rather than the notes already on another device. To see the same
+notes on two devices instead, both must first connect to the same server (each
+with its own invite code), then share the workspace between them:
+
+1. On the device joining an existing workspace, open the server sheet and
+   copy "Your identity code".
+2. Send that code to whoever owns the workspace, over any channel you trust
+   (the code identifies the joining device but reveals nothing about its
+   notes).
+3. On the owning device, paste the code into "Share this workspace" and copy
+   the resulting grant code back to the joining device.
+4. On the joining device, paste the grant code into "Join a shared
+   workspace." That workspace becomes active for the rest of this session,
+   alongside the device's own original one.
+
+This makes the joining device a workspace member (not the workspace owner),
+matching the up-to-five-user household model. Only the owner can share a
+workspace it holds.
+
 The backup action first asks for an Android document-tree destination. Beresta
 creates and verifies the encrypted backup in private storage, copies it through
 Storage Access Framework under a staging name, and publishes it only after all

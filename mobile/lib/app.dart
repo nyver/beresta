@@ -3,7 +3,8 @@ import "dart:typed_data";
 
 import "package:flutter/foundation.dart" show kDebugMode;
 import "package:flutter/material.dart";
-import "package:flutter/services.dart" show PlatformException;
+import "package:flutter/services.dart"
+    show Clipboard, ClipboardData, PlatformException;
 import "package:flutter_markdown_plus/flutter_markdown_plus.dart";
 
 import "core_gateway.dart";
@@ -454,8 +455,9 @@ class _NotesShellState extends State<NotesShell> {
                   (selectedNotebook == null ||
                       note["notebook_id"] == selectedNotebook) &&
                   (selectedTag == null ||
-                      (note["tag_ids"] as List<dynamic>? ?? const [])
-                          .contains(selectedTag)),
+                      (note["tag_ids"] as List<dynamic>? ?? const []).contains(
+                        selectedTag,
+                      )),
             )
             .toList();
     return Scaffold(
@@ -690,6 +692,10 @@ class _NotesShellState extends State<NotesShell> {
       builder:
           (_) => ServerSheet(gateway: widget.gateway, strings: widget.strings),
     );
+    // Joining or switching a shared workspace (below, inside ServerSheet)
+    // changes which notes/notebooks are visible, so refresh unconditionally
+    // rather than trying to track whether that actually happened.
+    await refresh();
   }
 
   List<Widget> notebookTree() {
@@ -925,15 +931,37 @@ class _ServerSheetState extends State<ServerSheet> {
   final url = TextEditingController();
   final invite = TextEditingController();
   final fingerprint = TextEditingController();
+  final peerIdentity = TextEditingController();
+  final peerGrant = TextEditingController();
   String securityMode = "pinned";
   String? error;
   bool busy = false;
+  String identityCode = "";
+  String grantCode = "";
+  String? copied;
+  bool sharingBusy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.gateway
+        .exportIdentity()
+        .then((code) {
+          if (mounted) setState(() => identityCode = code);
+        })
+        .catchError((_) {
+          // No account/server context yet - the identity section simply
+          // stays empty until this sheet is reopened after connecting.
+        });
+  }
 
   @override
   void dispose() {
     url.dispose();
     invite.dispose();
     fingerprint.dispose();
+    peerIdentity.dispose();
+    peerGrant.dispose();
     super.dispose();
   }
 
@@ -1008,9 +1036,115 @@ class _ServerSheetState extends State<ServerSheet> {
                     },
             child: Text(widget.strings("disconnect")),
           ),
+          const Divider(height: 32),
+          Text(
+            widget.strings("your_identity"),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          Text(widget.strings("your_identity_hint")),
+          SelectableText(identityCode),
+          TextButton(
+            onPressed:
+                identityCode.isEmpty
+                    ? null
+                    : () => copyToClipboard(identityCode),
+            child: Text(
+              widget.strings(copied == identityCode ? "copied" : "copy"),
+            ),
+          ),
+          const Divider(height: 32),
+          Text(
+            widget.strings("share_workspace"),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          TextField(
+            controller: peerIdentity,
+            decoration: InputDecoration(
+              labelText: widget.strings("paste_identity"),
+            ),
+          ),
+          FilledButton(
+            onPressed: sharingBusy ? null : shareWorkspace,
+            child: Text(widget.strings("generate_share_code")),
+          ),
+          if (grantCode.isNotEmpty) ...[
+            Text(widget.strings("grant_code")),
+            SelectableText(grantCode),
+            Text(widget.strings("grant_code_hint")),
+            TextButton(
+              onPressed: () => copyToClipboard(grantCode),
+              child: Text(
+                widget.strings(copied == grantCode ? "copied" : "copy"),
+              ),
+            ),
+          ],
+          const Divider(height: 32),
+          Text(
+            widget.strings("join_workspace"),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          TextField(
+            controller: peerGrant,
+            decoration: InputDecoration(
+              labelText: widget.strings("paste_grant"),
+            ),
+          ),
+          FilledButton(
+            onPressed: sharingBusy ? null : acceptWorkspaceGrant,
+            child: Text(widget.strings("join")),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> copyToClipboard(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) setState(() => copied = text);
+  }
+
+  Future<void> shareWorkspace() async {
+    setState(() {
+      sharingBusy = true;
+      error = null;
+    });
+    try {
+      final code = await widget.gateway.shareWorkspace(
+        peerIdentity.text.trim(),
+      );
+      if (mounted) {
+        setState(() {
+          grantCode = code;
+          peerIdentity.clear();
+        });
+      }
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    } finally {
+      if (mounted) setState(() => sharingBusy = false);
+    }
+  }
+
+  Future<void> acceptWorkspaceGrant() async {
+    setState(() {
+      sharingBusy = true;
+      error = null;
+    });
+    try {
+      await widget.gateway.acceptWorkspaceGrant(peerGrant.text.trim());
+      if (mounted) {
+        setState(() => peerGrant.clear());
+        if (context.mounted) Navigator.pop(context);
+      }
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    } finally {
+      if (mounted) setState(() => sharingBusy = false);
+    }
   }
 
   Future<void> connect() async {
@@ -1512,8 +1646,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final assigned =
         allTags
             .where(
-              (tag) =>
-                  tag["deleted"] != true && noteTagIds.contains(tag["id"]),
+              (tag) => tag["deleted"] != true && noteTagIds.contains(tag["id"]),
             )
             .toList();
     return Padding(
@@ -1785,9 +1918,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
                           if (!snapshot.hasData) {
                             return const SizedBox(
                               height: 200,
-                              child: Center(
-                                child: CircularProgressIndicator(),
-                              ),
+                              child: Center(child: CircularProgressIndicator()),
                             );
                           }
                           return InteractiveViewer(

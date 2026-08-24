@@ -119,19 +119,19 @@ class FakeGateway implements CoreGateway {
   @override
   Future<void> deleteNotebook(String id, bool deleted) async {}
   @override
-  Future<List<Map<String, dynamic>>> listNoteAttachments(
-    String noteId,
-  ) async => [];
+  Future<List<Map<String, dynamic>>> listNoteAttachments(String noteId) async =>
+      [];
   @override
-  Future<Uint8List> readAttachmentData(String blobId) async =>
-      Uint8List(0);
+  Future<Uint8List> readAttachmentData(String blobId) async => Uint8List(0);
   @override
   Future<void> removeAttachmentData(String noteId, String blobId) async {}
   @override
   Future<List<Map<String, dynamic>>> listTags() async => [];
   @override
-  Future<Map<String, dynamic>> createTag(String name) async =>
-      {"id": "018f0000-0000-7000-8000-000000000004", "name": name};
+  Future<Map<String, dynamic>> createTag(String name) async => {
+    "id": "018f0000-0000-7000-8000-000000000004",
+    "name": name,
+  };
   @override
   Future<void> deleteTag(String id, bool deleted) async {}
   @override
@@ -148,6 +148,22 @@ class FakeGateway implements CoreGateway {
   Future<void> connectServer(Map<String, dynamic> config) async {}
   @override
   Future<void> disconnectServer() async {}
+  @override
+  Future<String> exportIdentity() async =>
+      "beresta://identity?user=fake&key=00";
+  @override
+  Future<String> shareWorkspace(String identityCode) async =>
+      "beresta://grant?workspace=fake&key=00&authority=00&sig=00";
+  @override
+  Future<Map<String, dynamic>> acceptWorkspaceGrant(String grantCode) async => {
+    "workspace_id": "fake",
+    "role": "member",
+    "active": true,
+  };
+  @override
+  Future<List<Map<String, dynamic>>> listWorkspaces() async => [];
+  @override
+  Future<void> setActiveWorkspace(String workspaceId) async {}
   @override
   Future<void> capturePhoto(String noteId) async {}
   @override

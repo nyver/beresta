@@ -41,6 +41,7 @@ home server, convergent client synchronization, and the Android application:
 - deterministic-CBOR operation envelopes, durable pull-verify-apply-then-push workers, exactly-once application/quarantine recovery, TLS 1.3 pinning, resumable encrypted blobs, encrypted operation-replay snapshots, compaction bootstrap, and functional Windows server/device diagnostics;
 - a gomobile-safe value API with bounded event polling and cancellation, reproducibly normalized/checksummed Android AARs, Android Keystore and strong biometric unlock, constrained WorkManager jobs, SPAKE2-confirmed LAN frames, encrypted share/widget handoff, and attachment-cache retention controls;
 - workspace sharing (per-recipient sealed X25519 key envelopes with client-side membership signature verification), signed member/device revocation, no-downtime workspace-key rotation with historical-key reads and resumable local re-encryption hardening, and an optional shared-folder transport (immutable operation segments, a short-locked manifest, and content-addressed blob exchange) as an HTTP alternative;
+- desktop and mobile UI for that sharing primitive: an `ExportIdentity`/`ShareWorkspace`/`AcceptWorkspaceGrant`/`ListWorkspaces`/`SetActiveWorkspace` surface (`core/sharecode`'s opaque `beresta://identity` and `beresta://grant` out-of-band codes) so a second already-registered household device can join and switch to an existing workspace instead of only ever owning its own (see [docs/sync-protocol.md](docs/sync-protocol.md) and [docs/android-user-guide.md](docs/android-user-guide.md));
 - local operation-log and snapshot garbage collection alongside the existing tombstone/blob collector; systemd, Windows batch/Task Scheduler, and optional Docker deployment assets; and a release pipeline covering signed update-manifest publication, Android release signing, server checksums/SBOM/provenance, a core coverage gate, and `govulncheck`/OSV dependency scanning.
 
 The completed Phase 4 Windows desktop application uses a coarse Wails
@@ -499,12 +500,24 @@ seven valid daily backups are retained.
 - HTTP and folder synchronization, workspace sharing, member/device
   revocation, and no-downtime workspace-key rotation are implemented and
   covered by real end-to-end tests against a live server (see
-  `server/sharing_e2e_test.go`). Desktop/mobile UI for initiating a share or
-  rotation is not yet built; the underlying `core/account` and
-  `core/transport` APIs are complete and independently usable today. Raspberry
-  Pi idle acceptance runs only on the opt-in `beresta-pi` reference runner;
-  ordinary hosted CI cross-builds Linux arm64 but cannot substitute for the
-  physical RSS/CPU measurement.
+  `server/sharing_e2e_test.go`). Desktop and mobile now expose sharing/joining
+  a workspace and switching the active one (`ExportIdentity`/`ShareWorkspace`/
+  `AcceptWorkspaceGrant`/`ListWorkspaces`/`SetActiveWorkspace`, covered by
+  `desktop/workspaces_test.go` and `core/mobileapi/sharing_test.go` against a
+  real in-process server); UI for member/device revocation and key rotation
+  is not yet built. Mobile's active-workspace choice lives only in the
+  running `Service` instance, not the persisted `mobile_preferences` row, so
+  it resets to the account's deterministically lowest-ID workspace on every
+  fresh unlock rather than remembering the last one chosen (desktop persists
+  this in `AppSettings.ActiveWorkspaceID`). The Kotlin `MainActivity.kt`
+  method-channel wiring for the new bridge calls was hand-verified against
+  the established 1:1 naming convention with the other bound methods but not
+  compiled, since this development environment has no configured Android SDK
+  (`ANDROID_SDK_ROOT`); run `build.cmd mobile-bind-android` and
+  `build.cmd mobile-build-android` on a host with the Android toolchain
+  before shipping. Raspberry Pi idle acceptance runs only on the opt-in
+  `beresta-pi` reference runner; ordinary hosted CI cross-builds Linux arm64
+  but cannot substitute for the physical RSS/CPU measurement.
 - Core statement coverage measured 63.1% in this development environment,
   below the release-quality spec's 80% target; `build.cmd coverage-gate`
   fails below that threshold and is a required release gate. `core/transport`

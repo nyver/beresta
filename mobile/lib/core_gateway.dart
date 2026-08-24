@@ -30,6 +30,11 @@ abstract interface class CoreGateway {
   Future<void> syncNow();
   Future<void> connectServer(Map<String, dynamic> config);
   Future<void> disconnectServer();
+  Future<String> exportIdentity();
+  Future<String> shareWorkspace(String identityCode);
+  Future<Map<String, dynamic>> acceptWorkspaceGrant(String grantCode);
+  Future<List<Map<String, dynamic>>> listWorkspaces();
+  Future<void> setActiveWorkspace(String workspaceId);
   Future<void> capturePhoto(String noteId);
   Future<bool> selectBackupDestination();
   Future<void> createBackup();
@@ -150,12 +155,10 @@ class MethodChannelCore implements CoreGateway {
       _invoke("deleteTag", {"tagId": id, "deleted": deleted});
 
   @override
-  Future<void> setNoteTag(String noteId, String tagId, bool present) =>
-      _invoke("setNoteTag", {
-        "noteId": noteId,
-        "tagId": tagId,
-        "present": present,
-      });
+  Future<void> setNoteTag(String noteId, String tagId, bool present) => _invoke(
+    "setNoteTag",
+    {"noteId": noteId, "tagId": tagId, "present": present},
+  );
 
   @override
   Future<List<String>> listNoteTags(String noteId) async =>
@@ -180,6 +183,29 @@ class MethodChannelCore implements CoreGateway {
 
   @override
   Future<void> disconnectServer() => _invoke("disconnectServer");
+
+  @override
+  Future<String> exportIdentity() async =>
+      _object(await _invoke("exportIdentity"))["identity_code"] as String;
+
+  @override
+  Future<String> shareWorkspace(String identityCode) async =>
+      _object(
+            await _invoke("shareWorkspace", {"identityCode": identityCode}),
+          )["grant_code"]
+          as String;
+
+  @override
+  Future<Map<String, dynamic>> acceptWorkspaceGrant(String grantCode) async =>
+      _object(await _invoke("acceptWorkspaceGrant", {"grantCode": grantCode}));
+
+  @override
+  Future<List<Map<String, dynamic>>> listWorkspaces() async =>
+      _list(await _invoke("listWorkspaces"));
+
+  @override
+  Future<void> setActiveWorkspace(String workspaceId) =>
+      _invoke("setActiveWorkspace", {"workspaceId": workspaceId});
 
   @override
   Future<void> capturePhoto(String noteId) =>

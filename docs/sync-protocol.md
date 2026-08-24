@@ -50,6 +50,19 @@ The optional folder transport publishes immutable operation segments and encrypt
 
 Pairing establishes a SPAKE2-authenticated local channel. The existing device and new device exchange account bootstrap material and perform an on-demand history/snapshot/blob synchronization using the same validation and apply path. The pairing listener is not a persistent server.
 
+This describes same-account device pairing (a second device for the identity that already owns a workspace); it is not yet wired into the desktop or mobile UI (`core/mobileapi/pairing.go`'s SPAKE2 primitive exists standalone).
+
+### Cross-account workspace sharing
+
+The implemented mechanism for a second account to see an existing workspace's notes is `core/account.Account.ShareWorkspace`/`AcceptWorkspaceShare` plus the server's `/v1/workspaces/{id}/members` and `/v1/workspaces/{id}/key-envelopes` routes - a distinct, already-shipped path from LAN pairing above. The recipient must already be a registered user on the same server (each device's own invite-code registration always mints an independent user and workspace, per `server/identity_store.go`'s `Register`).
+
+Recipient discovery uses two short opaque codes exchanged out of band (chat, email - the same trust model as comparing a TLS fingerprint), not a server lookup:
+
+- `beresta://identity?user=<uuid>&key=<hex X25519 public key>` - the prospective member's own identity, produced by `ExportIdentity`.
+- `beresta://grant?workspace=<uuid>&key=<hex key id>&authority=<hex Ed25519 public key>&sig=<hex signature>` - the sealed membership grant, produced by `ShareWorkspace` after it calls `AddMember`; the recipient's `AcceptWorkspaceGrant` fetches the matching sealed envelope via `GetKeyEnvelopes` and opens it locally.
+
+Both codes are opaque identifiers and key material, never note content; `core/sharecode` encodes and decodes them.
+
 ## Canonical Encoding
 
 Protocol structures use deterministic CBOR. The decoder rejects:

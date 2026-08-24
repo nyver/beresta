@@ -17,6 +17,10 @@ export interface NoteSaveState {
   saving: boolean;
   dirty: boolean;
   savedAt: number | null;
+  /** True when the most recent flush attempt failed and has not yet
+   * succeeded on retry - distinct from "no edits made yet" (savedAt still
+   * null, but hasError false), which is not an error at all. */
+  hasError: boolean;
 }
 
 export interface NoteEditorProps {
@@ -78,8 +82,8 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function
   const onSaveStateChangeRef = useRef(onSaveStateChange);
   onSaveStateChangeRef.current = onSaveStateChange;
   useEffect(() => {
-    onSaveStateChangeRef.current?.({ saving, dirty, savedAt });
-  }, [saving, dirty, savedAt]);
+    onSaveStateChangeRef.current?.({ saving, dirty, savedAt, hasError: error !== null });
+  }, [saving, dirty, savedAt, error]);
 
   useEffect(() => {
     if (!ready || !ydoc || !containerRef.current) return;

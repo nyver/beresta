@@ -277,6 +277,14 @@ button:disabled {
 }
 
 .shell-sidebar {
+  /* Pinned to an explicit track (as .shell-notes/.shell-detail are below):
+     CSS Grid's auto-placement assigns hidden items no track at all, so
+     display:none-ing this pane for the collapsed-sidebar/focus-mode states
+     would otherwise shift .shell-notes and .shell-detail one track to the
+     left instead of leaving the freed-up 0-width track empty - .shell-notes
+     rendering inside the editor's own track and .shell-detail rendering
+     off the end of the grid entirely, blank. */
+  grid-column: 1;
   overflow-y: auto;
   padding: 1rem;
   /* A soft background tint separates the sidebar from the note list
@@ -466,6 +474,9 @@ li:hover > .tree-row-delete,
 }
 
 .shell-notes {
+  /* See .shell-sidebar's doc comment: pinned to its own track so a
+     display:none-collapsed sidebar cannot shift this into track 1. */
+  grid-column: 2;
   overflow: hidden;
   border-right: 1px solid #d8d1c4;
   background: #faf8f4;
@@ -474,6 +485,10 @@ li:hover > .tree-row-delete,
 }
 
 .shell-detail {
+  /* See .shell-sidebar's doc comment: pinned to its own track so a
+     display:none-collapsed sidebar/notes pane cannot shift this pane off
+     the end of the grid, leaving it unplaced (and blank). */
+  grid-column: 3;
   background: #fff;
   overflow: hidden;
 }
@@ -696,25 +711,30 @@ li:hover > .tree-row-delete,
   margin: 0;
 }
 
-.note-editor-quill {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
 /* Borderless toolbar/editor (task: the editor read as a giant <textarea>
    with a full rectangular border around it) - a single rule under the
-   toolbar is enough separation from the text below it. */
-.note-editor-quill .ql-toolbar {
+   toolbar is enough separation from the text below it.
+
+   Quill does not render the toolbar inside the container element it is
+   given: it inserts a new "ql-toolbar" element as that container's
+   *previous sibling*, and turns the container itself into "ql-container"
+   (adding the class directly, in place - see NoteEditor.tsx's containerRef
+   div, which ends up with both "note-editor-quill" and "ql-container" on
+   the same element). So ".note-editor-quill .ql-toolbar" as a descendant
+   selector never matches anything; the toolbar has to be reached through
+   their shared parent, ".note-editor", instead. */
+.note-editor .ql-toolbar {
   border: none;
   border-bottom: 1px solid #d8d1c4;
   border-radius: 0;
   padding-left: 0;
 }
 
-.note-editor-quill .ql-container {
+.note-editor-quill {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow-y: auto;
   border: none;
   border-radius: 0;
@@ -729,9 +749,11 @@ li:hover > .tree-row-delete,
 
 /* "Normal" is Quill's own built-in label for its header dropdown's default
    (no heading) option; "Paragraph" reads more clearly to someone writing
-   notes, not laying out a document. */
-.note-editor-quill .ql-picker.ql-header .ql-picker-label::before,
-.note-editor-quill .ql-picker.ql-header .ql-picker-item::before {
+   notes, not laying out a document. Scoped through .note-editor for the
+   same reason as .ql-toolbar above - the picker lives in the toolbar, not
+   inside .note-editor-quill. */
+.note-editor .ql-picker.ql-header .ql-picker-label::before,
+.note-editor .ql-picker.ql-header .ql-picker-item::before {
   content: "Paragraph";
 }
 

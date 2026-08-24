@@ -271,6 +271,8 @@ class MainActivity : FlutterFragmentActivity() {
             "syncNow" -> service.syncNow()
             "connectServer" -> service.connectServer(requestId, required(call, "encoded"))
             "disconnectServer" -> service.disconnectServer()
+            "syncStatus" -> service.syncStatus()
+            "syncConnectionInfo" -> service.syncConnectionInfo(requestId)
             "exportIdentity" -> service.exportIdentity(requestId)
             "shareWorkspace" -> service.shareWorkspace(requestId, required(call, "identityCode"))
             "acceptWorkspaceGrant" -> service.acceptWorkspaceGrant(requestId, required(call, "grantCode"))

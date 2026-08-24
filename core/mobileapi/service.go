@@ -46,6 +46,12 @@ type Service struct {
 	coordinator *coresync.Coordinator
 	remote      *transport.HTTP
 	repository  *store.SyncRepository
+	// syncGeneration is bumped by DisconnectServer so a ConnectServer call
+	// already in flight (in particular reconnectSavedServer's background
+	// attempt after unlock) can detect that the user disconnected while it
+	// was still working and discard its result instead of silently
+	// resurrecting a connection the user just turned off.
+	syncGeneration uint64
 }
 
 // NewService consumes deviceSecret. Android must generate it randomly and
@@ -163,7 +169,26 @@ func (s *Service) activate(value *account.Account) (string, error) {
 	}
 	result := map[string]any{"account_id": value.ID.String(), "device_id": value.DeviceID.String(), "workspace_id": workspaces[0].String()}
 	s.emit("account_unlocked", result)
+	s.reconnectSavedServer(value)
 	return marshal(result)
+}
+
+// reconnectSavedServer reattaches a previously configured server without
+// making unlock depend on network availability: ConnectServer performs
+// authentication in the background and leaves the complete local collection
+// usable if the attempt fails.
+func (s *Service) reconnectSavedServer(value *account.Account) {
+	cfg, err := loadSyncConnectionConfig(s.root, value.DB())
+	if err != nil || !cfg.Enabled {
+		return
+	}
+	encoded, err := marshal(connectConfig{URL: cfg.URL, SecurityMode: cfg.SecurityMode, Fingerprint: cfg.Fingerprint, DeviceName: "Android"})
+	if err != nil {
+		return
+	}
+	go func() {
+		_ = s.ConnectServer(fmt.Sprintf("auto-reconnect-%d", time.Now().UnixNano()), encoded)
+	}()
 }
 
 func (s *Service) Lock() error {
@@ -887,6 +912,9 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	generation := s.syncGeneration
+	s.mu.Unlock()
 	remote, err := transport.NewHTTP(transport.HTTPConfig{BaseURL: config.URL, SecurityMode: transport.HTTPSecurityMode(config.SecurityMode), PinnedFingerprint: config.Fingerprint, DeviceID: value.DeviceID, SignChallenge: value.SignDeviceChallenge})
 	if err != nil {
 		return err
@@ -912,13 +940,34 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 		return err
 	}
 	s.mu.Lock()
+	stale := s.syncGeneration != generation
+	s.mu.Unlock()
+	if stale {
+		// DisconnectServer ran while this attempt was still working (most
+		// often reconnectSavedServer's background retry after unlock,
+		// raced by the user tapping Disconnect before it finished): drop
+		// the result instead of silently resurrecting a connection the
+		// user just turned off.
+		coordinator.Detach()
+		return errors.New("mobileapi: server connection was disabled before this connection attempt finished")
+	}
+	// Persisted only once the coordinator has actually attached, so a
+	// failed attach never leaves the on-disk config claiming an active
+	// connection that isn't running.
+	if err := saveSyncConnectionConfig(ctx, value.DB(), syncConnectionConfig{
+		Enabled: true, URL: config.URL, SecurityMode: config.SecurityMode, Fingerprint: config.Fingerprint,
+	}); err != nil {
+		coordinator.Detach()
+		return err
+	}
+	s.mu.Lock()
 	previous := s.coordinator
 	s.coordinator, s.remote, s.repository = coordinator, remote, repository
 	s.mu.Unlock()
 	if previous != nil {
 		previous.Detach()
 	}
-	s.emit("sync_status", map[string]string{"status": "active"})
+	s.emit("sync_status", map[string]string{"status": string(transport.StatusActive)})
 	return nil
 }
 
@@ -996,6 +1045,16 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 			return nil
 		},
 		Progress: func(progress coresync.Progress) {
+			status := transport.StatusActive
+			switch progress.Phase {
+			case coresync.PhaseCurrent:
+				status = transport.StatusCurrent
+			case coresync.PhaseBackoff:
+				status = transport.StatusOffline
+			case coresync.PhaseQuarantine:
+				status = transport.StatusFailed
+			}
+			s.emit("sync_status", map[string]string{"status": string(status)})
 			s.emit("sync_progress", map[string]any{"workspace_id": progress.WorkspaceID.String(), "phase": progress.Phase, "pulled": progress.Pulled, "pushed": progress.Pushed, "cursor": progress.Cursor, "retry_ms": progress.RetryIn.Milliseconds(), "error_class": progress.ErrorClass})
 		},
 	})
@@ -1050,15 +1109,66 @@ func (s *Service) SyncNow() error {
 	return nil
 }
 
-func (s *Service) DisconnectServer() {
+// DisconnectServer detaches networking only: the local database, full
+// collection, and previously downloaded data remain untouched. The saved
+// connection details stay on disk (with enabled cleared) so the connect
+// dialog still shows them and can reconnect without retyping.
+func (s *Service) DisconnectServer() error {
 	s.mu.Lock()
-	coordinator := s.coordinator
+	coordinator, value := s.coordinator, s.account
 	s.coordinator, s.remote, s.repository = nil, nil, nil
+	s.syncGeneration++
 	s.mu.Unlock()
 	if coordinator != nil {
 		coordinator.Detach()
 	}
-	s.emit("sync_status", map[string]string{"status": "disabled"})
+	if value != nil {
+		cfg, err := loadSyncConnectionConfig(s.root, value.DB())
+		if err != nil {
+			return err
+		}
+		cfg.Enabled = false
+		if err := saveSyncConnectionConfig(s.root, value.DB(), cfg); err != nil {
+			return err
+		}
+	}
+	s.emit("sync_status", map[string]string{"status": string(transport.StatusDisabled)})
+	return nil
+}
+
+// SyncStatus reports the current synchronization transport's status
+// (see core/transport.Status), without requiring an active request ID: it
+// only reads cached in-memory state. It reports "disabled" whenever no
+// server is currently attached, including while the account is locked.
+func (s *Service) SyncStatus() (string, error) {
+	s.mu.Lock()
+	remote := s.remote
+	s.mu.Unlock()
+	if remote == nil {
+		return string(transport.StatusDisabled), nil
+	}
+	return string(remote.Status(s.root)), nil
+}
+
+// SyncConnectionInfo returns the last server connection configured on this
+// device, so the connect dialog can prefill its fields after being reopened.
+// Enabled is false once the user disconnects, but URL/SecurityMode/
+// Fingerprint remain so reconnecting does not require retyping them.
+func (s *Service) SyncConnectionInfo(requestID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, _, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	cfg, err := loadSyncConnectionConfig(ctx, value.DB())
+	if err != nil {
+		return "", err
+	}
+	return marshal(cfg)
 }
 
 func (s *Service) Close() {

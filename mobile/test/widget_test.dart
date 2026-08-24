@@ -52,6 +52,37 @@ void main() {
     await tester.pump();
     expect(find.text("Secret fixture body"), findsNothing);
   });
+
+  testWidgets("sync status is visible and the server sheet reopens prefilled", (
+    tester,
+  ) async {
+    final gateway =
+        FakeGateway(unlocked: true)
+          ..syncStatusValue = "current"
+          ..connectionInfo = {
+            "enabled": true,
+            "url": "https://sync.example.com",
+            "security_mode": "pinned",
+            "fingerprint": "ab12",
+          };
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    final cloudButton = tester.widget<IconButton>(
+      find.widgetWithIcon(IconButton, Icons.cloud_done_outlined),
+    );
+    expect(cloudButton.tooltip, contains("Up to date"));
+
+    await tester.tap(find.byIcon(Icons.cloud_done_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Sync status: Up to date"), findsOneWidget);
+    expect(find.widgetWithText(TextField, "HTTPS server URL"), findsOneWidget);
+    final urlField = tester.widget<TextField>(
+      find.widgetWithText(TextField, "HTTPS server URL"),
+    );
+    expect(urlField.controller!.text, "https://sync.example.com");
+  });
 }
 
 class FakeGateway implements CoreGateway {
@@ -59,6 +90,13 @@ class FakeGateway implements CoreGateway {
 
   bool unlocked;
   String savedBody = "";
+  String syncStatusValue = "disabled";
+  Map<String, dynamic> connectionInfo = {
+    "enabled": false,
+    "url": "",
+    "security_mode": "pinned",
+    "fingerprint": "",
+  };
   final note = <String, dynamic>{
     "id": "018f0000-0000-7000-8000-000000000001",
     "workspace_id": "018f0000-0000-7000-8000-000000000002",
@@ -148,6 +186,10 @@ class FakeGateway implements CoreGateway {
   Future<void> connectServer(Map<String, dynamic> config) async {}
   @override
   Future<void> disconnectServer() async {}
+  @override
+  Future<String> syncStatus() async => syncStatusValue;
+  @override
+  Future<Map<String, dynamic>> syncConnectionInfo() async => connectionInfo;
   @override
   Future<String> exportIdentity() async =>
       "beresta://identity?user=fake&key=00";

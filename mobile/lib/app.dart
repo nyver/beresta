@@ -27,6 +27,39 @@ String describeFailure(Strings strings, Object failure) {
   return "$base ($failure)";
 }
 
+/// Maps a core/transport.Status value ("disabled", "offline", "active",
+/// "current", "failed") to the icon shown next to it in the sync UI.
+IconData syncStatusIcon(String status) {
+  switch (status) {
+    case "current":
+      return Icons.cloud_done_outlined;
+    case "active":
+      return Icons.cloud_sync_outlined;
+    case "offline":
+      return Icons.cloud_off_outlined;
+    case "failed":
+      return Icons.error_outline;
+    default:
+      return Icons.cloud_outlined;
+  }
+}
+
+Color syncStatusColor(BuildContext context, String status) {
+  final scheme = Theme.of(context).colorScheme;
+  switch (status) {
+    case "current":
+      return Colors.green;
+    case "active":
+      return scheme.primary;
+    case "offline":
+      return Colors.orange;
+    case "failed":
+      return scheme.error;
+    default:
+      return scheme.onSurfaceVariant;
+  }
+}
+
 class BerestaApp extends StatefulWidget {
   const BerestaApp({super.key, this.gateway});
 
@@ -388,11 +421,28 @@ class _NotesShellState extends State<NotesShell> {
   String? selectedTag;
   String? error;
   Timer? searchDebounce;
+  String syncStatusValue = "disabled";
+  Timer? syncStatusTimer;
 
   @override
   void initState() {
     super.initState();
     refresh();
+    refreshSyncStatus();
+    syncStatusTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => refreshSyncStatus(),
+    );
+  }
+
+  Future<void> refreshSyncStatus() async {
+    try {
+      final value = await widget.gateway.syncStatus();
+      if (mounted) setState(() => syncStatusValue = value);
+    } catch (_) {
+      // Sync may be disabled or the account context not ready yet; the
+      // indicator simply keeps its last known value.
+    }
   }
 
   Future<void> refresh() async {
@@ -442,6 +492,7 @@ class _NotesShellState extends State<NotesShell> {
   @override
   void dispose() {
     searchDebounce?.cancel();
+    syncStatusTimer?.cancel();
     super.dispose();
   }
 
@@ -470,9 +521,14 @@ class _NotesShellState extends State<NotesShell> {
             icon: const Icon(Icons.sync),
           ),
           IconButton(
-            tooltip: widget.strings("server"),
+            tooltip:
+                "${widget.strings("server")}: "
+                "${widget.strings("sync_status_$syncStatusValue")}",
             onPressed: showServer,
-            icon: const Icon(Icons.cloud_outlined),
+            icon: Icon(
+              syncStatusIcon(syncStatusValue),
+              color: syncStatusColor(context, syncStatusValue),
+            ),
           ),
           IconButton(
             tooltip: widget.strings("lock"),
@@ -696,6 +752,7 @@ class _NotesShellState extends State<NotesShell> {
     // changes which notes/notebooks are visible, so refresh unconditionally
     // rather than trying to track whether that actually happened.
     await refresh();
+    await refreshSyncStatus();
   }
 
   List<Widget> notebookTree() {
@@ -940,6 +997,8 @@ class _ServerSheetState extends State<ServerSheet> {
   String grantCode = "";
   String? copied;
   bool sharingBusy = false;
+  String syncStatusValue = "disabled";
+  Timer? syncStatusTimer;
 
   @override
   void initState() {
@@ -953,10 +1012,38 @@ class _ServerSheetState extends State<ServerSheet> {
           // No account/server context yet - the identity section simply
           // stays empty until this sheet is reopened after connecting.
         });
+    widget.gateway
+        .syncConnectionInfo()
+        .then((info) {
+          if (!mounted) return;
+          setState(() {
+            url.text = info["url"] as String? ?? "";
+            fingerprint.text = info["fingerprint"] as String? ?? "";
+            securityMode = info["security_mode"] as String? ?? "pinned";
+          });
+        })
+        .catchError((_) {
+          // No account context yet - the form simply stays empty.
+        });
+    refreshSyncStatus();
+    syncStatusTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => refreshSyncStatus(),
+    );
+  }
+
+  Future<void> refreshSyncStatus() async {
+    try {
+      final value = await widget.gateway.syncStatus();
+      if (mounted) setState(() => syncStatusValue = value);
+    } catch (_) {
+      // Keep showing the last known status; the periodic timer retries.
+    }
   }
 
   @override
   void dispose() {
+    syncStatusTimer?.cancel();
     url.dispose();
     invite.dispose();
     fingerprint.dispose();
@@ -981,6 +1068,24 @@ class _ServerSheetState extends State<ServerSheet> {
             style: Theme.of(context).textTheme.titleLarge,
           ),
           Text(widget.strings("server_optional")),
+          Row(
+            children: [
+              Icon(
+                syncStatusIcon(syncStatusValue),
+                size: 18,
+                color: syncStatusColor(context, syncStatusValue),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                "${widget.strings("sync_status_label")}: "
+                "${widget.strings("sync_status_$syncStatusValue")}",
+                style: TextStyle(
+                  color: syncStatusColor(context, syncStatusValue),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           TextField(
             controller: url,
             keyboardType: TextInputType.url,

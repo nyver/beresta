@@ -21,6 +21,13 @@ Use the cloud action to attach an optional HTTPS server. A first connection
 accepts an invite code plus either a pinned SHA-256 certificate fingerprint or
 a certificate trusted by Android. Disabling the server removes only runtime
 transport state; the local collection and queued operations remain intact.
+The server URL, certificate fingerprint, and pinned/trusted choice are saved
+on the device (not the one-time invite code), so reopening the server sheet
+shows the same connection instead of a blank form, and a previously enabled
+connection reattaches automatically the next time the account unlocks. The
+cloud action's icon and the top of the server sheet reflect the live
+synchronization status (not connected, offline and retrying, syncing, up to
+date, or a sync error).
 
 Each invite code registers its own independent workspace, so connecting a
 second device with its own invite gives it its own empty collection on the

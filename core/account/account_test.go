@@ -85,6 +85,9 @@ func TestEraseLocalAccountRemovesEveryLocalFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+	if err := created.EnableDeviceUnlock(ctx); err != nil {
+		t.Fatalf("EnableDeviceUnlock() error = %v", err)
+	}
 	if err := created.Lock(); err != nil {
 		t.Fatalf("Lock() error = %v", err)
 	}
@@ -106,7 +109,8 @@ func TestEraseLocalAccountRemovesEveryLocalFile(t *testing.T) {
 	}
 
 	envelope := envelopePath(path)
-	for _, p := range []string{path, envelope} {
+	deviceUnlockEnvelope := deviceUnlockPath(path)
+	for _, p := range []string{path, envelope, deviceUnlockEnvelope} {
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("Stat(%s) error = %v, want the file to exist before erasing", p, err)
 		}
@@ -116,7 +120,7 @@ func TestEraseLocalAccountRemovesEveryLocalFile(t *testing.T) {
 		t.Fatalf("EraseLocalAccount() error = %v", err)
 	}
 
-	for _, p := range []string{path, path + "-wal", path + "-shm", envelope, blobsDir, runtimeDir} {
+	for _, p := range []string{path, path + "-wal", path + "-shm", envelope, deviceUnlockEnvelope, blobsDir, runtimeDir} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Fatalf("Stat(%s) after EraseLocalAccount() error = %v, want os.IsNotExist", p, err)
 		}
@@ -216,6 +220,61 @@ func TestCreateThenUnlockRecoversTheSameIdentity(t *testing.T) {
 	}
 	if !bytes.Equal(unlocked.DevicePublicKey, wantDevicePub) {
 		t.Fatal("device public key changed across unlock")
+	}
+}
+
+func TestDeviceUnlockRecoversAccountWithoutPassphrase(t *testing.T) {
+	path := tempDBPath(t)
+	wrapper := newFakeWrapper()
+	ctx := context.Background()
+	created, err := Create(ctx, CreateOptions{
+		DatabasePath: path,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+		KDFOptions:   fastKDF(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAccountID := created.ID
+	if err := created.EnableDeviceUnlock(ctx); err != nil {
+		t.Fatalf("EnableDeviceUnlock: %v", err)
+	}
+	if _, err := os.Stat(deviceUnlockPath(path)); err != nil {
+		t.Fatalf("Stat device unlock envelope: %v", err)
+	}
+	if err := created.Lock(); err != nil {
+		t.Fatal(err)
+	}
+
+	unlocked, err := UnlockWithDeviceKey(ctx, path, wrapper)
+	if err != nil {
+		t.Fatalf("UnlockWithDeviceKey: %v", err)
+	}
+	defer unlocked.Lock()
+	if unlocked.ID != wantAccountID {
+		t.Fatalf("unlocked.ID = %s, want %s", unlocked.ID, wantAccountID)
+	}
+}
+
+func TestDeviceUnlockRequiresProvisionedEnvelope(t *testing.T) {
+	path := tempDBPath(t)
+	wrapper := newFakeWrapper()
+	ctx := context.Background()
+	created, err := Create(ctx, CreateOptions{
+		DatabasePath: path,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+		KDFOptions:   fastKDF(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := created.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnlockWithDeviceKey(ctx, path, wrapper); !errors.Is(err, ErrDeviceUnlockUnavailable) {
+		t.Fatalf("UnlockWithDeviceKey error = %v, want %v", err, ErrDeviceUnlockUnavailable)
 	}
 }
 

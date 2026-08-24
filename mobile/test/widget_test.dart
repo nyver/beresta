@@ -42,6 +42,19 @@ void main() {
     expect(gateway.savedBody, "Offline paragraph");
   });
 
+  testWidgets("unlocks an existing account with device authentication", (
+    tester,
+  ) async {
+    final gateway = FakeGateway(unlocked: false)
+      ..accountExists = true
+      ..deviceUnlockAvailable = true;
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    expect(gateway.deviceUnlockCalls, 1);
+    expect(find.text("Offline note"), findsOneWidget);
+  });
+
   testWidgets("new and untitled notes use the desktop title", (tester) async {
     final gateway = FakeGateway(unlocked: true)
       ..listedNotes = [
@@ -55,6 +68,22 @@ void main() {
     await tester.tap(find.byIcon(Icons.add));
     await tester.pumpAndSettle();
     expect(gateway.createdNoteTitle, "Untitled");
+  });
+
+  testWidgets("notebook menu creates a root note", (tester) async {
+    final gateway = FakeGateway(unlocked: true);
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip("More actions"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(PopupMenuItem<String>, "New note"));
+    await tester.pumpAndSettle();
+
+    expect(gateway.createdNoteNotebookId, "");
+    expect(find.text("Markdown body"), findsOneWidget);
   });
 
   testWidgets("attachment can be deleted from its visible action", (
@@ -181,8 +210,12 @@ class FakeGateway implements CoreGateway {
   FakeGateway({required this.unlocked});
 
   bool unlocked;
+  bool accountExists = false;
+  bool deviceUnlockAvailable = false;
+  int deviceUnlockCalls = 0;
   String savedBody = "";
   String createdNoteTitle = "";
+  String createdNoteNotebookId = "";
   (String, String)? removedAttachment;
   List<Map<String, dynamic>> attachmentList = [];
   String syncStatusValue = "disabled";
@@ -204,11 +237,16 @@ class FakeGateway implements CoreGateway {
     "archived": false,
     "deleted": false,
     "created_unix_ms": 1710000000000,
+    "updated_unix_ms": 1710000000000,
   };
   final note = Map<String, dynamic>.from(noteFixture);
 
   @override
-  Future<Map<String, dynamic>> status() async => {"unlocked": unlocked};
+  Future<Map<String, dynamic>> status() async => {
+    "unlocked": unlocked,
+    "account_exists": accountExists,
+    "device_unlock_available": deviceUnlockAvailable,
+  };
   @override
   Future<Map<String, dynamic>> createAccount(String passphrase) async {
     unlocked = true;
@@ -217,6 +255,13 @@ class FakeGateway implements CoreGateway {
 
   @override
   Future<Map<String, dynamic>> unlockAccount(String passphrase) async {
+    unlocked = true;
+    return {};
+  }
+
+  @override
+  Future<Map<String, dynamic>> unlockWithDeviceAuthentication() async {
+    deviceUnlockCalls++;
     unlocked = true;
     return {};
   }
@@ -231,6 +276,7 @@ class FakeGateway implements CoreGateway {
     String notebookId = "",
   }) async {
     createdNoteTitle = title;
+    createdNoteNotebookId = notebookId;
     return note;
   }
   @override

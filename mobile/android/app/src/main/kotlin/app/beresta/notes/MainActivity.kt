@@ -15,6 +15,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.SecureRandom
 import java.util.concurrent.Executors
+import mobileapi.Service
 import org.json.JSONObject
 
 class MainActivity : FlutterFragmentActivity() {
@@ -25,6 +26,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingBackupDestination: MethodChannel.Result? = null
     @Volatile private var lifecycleGeneration = 0L
     @Volatile private var nativeCoreInitStarted = false
+    @Volatile private var deviceAuthenticationFresh = false
 
     private val backupTreePicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         val pending = pendingBackupDestination.also { pendingBackupDestination = null } ?: return@registerForActivityResult
@@ -139,9 +141,11 @@ class MainActivity : FlutterFragmentActivity() {
                 return
             }
         }
-        val newProtection = if (adapter.biometricAvailable()) AndroidKeyWrappingAdapter.Protection.BIOMETRIC else AndroidKeyWrappingAdapter.Protection.KEYSTORE
+        val newProtection = if (adapter.deviceAuthenticationAvailable()) AndroidKeyWrappingAdapter.Protection.BIOMETRIC else AndroidKeyWrappingAdapter.Protection.KEYSTORE
+        var authenticationFresh = false
         val callback = object : AndroidKeyWrappingAdapter.Callback {
             override fun success(value: ByteArray) {
+                deviceAuthenticationFresh = authenticationFresh
                 if (envelopeFile.exists()) {
                     NativeCore.initialize(value)
                     return
@@ -189,6 +193,7 @@ class MainActivity : FlutterFragmentActivity() {
                 NativeCore.failInitialization("corrupt device-secret envelope")
                 return
             }
+            authenticationFresh = protection == AndroidKeyWrappingAdapter.Protection.BIOMETRIC
             adapter.unwrap(
                 protection,
                 metadata,
@@ -203,6 +208,10 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun handleCoreCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method == "unlockWithDeviceAuthentication") {
+            unlockWithDeviceAuthentication(call, result)
+            return
+        }
         if (call.method == "capturePhoto") {
             val requestId = call.argument<String>("requestId")
             val noteId = call.argument<String>("noteId")
@@ -240,10 +249,12 @@ class MainActivity : FlutterFragmentActivity() {
         return when (call.method) {
             "status" -> annotateStatus(service.status())
             "createAccount" -> service.createAccount(requestId, NativeCore.accountPath(filesDir), required(call, "passphrase")).also {
+                enableDeviceUnlockIfAvailable(service)
                 ShareHandoff.drain(this)
                 BackupWorker.requestImmediate(this)
             }
             "unlockAccount" -> service.unlockAccount(requestId, NativeCore.accountPath(filesDir), required(call, "passphrase")).also {
+                enableDeviceUnlockIfAvailable(service)
                 ShareHandoff.drain(this)
                 BackupWorker.requestImmediate(this)
             }
@@ -294,6 +305,72 @@ class MainActivity : FlutterFragmentActivity() {
     private fun required(call: MethodCall, name: String): String =
         requireNotNull(call.argument<String>(name)) { "missing $name" }
 
+    private fun enableDeviceUnlockIfAvailable(service: Service) {
+        if (!AndroidKeyWrappingAdapter(this).deviceAuthenticationAvailable()) return
+        // Password entry has already authenticated the user. A failure here
+        // only disables the convenience path; it must never undo a completed
+        // account creation or passphrase unlock.
+        runCatching {
+            service.enableDeviceUnlock("android-enable-device-unlock-${System.nanoTime()}")
+        }
+    }
+
+    private fun unlockWithDeviceAuthentication(call: MethodCall, result: MethodChannel.Result) {
+        val databasePath = NativeCore.accountPath(filesDir)
+        if (!File(databasePath + DEVICE_UNLOCK_SUFFIX).exists()) {
+            result.error("device_unlock_unavailable", null, null)
+            return
+        }
+        val adapter = AndroidKeyWrappingAdapter(this)
+        if (!adapter.deviceAuthenticationAvailable()) {
+            result.error("device_authentication_unavailable", null, null)
+            return
+        }
+        val requestId = call.argument<String>("requestId") ?: "android-device-unlock-${System.nanoTime()}"
+        val unlock = {
+            executor.execute {
+                runCatching {
+                    NativeCore.awaitService().unlockWithDeviceKey(requestId, databasePath)
+                }.fold(
+                    onSuccess = { value -> mainHandler.post { result.success(value) } },
+                    onFailure = { error -> mainHandler.post { result.error("device_unlock_failed", error.message, null) } },
+                )
+            }
+        }
+        if (deviceAuthenticationFresh) {
+            deviceAuthenticationFresh = false
+            unlock()
+            return
+        }
+        val envelopeFile = File(filesDir, "mobile-core.bkw1")
+        val envelope = runCatching { envelopeFile.readBytes() }.getOrElse {
+            result.error("device_authentication_unavailable", it.message, null)
+            return
+        }
+        val protection = envelope.getOrNull(5)?.let(AndroidKeyWrappingAdapter.Protection::fromCode)
+        if (protection != AndroidKeyWrappingAdapter.Protection.BIOMETRIC) {
+            result.error("device_authentication_unavailable", null, null)
+            return
+        }
+        adapter.unwrap(
+            protection,
+            AndroidKeyWrappingAdapter.Metadata("mobile-core", "device-secret"),
+            envelope,
+            getString(R.string.biometric_unlock_title),
+            getString(R.string.biometric_cancel),
+            object : AndroidKeyWrappingAdapter.Callback {
+                override fun success(value: ByteArray) {
+                    value.fill(0)
+                    unlock()
+                }
+
+                override fun error(code: String, detail: String?) {
+                    result.error("device_authentication_$code", detail, null)
+                }
+            },
+        )
+    }
+
     // The Go core only knows about the account it holds in memory, so a
     // locked status can't tell a fresh install apart from a device that
     // already has an account and just needs its passphrase. Flag on-disk
@@ -302,7 +379,13 @@ class MainActivity : FlutterFragmentActivity() {
     private fun annotateStatus(rawStatus: String): String {
         val status = JSONObject(rawStatus)
         if (status.optBoolean("unlocked", false)) return rawStatus
-        status.put("account_exists", File(NativeCore.accountPath(filesDir)).exists())
+        val databasePath = NativeCore.accountPath(filesDir)
+        status.put("account_exists", File(databasePath).exists())
+        status.put(
+            "device_unlock_available",
+            File(databasePath + DEVICE_UNLOCK_SUFFIX).exists() &&
+                AndroidKeyWrappingAdapter(this).deviceAuthenticationAvailable(),
+        )
         return status.toString()
     }
 
@@ -377,5 +460,6 @@ class MainActivity : FlutterFragmentActivity() {
         private const val DEFAULT_AUTO_LOCK_MINUTES = 5L
         private const val MAX_AUTO_LOCK_MINUTES = 24L * 60L
         private const val MAX_CAPTURE_BYTES = 64 * 1024 * 1024
+        private const val DEVICE_UNLOCK_SUFFIX = ".deviceunlock"
     }
 }

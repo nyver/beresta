@@ -151,6 +151,37 @@ func (s *Service) UnlockAccount(requestID, databasePath, passphrase string) (str
 	return s.activate(unlocked)
 }
 
+// EnableDeviceUnlock persists a platform-wrapped Root Key for the current
+// unlocked account. Android calls it only after confirming that biometric or
+// device-credential authentication protects its device secret.
+func (s *Service) EnableDeviceUnlock(requestID string) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, _, err := s.accountState()
+	if err != nil {
+		return err
+	}
+	return value.EnableDeviceUnlock(ctx)
+}
+
+// UnlockWithDeviceKey unlocks the local account from the platform-authenticated
+// Root Key envelope. It does not accept or retain a passphrase.
+func (s *Service) UnlockWithDeviceKey(requestID, databasePath string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	unlocked, err := account.UnlockWithDeviceKey(ctx, databasePath, s.wrapper)
+	if err != nil {
+		return "", err
+	}
+	return s.activate(unlocked)
+}
+
 func (s *Service) activate(value *account.Account) (string, error) {
 	workspaces, err := value.Workspaces()
 	if err != nil || len(workspaces) == 0 {
@@ -247,6 +278,7 @@ type noteDTO struct {
 	Archived    bool     `json:"archived"`
 	Deleted     bool     `json:"deleted"`
 	CreatedMS   uint64   `json:"created_unix_ms"`
+	UpdatedMS   int64    `json:"updated_unix_ms"`
 	TagIDs      []string `json:"tag_ids"`
 }
 
@@ -274,14 +306,27 @@ func (s *Service) ListNotes(requestID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	metadataByNote, err := value.NoteListMetaByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
 	result := make([]noteDTO, len(notes))
 	for i, note := range notes {
 		result[i] = mobileNote(note)
+		result[i].UpdatedMS = int64(note.CreatedAt.PhysicalMS)
+		if metadata, ok := metadataByNote[note.ID]; ok {
+			result[i].UpdatedMS = metadata.UpdatedUnixMS
+		}
 		for _, tagID := range tagsByNote[note.ID] {
 			result[i].TagIDs = append(result[i].TagIDs, tagID.String())
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].CreatedMS > result[j].CreatedMS })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].UpdatedMS == result[j].UpdatedMS {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].UpdatedMS > result[j].UpdatedMS
+	})
 	return marshal(result)
 }
 

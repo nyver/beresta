@@ -9,12 +9,14 @@ class Strings {
       "create": "Create local account",
       "unlock": "Unlock",
       "passphrase": "Passphrase",
+      "device_unlock": "Unlock with biometrics or PIN",
       "local_hint":
           "Your account starts only on this device. A server is optional.",
       "returning_hint": "Enter your passphrase to unlock this device.",
       "notes": "Notes",
       "notebooks": "Notebooks",
       "new_notebook": "New notebook",
+      "more_actions": "More actions",
       "notebook_name": "Notebook name",
       "delete": "Delete",
       "delete_notebook": "Delete notebook?",
@@ -107,6 +109,7 @@ class Strings {
       "create": "Создать локальный аккаунт",
       "unlock": "Разблокировать",
       "passphrase": "Парольная фраза",
+      "device_unlock": "Разблокировать по биометрии или PIN-коду",
       "local_hint":
           "Аккаунт создаётся только на этом устройстве. Сервер необязателен.",
       "returning_hint":
@@ -114,6 +117,7 @@ class Strings {
       "notes": "Заметки",
       "notebooks": "Блокноты",
       "new_notebook": "Новый блокнот",
+      "more_actions": "Другие действия",
       "notebook_name": "Название блокнота",
       "delete": "Удалить",
       "delete_notebook": "Удалить блокнот?",

@@ -3,8 +3,10 @@
 - `FLAG_SECURE` and Android 13 recent-task screenshot suppression protect every
   note-bearing activity. The app locks after the configured background delay.
 - A non-exportable Android Keystore AES-256-GCM key wraps the mobile core device
-  secret. When strong biometrics are enrolled, a `BiometricPrompt` gates each
-  wrap/unwrap; the key itself is not hardware-bound to the biometric result
+  secret. A `BiometricPrompt` accepts strong biometrics or the configured device
+  credential and gates each wrap/unwrap; after the first passphrase unlock it
+  also protects a local envelope for the account Root Key. The key itself is not
+  hardware-bound to the biometric result
   (`setUserAuthenticationRequired`), because several real Keymaster/TEE
   implementations throw `IllegalBlockSizeException` from `Cipher.doFinal()` on
   an AES/GCM key authorized through `BiometricPrompt.CryptoObject`.

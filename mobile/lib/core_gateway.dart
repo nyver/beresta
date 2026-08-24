@@ -6,6 +6,7 @@ abstract interface class CoreGateway {
   Future<Map<String, dynamic>> status();
   Future<Map<String, dynamic>> createAccount(String passphrase);
   Future<Map<String, dynamic>> unlockAccount(String passphrase);
+  Future<Map<String, dynamic>> unlockWithDeviceAuthentication();
   Future<void> lock();
   Future<List<Map<String, dynamic>>> listNotes();
   Future<Map<String, dynamic>> createNote(String title, {String notebookId});
@@ -81,6 +82,10 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<Map<String, dynamic>> unlockAccount(String passphrase) async =>
       _object(await _invoke("unlockAccount", {"passphrase": passphrase}));
+
+  @override
+  Future<Map<String, dynamic>> unlockWithDeviceAuthentication() async =>
+      _object(await _invoke("unlockWithDeviceAuthentication"));
 
   @override
   Future<void> lock() => _invoke("lock");

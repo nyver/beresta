@@ -209,23 +209,51 @@ class SessionRoot extends StatefulWidget {
 class _SessionRootState extends State<SessionRoot> {
   bool? unlocked;
   bool accountExists = false;
+  bool deviceUnlockAvailable = false;
 
   @override
   void initState() {
     super.initState();
-    widget.gateway
-        .status()
-        .then((status) {
+    loadSession();
+  }
+
+  Future<void> loadSession() async {
+    try {
+      final status = await widget.gateway.status();
+      final isUnlocked = status["unlocked"] == true;
+      final hasAccount = status["account_exists"] == true;
+      final canUseDeviceUnlock = status["device_unlock_available"] == true;
+      if (!isUnlocked && hasAccount && canUseDeviceUnlock) {
+        try {
+          await widget.gateway.unlockWithDeviceAuthentication();
           if (mounted) {
             setState(() {
-              unlocked = status["unlocked"] == true;
-              accountExists = status["account_exists"] == true;
+              unlocked = true;
+              accountExists = true;
+              deviceUnlockAvailable = true;
             });
           }
-        })
-        .catchError((_) {
-          if (mounted) setState(() => unlocked = false);
+          return;
+        } catch (_) {
+          // The user may cancel the platform prompt; passphrase unlock stays
+          // available and the device-authentication action can be retried.
+        }
+      }
+      if (mounted) {
+        setState(() {
+          unlocked = isUnlocked;
+          accountExists = hasAccount;
+          deviceUnlockAvailable = canUseDeviceUnlock;
         });
+      }
+    } catch (_) {
+      if (mounted) setState(() => unlocked = false);
+    }
+  }
+
+  Future<void> unlockWithDeviceAuthentication() async {
+    await widget.gateway.unlockWithDeviceAuthentication();
+    if (mounted) setState(() => unlocked = true);
   }
 
   @override
@@ -241,6 +269,8 @@ class _SessionRootState extends State<SessionRoot> {
         language: widget.language,
         onLanguageChanged: widget.onLanguageChanged,
         accountExists: accountExists,
+        deviceUnlockAvailable: deviceUnlockAvailable,
+        onDeviceUnlock: unlockWithDeviceAuthentication,
         onUnlocked: () => setState(() => unlocked = true),
       );
     }
@@ -262,6 +292,8 @@ class OnboardingScreen extends StatefulWidget {
     required this.onLanguageChanged,
     required this.onUnlocked,
     this.accountExists = false,
+    this.deviceUnlockAvailable = false,
+    this.onDeviceUnlock,
     super.key,
   });
 
@@ -271,6 +303,8 @@ class OnboardingScreen extends StatefulWidget {
   final ValueChanged<String> onLanguageChanged;
   final VoidCallback onUnlocked;
   final bool accountExists;
+  final bool deviceUnlockAvailable;
+  final Future<void> Function()? onDeviceUnlock;
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -300,6 +334,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       }
     } finally {
       passphrase.clear();
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> unlockWithDeviceAuthentication() async {
+    if (busy || widget.onDeviceUnlock == null) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await widget.onDeviceUnlock!();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    } finally {
       if (mounted) setState(() => busy = false);
     }
   }
@@ -354,6 +405,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   TextButton(
                     onPressed: busy ? null : () => submit(false),
                     child: Text(widget.strings("unlock")),
+                  ),
+                ],
+                if (widget.accountExists && widget.deviceUnlockAvailable) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: busy ? null : unlockWithDeviceAuthentication,
+                    icon: const Icon(Icons.fingerprint),
+                    label: Text(widget.strings("device_unlock")),
                   ),
                 ],
                 Text(
@@ -671,10 +730,26 @@ class _NotesShellState extends State<NotesShell> {
                   widget.strings("notebooks"),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
-                IconButton(
-                  tooltip: widget.strings("new_notebook"),
-                  onPressed: () => createNotebook(),
-                  icon: const Icon(Icons.create_new_folder_outlined),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  tooltip: widget.strings("more_actions"),
+                  onSelected: (action) {
+                    if (action == "new_note") {
+                      createNote(notebookId: "", closeDrawer: true);
+                    } else {
+                      createNotebook();
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: "new_note",
+                      child: Text(widget.strings("new_note")),
+                    ),
+                    PopupMenuItem(
+                      value: "new_notebook",
+                      child: Text(widget.strings("new_notebook")),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -769,7 +844,8 @@ class _NotesShellState extends State<NotesShell> {
                           ),
                           subtitle: Text(
                             DateTime.fromMillisecondsSinceEpoch(
-                              note["created_unix_ms"] as int,
+                              (note["updated_unix_ms"] as int?) ??
+                                  (note["created_unix_ms"] as int),
                             ).toLocal().toString(),
                           ),
                           trailing: IconButton(
@@ -786,18 +862,31 @@ class _NotesShellState extends State<NotesShell> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         tooltip: widget.strings("new_note"),
-        onPressed: () async {
-          final created = await widget.gateway.createNote(
-            widget.strings("untitled"),
-            notebookId: selectedNotebook ?? "",
-          );
-          requestCurrentWorkspaceSync(widget.gateway);
-          await openEditor(created["id"] as String);
-        },
+        onPressed: () => createNote(notebookId: selectedNotebook ?? ""),
         icon: const Icon(Icons.add),
         label: Text(widget.strings("new_note")),
       ),
     );
+  }
+
+  Future<void> createNote({
+    required String notebookId,
+    bool closeDrawer = false,
+  }) async {
+    try {
+      final created = await widget.gateway.createNote(
+        widget.strings("untitled"),
+        notebookId: notebookId,
+      );
+      requestCurrentWorkspaceSync(widget.gateway);
+      if (!mounted) return;
+      if (closeDrawer) Navigator.pop(context);
+      await openEditor(created["id"] as String);
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    }
   }
 
   Future<void> openEditor(String noteId) async {

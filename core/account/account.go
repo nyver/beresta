@@ -27,10 +27,16 @@ const (
 	// devicePrivateKeyPurpose is the keystore Purpose for the wrapped
 	// per-device Ed25519 signing private key.
 	devicePrivateKeyPurpose = "device-signing-key"
+	// deviceUnlockRootKeyPurpose identifies the optional local copy of the
+	// account Root Key protected by the platform authenticator. It allows a
+	// user-authenticated mobile device to unlock without retaining the
+	// passphrase on disk.
+	deviceUnlockRootKeyPurpose = "device-unlock-root-key"
 
-	envelopeFileSuffix   = ".keyenvelope"
-	workspaceKeyIDLen    = 16
-	initialKeybagVersion = 1
+	envelopeFileSuffix     = ".keyenvelope"
+	deviceUnlockFileSuffix = ".deviceunlock"
+	workspaceKeyIDLen      = 16
+	initialKeybagVersion   = 1
 )
 
 var (
@@ -42,6 +48,9 @@ var (
 	ErrNoLocalAccount = errors.New("account: no local account at this path")
 	// ErrAccountLocked reports use of an Account after Lock.
 	ErrAccountLocked = errors.New("account: account is locked")
+	// ErrDeviceUnlockUnavailable reports that no platform-authenticated local
+	// Root Key envelope has been provisioned for this account.
+	ErrDeviceUnlockUnavailable = errors.New("account: device unlock is unavailable")
 	// ErrUnknownWorkspace reports a workspace ID with no key held by this
 	// unlocked account.
 	ErrUnknownWorkspace = errors.New("account: unknown workspace")
@@ -614,7 +623,26 @@ func Unlock(ctx context.Context, opts UnlockOptions) (*Account, error) {
 		return nil, err
 	}
 
-	account, err := unlockAccountContent(ctx, db, opts)
+	accountRow, err := loadAccountRow(ctx, db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	kdfParams := corecrypto.Argon2idParams{
+		CryptoProfile:   corecrypto.CryptoProfileV1,
+		Algorithm:       corecrypto.Argon2idName,
+		Salt:            accountRow.kdfSalt,
+		MemoryKiB:       accountRow.kdfMemoryKiB,
+		TimeCost:        accountRow.kdfTimeCost,
+		Parallelism:     accountRow.kdfParallelism,
+		DerivedKeyBytes: corecrypto.RootKeyBytes,
+	}
+	rootKey, err := corecrypto.DeriveRootKey(ctx, opts.Passphrase, kdfParams)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	account, err := unlockAccountContent(ctx, db, opts, accountRow, rootKey)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -622,18 +650,72 @@ func Unlock(ctx context.Context, opts UnlockOptions) (*Account, error) {
 	return account, nil
 }
 
-func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (*Account, error) {
-	accountRow, err := loadAccountRow(ctx, db)
+// UnlockWithDeviceKey opens an account using a Root Key previously wrapped by
+// EnableDeviceUnlock. The caller must arrange platform user authentication
+// before calling this method; a missing envelope falls back to passphrase
+// unlock without exposing account data.
+func UnlockWithDeviceKey(ctx context.Context, databasePath string, wrapper keystore.Wrapper) (*Account, error) {
+	if databasePath == "" {
+		return nil, errors.New("account: database path is required")
+	}
+	if wrapper == nil {
+		return nil, keystore.ErrUnavailable
+	}
+	rootEnvelope, err := os.ReadFile(deviceUnlockPath(databasePath))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrDeviceUnlockUnavailable
+	}
+	if err != nil {
+		return nil, fmt.Errorf("account: read device unlock envelope: %w", err)
+	}
+	rootKey, err := wrapper.Unwrap(ctx, keystore.Metadata{KeyID: localDeviceKeyID, Purpose: deviceUnlockRootKeyPurpose}, rootEnvelope)
 	if err != nil {
 		return nil, err
 	}
+
+	envelope, err := os.ReadFile(envelopePath(databasePath))
+	if err != nil {
+		rootKey.Close()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNoLocalAccount
+		}
+		return nil, err
+	}
+	dbKey, _, err := store.LoadOrCreateDatabaseKey(ctx, wrapper, localDeviceKeyID, envelope)
+	if err != nil {
+		rootKey.Close()
+		return nil, err
+	}
+	db, _, err := store.Open(ctx, databasePath, dbKey)
+	dbKey.Close()
+	if err != nil {
+		rootKey.Close()
+		return nil, err
+	}
+	accountRow, err := loadAccountRow(ctx, db)
+	if err != nil {
+		rootKey.Close()
+		db.Close()
+		return nil, err
+	}
+	account, err := unlockAccountContent(ctx, db, UnlockOptions{DatabasePath: databasePath, Wrapper: wrapper}, accountRow, rootKey)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return account, nil
+}
+
+func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions, accountRow accountRow, rootKey *corecrypto.Secret) (*Account, error) {
 	deviceRow, err := loadLocalDeviceRow(ctx, db)
 	if err != nil {
+		rootKey.Close()
 		return nil, err
 	}
 
 	devicePrivate, err := opts.Wrapper.Unwrap(ctx, keystore.Metadata{KeyID: localDeviceKeyID, Purpose: devicePrivateKeyPurpose}, deviceRow.signingKeyEnvelope)
 	if err != nil {
+		rootKey.Close()
 		return nil, err
 	}
 
@@ -648,6 +730,7 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 	}
 	header, err := corecrypto.NewKeybagHeader(accountRow.id.Bytes(), accountRow.keybagVersion, kdfParams)
 	if err != nil {
+		rootKey.Close()
 		devicePrivate.Close()
 		return nil, err
 	}
@@ -657,19 +740,6 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 		Ciphertext: accountRow.keybagCiphertext,
 	}
 
-	// Derive the Root Key directly (rather than through the UnlockKeybag
-	// convenience wrapper, which derives and discards it internally) so it
-	// can be retained on the returned Account: backup creation (see
-	// core/account/backup.go) derives a fresh per-backup key from it later,
-	// on demand, exactly as workspace/identity keys are already retained
-	// for the account's unlocked lifetime. OpenKeybag reports the same
-	// uniform error for a wrong passphrase and a corrupt/tampered keybag as
-	// UnlockKeybag does, since UnlockKeybag is just these two calls.
-	rootKey, err := corecrypto.DeriveRootKey(ctx, opts.Passphrase, kdfParams)
-	if err != nil {
-		devicePrivate.Close()
-		return nil, err
-	}
 	keybagSecret, err := corecrypto.OpenKeybag(rootKey, encryptedKeybag)
 	if err != nil {
 		rootKey.Close()
@@ -728,6 +798,26 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions) (
 		databasePath:            opts.DatabasePath,
 		wrapper:                 opts.Wrapper,
 	}, nil
+}
+
+// EnableDeviceUnlock writes an authenticated platform-keystore envelope for
+// the Root Key of an already unlocked account. It never stores the passphrase
+// and is intentionally opt-in for platform clients that have verified a
+// biometric or device-credential challenge.
+func (a *Account) EnableDeviceUnlock(ctx context.Context) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.locked || a.rootKey == nil {
+		return ErrAccountLocked
+	}
+	envelope, err := a.wrapper.Wrap(ctx, keystore.Metadata{KeyID: localDeviceKeyID, Purpose: deviceUnlockRootKeyPurpose}, a.rootKey)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(deviceUnlockPath(a.databasePath), envelope, 0o600); err != nil {
+		return fmt.Errorf("account: write device unlock envelope: %w", err)
+	}
+	return nil
 }
 
 type accountRow struct {
@@ -791,6 +881,10 @@ func envelopePath(databasePath string) string {
 	return databasePath + envelopeFileSuffix
 }
 
+func deviceUnlockPath(databasePath string) string {
+	return databasePath + deviceUnlockFileSuffix
+}
+
 // newBlobStore returns the BlobStore for the data directory containing
 // databasePath, at the fixed layout documented in docs/architecture.md:
 // <data-dir>/blobs for published content, <data-dir>/runtime for staging.
@@ -838,6 +932,9 @@ func EraseLocalAccount(databasePath string) error {
 	}
 	if err := os.Remove(envelopePath(databasePath)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("account: erase key envelope: %w", err)
+	}
+	if err := os.Remove(deviceUnlockPath(databasePath)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("account: erase device unlock envelope: %w", err)
 	}
 	dataDir := filepath.Dir(databasePath)
 	if err := os.RemoveAll(filepath.Join(dataDir, "blobs")); err != nil {

@@ -55,6 +55,10 @@ internal class AndroidKeyWrappingAdapter(
         BiometricManager.from(activity).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
             BiometricManager.BIOMETRIC_SUCCESS
 
+    fun deviceAuthenticationAvailable(): Boolean =
+        BiometricManager.from(activity).canAuthenticate(DEVICE_AUTHENTICATORS) ==
+            BiometricManager.BIOMETRIC_SUCCESS
+
     fun wrap(
         protection: Protection,
         metadata: Metadata,
@@ -174,7 +178,7 @@ internal class AndroidKeyWrappingAdapter(
             executeCipher(cipher, callback, operation)
             return
         }
-        if (!biometricAvailable() || !validPrompt(prompt) || !validPrompt(cancelLabel)) {
+        if (!deviceAuthenticationAvailable() || !validPrompt(prompt)) {
             callback.error(ERROR_UNAVAILABLE)
             return
         }
@@ -215,12 +219,19 @@ internal class AndroidKeyWrappingAdapter(
                     }
                 },
             )
-        val promptInfo =
+        val authenticators =
+            if (requireCryptoBinding) BiometricManager.Authenticators.BIOMETRIC_STRONG
+            else DEVICE_AUTHENTICATORS
+        val promptBuilder =
             BiometricPrompt.PromptInfo.Builder()
                 .setTitle(requireNotNull(prompt))
-                .setNegativeButtonText(requireNotNull(cancelLabel))
-                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                .build()
+                .setAllowedAuthenticators(authenticators)
+        // Android rejects a custom negative button whenever DEVICE_CREDENTIAL
+        // is allowed; the system prompt supplies its own PIN/passcode action.
+        if (authenticators == BiometricManager.Authenticators.BIOMETRIC_STRONG) {
+            promptBuilder.setNegativeButtonText(requireNotNull(cancelLabel))
+        }
+        val promptInfo = promptBuilder.build()
         if (requireCryptoBinding) {
             biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))
         } else {
@@ -338,6 +349,9 @@ internal class AndroidKeyWrappingAdapter(
         private const val MAX_PLAINTEXT_BYTES = 4096
         private const val KEY_BITS = 256
         private const val GCM_TAG_BITS = 128
+        private val DEVICE_AUTHENTICATORS =
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL
         private val MAGIC = byteArrayOf('B'.code.toByte(), 'K'.code.toByte(), 'W'.code.toByte(), '1'.code.toByte())
 
         private fun validToken(value: String): Boolean =

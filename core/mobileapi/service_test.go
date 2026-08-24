@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestServiceDeviceSecret(t *testing.T) []byte {
@@ -23,6 +24,54 @@ func decodeJSON[T any](t *testing.T, encoded string) T {
 		t.Fatalf("decode %q: %v", encoded, err)
 	}
 	return value
+}
+
+func must(value string, err error) string {
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
+func TestListNotesOrdersByLastModified(t *testing.T) {
+	service, err := NewService(newTestServiceDeviceSecret(t))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	t.Cleanup(service.Close)
+	if _, err := service.CreateAccount("create-account", filepath.Join(t.TempDir(), "beresta.db"), "correct horse battery staple"); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	firstJSON, err := service.CreateNote("create-first", "", "first")
+	if err != nil {
+		t.Fatalf("CreateNote(first): %v", err)
+	}
+	first := decodeJSON[map[string]any](t, firstJSON)
+	firstID, _ := first["id"].(string)
+	if firstID == "" {
+		t.Fatalf("unexpected first note: %v", first)
+	}
+	// Note metadata uses physical milliseconds. A short gap makes this test
+	// assert ordering by a later edit rather than an arbitrary tie-breaker.
+	time.Sleep(2 * time.Millisecond)
+	if _, err := service.CreateNote("create-second", "", "second"); err != nil {
+		t.Fatalf("CreateNote(second): %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if err := service.SaveNote("edit-first", firstID, "first", "edited last"); err != nil {
+		t.Fatalf("SaveNote(first): %v", err)
+	}
+
+	listed := decodeJSON[[]map[string]any](t, must(service.ListNotes("list-notes")))
+	if len(listed) != 2 {
+		t.Fatalf("ListNotes count = %d, want 2", len(listed))
+	}
+	if listed[0]["id"] != firstID {
+		t.Fatalf("first listed note = %v, want last-edited note %s", listed[0], firstID)
+	}
+	if _, ok := listed[0]["updated_unix_ms"].(float64); !ok {
+		t.Fatalf("ListNotes did not return updated_unix_ms: %v", listed[0])
+	}
 }
 
 // TestServiceFullAccountLifecycle exercises the gomobile-facing Service

@@ -2,8 +2,11 @@
 
 Beresta creates and edits a complete local collection before any network is
 configured. Create a local account or unlock the existing account with its
-passphrase. Strong biometrics are used when the device supports them; Android
-Keystore remains the device key boundary.
+passphrase once. On a device with a secure screen lock, later launches can use
+strong biometrics or the configured device credential (PIN, pattern, or device
+password); the passphrase remains available as the recovery fallback. Android
+Keystore remains the device key boundary and the app never stores the
+passphrase.
 
 The navigation drawer filters the virtualized note list by notebook and shows
 available tags. Search uses the encrypted local FTS index and supports the same

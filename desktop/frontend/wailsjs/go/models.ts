@@ -1,11 +1,11 @@
 export namespace main {
-	
+
 	export class AccountInfo {
 	    account_id: string;
 	    device_id: string;
 	    workspace_id: string;
 	    key_protection: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AccountInfo(source);
 	    }
@@ -21,11 +21,11 @@ export namespace main {
 	export class AccountStatus {
 	    unlocked: boolean;
 	    account?: AccountInfo;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AccountStatus(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.unlocked = source["unlocked"];
@@ -779,6 +779,7 @@ export namespace main {
 	        this.member_count = source["member_count"];
 	    }
 	}
+
 }
 
 export namespace transport {

@@ -282,14 +282,13 @@ export function Shell({ account, onLocked }: ShellProps) {
     );
   }
 
-  async function handleCreateNote() {
+  async function handleCreateNote(
+    notebookId = selection.kind === "notebook" ? selection.id : "",
+  ) {
+    if (creatingNote) return;
     setCreatingNote(true);
     setNoteCreateError(null);
     try {
-      // Files the note into the currently selected notebook, or the
-      // workspace root ("") when "All Notes" or a tag is selected - a tag
-      // is not a filing location a note can be created into directly.
-      const notebookId = selection.kind === "notebook" ? selection.id : "";
       const created = await createNote(notebookId, "");
       setNotes((current) => [created, ...current]);
       searchBarRef.current?.clear();
@@ -432,11 +431,10 @@ export function Shell({ account, onLocked }: ShellProps) {
     setAutoLockMinutes(updated.auto_lock_minutes);
   }
 
-  // Ctrl+N/Cmd+N creates a note from anywhere in the shell, mirroring the
-  // sidebar's "+ New note" button. Read through a ref (same pattern as
-  // handleLockRef above) so this listener is only ever attached once,
-  // instead of being torn down and reattached on every keystroke-driven
-  // Shell render.
+  // Ctrl+N/Cmd+N creates a note from anywhere in the shell. Read through a
+  // ref (same pattern as handleLockRef above) so this listener is only ever
+  // attached once, instead of being torn down and reattached on every
+  // keystroke-driven Shell render.
   const handleCreateNoteRef = useRef(handleCreateNote);
   handleCreateNoteRef.current = handleCreateNote;
 
@@ -511,8 +509,15 @@ export function Shell({ account, onLocked }: ShellProps) {
           >
             ⚙
           </button>
-          <button type="button" onClick={() => void handleLock()} disabled={locking}>
-            {t("shell.lock_button")}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={t("shell.lock_button")}
+            title={t("shell.lock_button")}
+            onClick={() => void handleLock()}
+            disabled={locking}
+          >
+            <span aria-hidden="true">🔒</span>
           </button>
         </div>
       </header>
@@ -576,14 +581,6 @@ export function Shell({ account, onLocked }: ShellProps) {
           className={`shell-body${sidebarCollapsed || focusMode ? " sidebar-collapsed" : ""}${focusMode ? " focus-mode" : ""}`}
         >
           <aside className="shell-sidebar">
-            <button
-              type="button"
-              className="new-note-button"
-              onClick={() => void handleCreateNote()}
-              disabled={creatingNote}
-            >
-              <span aria-hidden="true">+</span> {t("shell.new_note_button")}
-            </button>
             <NotebookTree
               notebooks={notebooks}
               selectedId={
@@ -593,6 +590,7 @@ export function Shell({ account, onLocked }: ShellProps) {
                 searchBarRef.current?.clear();
                 setSelection(id === "" ? { kind: "all" } : { kind: "notebook", id });
               }}
+              onCreateNote={(notebookId) => void handleCreateNote(notebookId)}
               onCreated={(notebook) => setNotebooks((current) => [...current, notebook])}
               onDeleted={(notebookId) => {
                 setNotebooks((current) => current.filter((notebook) => notebook.id !== notebookId));
@@ -654,8 +652,6 @@ export function Shell({ account, onLocked }: ShellProps) {
               assignedTagIds={selectedNote ? (noteTagIds[selectedNote.id] ?? []) : []}
               onTitleCommitted={handleTitleCommitted}
               onDeleted={handleDeleteNote}
-              onCreateNote={() => void handleCreateNote()}
-              creatingNote={creatingNote}
               onToggleTag={handleToggleNoteTag}
               onCreateTag={handleCreateAndAssignTag}
               syncStatus={syncStatusValue}

@@ -79,17 +79,22 @@ func (s *Service) ShareWorkspace(requestID, identityCode string) (string, error)
 	if err != nil {
 		return "", err
 	}
+	// Prompt the current worker to publish the collection immediately, so a
+	// member joining with this grant receives existing notes and notebooks.
+	s.mu.Lock()
+	coordinator := s.coordinator
+	s.mu.Unlock()
+	if coordinator != nil {
+		coordinator.Trigger()
+	}
 	return marshal(map[string]string{"grant_code": grantCode})
 }
 
 // AcceptWorkspaceGrant redeems a beresta://grant code produced by
 // ShareWorkspace: it fetches the matching sealed key envelope from the
 // server, adds the shared workspace to this account's local keybag, and
-// makes it the active workspace for the rest of this unlocked session (a
-// fresh unlock resets to the deterministic smallest-workspace-ID pick;
-// SetActiveWorkspace after unlocking restores whichever workspace the user
-// prefers - this session-only scope, unlike desktop's persisted
-// ActiveWorkspaceID setting, is a known limitation of this first cut). Sync
+// makes it the active workspace and persists that choice across future
+// lock/unlock cycles. Sync
 // must already be enabled - the account must already be registered on the
 // same server the grant was issued against, since GetKeyEnvelopes only
 // returns envelopes for workspaces this device's user is already a member
@@ -126,6 +131,9 @@ func (s *Service) AcceptWorkspaceGrant(requestID, grantCode string) (string, err
 		return "", err
 	}
 	if err := s.attachWorkspaceSync(value, workspaceID); err != nil {
+		return "", err
+	}
+	if err := saveActiveWorkspace(ctx, value.DB(), workspaceID); err != nil {
 		return "", err
 	}
 	s.emit("workspace_changed", map[string]string{"workspace_id": workspaceID.String()})
@@ -175,14 +183,14 @@ func (s *Service) ListWorkspaces(requestID string) (string, error) {
 }
 
 // SetActiveWorkspace changes which of the account's workspaces
-// workspace-scoped methods act against for the rest of this unlocked
-// session, and - when sync is enabled - redirects the running sync worker
+// workspace-scoped methods act against and persists that choice across future
+// lock/unlock cycles. When sync is enabled, it redirects the running worker
 // at it. workspaceID must name a workspace this account already holds a key
 // for (see ListWorkspaces); switching to one it does not is rejected rather
 // than silently falling back, since that would be confusing after an
 // explicit user choice.
 func (s *Service) SetActiveWorkspace(requestID, workspaceID string) error {
-	_, done, err := s.begin(requestID)
+	ctx, done, err := s.begin(requestID)
 	if err != nil {
 		return err
 	}
@@ -221,6 +229,9 @@ func (s *Service) SetActiveWorkspace(requestID, workspaceID string) error {
 		s.mu.Lock()
 		s.workspaceID = id
 		s.mu.Unlock()
+	}
+	if err := saveActiveWorkspace(ctx, value.DB(), id); err != nil {
+		return err
 	}
 	s.emit("workspace_changed", map[string]string{"workspace_id": id.String()})
 	return nil

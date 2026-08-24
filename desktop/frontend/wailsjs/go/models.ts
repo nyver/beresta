@@ -31,7 +31,7 @@ export namespace main {
 	        this.unlocked = source["unlocked"];
 	        this.account = this.convertValues(source["account"], AccountInfo);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -724,30 +724,12 @@ export namespace main {
 	        this.passphrase = source["passphrase"];
 	    }
 	}
-	export class WorkspaceSummaryDTO {
-	    workspace_id: string;
-	    role: string;
-	    active: boolean;
-	    member_count?: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new WorkspaceSummaryDTO(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.workspace_id = source["workspace_id"];
-	        this.role = source["role"];
-	        this.active = source["active"];
-	        this.member_count = source["member_count"];
-	    }
-	}
-
 	export class WorkspaceMemberDTO {
 	    user_id: string;
 	    display_name: string;
 	    role: string;
-	    revoked_at?: string;
+	    // Go type: time
+	    revoked_at?: any;
 
 	    static createFrom(source: any = {}) {
 	        return new WorkspaceMemberDTO(source);
@@ -758,12 +740,47 @@ export namespace main {
 	        this.user_id = source["user_id"];
 	        this.display_name = source["display_name"];
 	        this.role = source["role"];
-	        this.revoked_at = source["revoked_at"];
+	        this.revoked_at = this.convertValues(source["revoked_at"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class WorkspaceSummaryDTO {
+	    workspace_id: string;
+	    role: string;
+	    active: boolean;
+	    member_count?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceSummaryDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.workspace_id = source["workspace_id"];
+	        this.role = source["role"];
+	        this.active = source["active"];
+	        this.member_count = source["member_count"];
 	    }
 	}
 
 }
-
 export namespace transport {
 	
 	export class Diagnostics {

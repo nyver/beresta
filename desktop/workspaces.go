@@ -82,6 +82,14 @@ func (a *App) ShareWorkspace(identityCode string) (string, error) {
 	if err != nil {
 		return "", mapError(err)
 	}
+	// Make already-created notes and notebooks available to the newly added
+	// member without making them wait for the regular sync poll interval.
+	a.mu.Lock()
+	coordinator := a.syncCoordinator
+	a.mu.Unlock()
+	if coordinator != nil {
+		coordinator.Trigger()
+	}
 	return grantCode, nil
 }
 

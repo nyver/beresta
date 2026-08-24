@@ -423,6 +423,9 @@ class _NotesShellState extends State<NotesShell> {
   Timer? searchDebounce;
   String syncStatusValue = "disabled";
   Timer? syncStatusTimer;
+  Timer? syncEventsTimer;
+  int eventCursor = 0;
+  bool pollingEvents = false;
 
   @override
   void initState() {
@@ -432,6 +435,11 @@ class _NotesShellState extends State<NotesShell> {
     syncStatusTimer = Timer.periodic(
       const Duration(seconds: 5),
       (_) => refreshSyncStatus(),
+    );
+    pollEvents();
+    syncEventsTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => pollEvents(),
     );
   }
 
@@ -471,6 +479,31 @@ class _NotesShellState extends State<NotesShell> {
     }
   }
 
+  Future<void> pollEvents() async {
+    if (pollingEvents) return;
+    pollingEvents = true;
+    try {
+      final events = await widget.gateway.pollEvents(eventCursor);
+      var refreshCollection = false;
+      for (final event in events) {
+        final sequence = event["sequence"];
+        if (sequence is num && sequence.toInt() > eventCursor) {
+          eventCursor = sequence.toInt();
+        }
+        switch (event["type"]) {
+          case "workspace_changed":
+          case "workspace_synced":
+            refreshCollection = true;
+        }
+      }
+      if (refreshCollection && mounted) await refresh();
+    } catch (_) {
+      // The next poll retries after transient method-channel or lock errors.
+    } finally {
+      pollingEvents = false;
+    }
+  }
+
   void runSearch(String value) {
     searchDebounce?.cancel();
     searchDebounce = Timer(const Duration(milliseconds: 250), () async {
@@ -493,6 +526,7 @@ class _NotesShellState extends State<NotesShell> {
   void dispose() {
     searchDebounce?.cancel();
     syncStatusTimer?.cancel();
+    syncEventsTimer?.cancel();
     super.dispose();
   }
 

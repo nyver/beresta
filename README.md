@@ -41,7 +41,7 @@ home server, convergent client synchronization, and the Android application:
 - deterministic-CBOR operation envelopes, durable pull-verify-apply-then-push workers, exactly-once application/quarantine recovery, TLS 1.3 pinning, resumable encrypted blobs, encrypted operation-replay snapshots, compaction bootstrap, and functional Windows server/device diagnostics;
 - a gomobile-safe value API with bounded event polling and cancellation, reproducibly normalized/checksummed Android AARs, Android Keystore and strong biometric unlock, constrained WorkManager jobs, SPAKE2-confirmed LAN frames, encrypted share/widget handoff, and attachment-cache retention controls;
 - workspace sharing (per-recipient sealed X25519 key envelopes with client-side membership signature verification), signed member/device revocation, no-downtime workspace-key rotation with historical-key reads and resumable local re-encryption hardening, and an optional shared-folder transport (immutable operation segments, a short-locked manifest, and content-addressed blob exchange) as an HTTP alternative;
-- desktop and mobile UI for that sharing primitive: an `ExportIdentity`/`ShareWorkspace`/`AcceptWorkspaceGrant`/`ListWorkspaces`/`SetActiveWorkspace` surface (`core/sharecode`'s opaque `beresta://identity` and `beresta://grant` out-of-band codes) so a second already-registered household device can join and switch to an existing workspace instead of only ever owning its own; mobile lists held workspaces and keeps the share sheet open until its initial sync completes, while desktop owners can see and disconnect active workspace clients (see [docs/sync-protocol.md](docs/sync-protocol.md) and [docs/android-user-guide.md](docs/android-user-guide.md));
+- desktop and mobile UI for that sharing primitive: an `ExportIdentity`/`ShareWorkspace`/`AcceptWorkspaceGrant`/`ListWorkspaces`/`SetActiveWorkspace` surface (`core/sharecode`'s opaque `beresta://identity` and `beresta://grant` out-of-band codes) so a second already-registered household device can join and switch to an existing workspace instead of only ever owning its own; sharing prompts the owner to publish its existing collection, mobile preserves its selected workspace across lock/unlock, and reloads notes and notebooks when initial sync completes, while desktop owners can see and disconnect active workspace clients (see [docs/sync-protocol.md](docs/sync-protocol.md) and [docs/android-user-guide.md](docs/android-user-guide.md));
 - local operation-log and snapshot garbage collection alongside the existing tombstone/blob collector; systemd, Windows batch/Task Scheduler, and optional Docker deployment assets; and a release pipeline covering signed update-manifest publication, Android release signing, server checksums/SBOM/provenance, a core coverage gate, and `govulncheck`/OSV dependency scanning.
 
 The completed Phase 4 Windows desktop application uses a coarse Wails
@@ -69,7 +69,9 @@ text-query quoting limitations), and a virtualized note list
 (`@tanstack/react-virtual`, since the account ceiling is 20,000 notes)
 selecting into a working note editor. Notebook, note, and tag creation and
 deletion live behind a per-row "⋮" kebab menu (`shell/KebabMenu.tsx`) next
-to each item's name rather than always-visible buttons, and both trees
+to each item's name rather than always-visible buttons. Choosing "New note"
+from a notebook's menu files it directly in that notebook; the Notebooks
+section menu creates a note in the workspace root. Both trees
 support drag-and-drop reorganization: dropping a notebook onto another
 reparents it (and everything filed under it) via the existing
 `MoveNotebook` cycle-checked binding, and dragging a note from the list
@@ -507,11 +509,10 @@ seven valid daily backups are retained.
   real in-process server). Desktop owners can list and disconnect active
   workspace members; removal blocks their future server synchronization but
   cannot erase notes or keys they already downloaded. Mobile's
-  active-workspace choice lives only in the
-  running `Service` instance, not the persisted `mobile_preferences` row, so
-  it resets to the account's deterministically lowest-ID workspace on every
-  fresh unlock rather than remembering the last one chosen (desktop persists
-  this in `AppSettings.ActiveWorkspaceID`). The Kotlin `MainActivity.kt`
+  active-workspace choice is stored in the persisted `mobile_preferences`
+  row, so the most recently selected workspace is restored after every
+  unlock, matching desktop's `AppSettings.ActiveWorkspaceID` behavior. The
+  Kotlin `MainActivity.kt`
   method-channel wiring for the new bridge calls was hand-verified against
   the established 1:1 naming convention with the other bound methods but not
   compiled, since this development environment has no configured Android SDK

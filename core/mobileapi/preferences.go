@@ -21,6 +21,7 @@ const (
 type mobilePreferences struct {
 	Language            string   `json:"language"`
 	AutoLockMinutes     int      `json:"auto_lock_minutes"`
+	ActiveWorkspaceID   string   `json:"active_workspace_id"`
 	BackupDestination   string   `json:"backup_destination"`
 	AttachmentRetention string   `json:"attachment_retention"`
 	SelectedNotebooks   []string `json:"selected_notebooks"`
@@ -46,6 +47,11 @@ func (p mobilePreferences) validate() error {
 	}
 	if p.AttachmentRetention != retentionAll && p.AttachmentRetention != retentionSelected && p.AttachmentRetention != retentionMetadata {
 		return errors.New("mobileapi: invalid attachment retention mode")
+	}
+	if p.ActiveWorkspaceID != "" {
+		if _, err := parseID(p.ActiveWorkspaceID); err != nil {
+			return err
+		}
 	}
 	seen := make(map[string]struct{}, len(p.SelectedNotebooks))
 	for _, raw := range p.SelectedNotebooks {
@@ -97,16 +103,35 @@ func (s *Service) UpdateSettings(requestID, encoded string) error {
 	if err != nil {
 		return err
 	}
-	contents, err := json.Marshal(prefs)
-	if err != nil {
-		return err
-	}
-	_, err = value.DB().ExecContext(ctx, `INSERT INTO mobile_preferences(singleton, value_json, updated_unix_ms) VALUES (1, ?, ?)
-		ON CONFLICT(singleton) DO UPDATE SET value_json = excluded.value_json, updated_unix_ms = excluded.updated_unix_ms`, contents, time.Now().UnixMilli())
+	err = saveMobilePreferences(ctx, value.DB(), prefs)
 	if err == nil {
 		s.emit("settings_changed", prefs)
 	}
 	return err
+}
+
+func saveMobilePreferences(ctx context.Context, db *sql.DB, prefs mobilePreferences) error {
+	if err := prefs.validate(); err != nil {
+		return err
+	}
+	contents, err := json.Marshal(prefs)
+	if err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO mobile_preferences(singleton, value_json, updated_unix_ms) VALUES (1, ?, ?)
+		ON CONFLICT(singleton) DO UPDATE SET value_json = excluded.value_json, updated_unix_ms = excluded.updated_unix_ms`, contents, time.Now().UnixMilli())
+	return err
+}
+
+// saveActiveWorkspace remembers the workspace selected by the user so a
+// lock/unlock cycle does not silently switch synchronization to another one.
+func saveActiveWorkspace(ctx context.Context, db *sql.DB, workspaceID model.ID) error {
+	prefs, err := loadMobilePreferences(ctx, db)
+	if err != nil {
+		return err
+	}
+	prefs.ActiveWorkspaceID = workspaceID.String()
+	return saveMobilePreferences(ctx, db, prefs)
 }
 
 func loadMobilePreferences(ctx context.Context, db *sql.DB) (mobilePreferences, error) {

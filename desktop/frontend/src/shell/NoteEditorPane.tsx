@@ -31,13 +31,6 @@ export interface NoteEditorPaneProps {
    * caller (Shell) can drop it from its own note list state and clear
    * the selection. */
   onDeleted: (noteId: string) => Promise<void> | void;
-  /** Creates a new note (in whatever notebook context Shell currently has
-   * selected) - used by both the open note's kebab menu and the
-   * no-note-open placeholder. */
-  onCreateNote: () => void;
-  /** True while a just-requested onCreateNote call is still in flight, so
-   * both triggers can disable themselves against a double click. */
-  creatingNote: boolean;
   /** Assigns or unassigns one tag on the open note. */
   onToggleTag: (noteId: string, tagId: string, present: boolean) => Promise<void>;
   /** Creates a new workspace tag and assigns it to the open note. */
@@ -71,8 +64,6 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
       assignedTagIds,
       onTitleCommitted,
       onDeleted,
-      onCreateNote,
-      creatingNote,
       onToggleTag,
       onCreateTag,
       syncStatus = null,
@@ -161,14 +152,7 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     useImperativeHandle(ref, () => ({ flush: commitTitleIfChanged }), [note, title]);
 
     if (!note) {
-      return (
-        <div className="note-detail note-detail-empty">
-          <p>{t("shell.detail_placeholder")}</p>
-          <button type="button" onClick={onCreateNote} disabled={creatingNote}>
-            {t("shell.new_note_button")}
-          </button>
-        </div>
-      );
+      return <div className="note-detail note-detail-empty" />;
     }
 
     return (
@@ -201,7 +185,6 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
             <KebabMenu
               label={t("shell.note_actions")}
               items={[
-                { label: t("shell.new_note_button"), onSelect: onCreateNote, disabled: creatingNote },
                 { label: t("revisions.open_button"), onSelect: () => setHistoryOpen(true) },
                 { label: t("shell.delete_note"), onSelect: () => setConfirmingDelete(true), destructive: true },
               ]}

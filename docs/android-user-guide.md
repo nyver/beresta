@@ -43,10 +43,12 @@ with its own invite code), then share the workspace between them:
 3. On the owning device, paste the code into "Share this workspace" and copy
    the resulting grant code back to the joining device.
 4. On the joining device, paste the grant code into "Join a shared
-   workspace." The server sheet keeps the device on the synchronization
-   status until its initial download completes; then that workspace becomes
-   active for the rest of this session, alongside the device's own original
-   one. The same sheet lists every workspace held by the device and lets you
+   workspace." The owner publishes the existing collection immediately, and
+   the server sheet keeps the device on the synchronization status until its
+   initial download completes; then that workspace becomes
+   active across future lock/unlock cycles, alongside the device's own
+   original one. The same sheet lists every workspace held by the device and
+   lets you
    switch between them.
 
 This makes the joining device a workspace member (not the workspace owner),

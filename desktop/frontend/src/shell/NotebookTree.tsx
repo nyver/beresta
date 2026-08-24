@@ -18,6 +18,8 @@ export interface NotebookTreeProps {
    * any notebook is the active selection (a tag is selected instead). */
   selectedId: string | null;
   onSelect: (notebookId: string) => void;
+  /** Creates a note directly in the notebook selected from its row menu. */
+  onCreateNote: (notebookId: string) => void;
   /** Called after a new notebook has been durably created, so the caller
    * (Shell) can add it to its own notebooks state. */
   onCreated: (notebook: main.NotebookDTO) => void;
@@ -44,6 +46,7 @@ export function NotebookTree({
   notebooks,
   selectedId,
   onSelect,
+  onCreateNote,
   onCreated,
   onDeleted,
   onMoved,
@@ -163,7 +166,10 @@ export function NotebookTree({
         <h2>{t("shell.notebooks_section")}</h2>
         <KebabMenu
           label={t("shell.notebooks_section_actions")}
-          items={[{ label: t("shell.new_notebook_menu_item"), onSelect: () => startCreate("") }]}
+          items={[
+            { label: t("shell.new_note_button"), onSelect: () => onCreateNote("") },
+            { label: t("shell.new_notebook_menu_item"), onSelect: () => startCreate("") },
+          ]}
         />
       </div>
       <button
@@ -200,6 +206,7 @@ export function NotebookTree({
               dragOver={dragOverId === node.notebook.id}
               onToggle={() => toggle(node.notebook.id)}
               onSelect={() => onSelect(node.notebook.id)}
+              onCreateNote={() => onCreateNote(node.notebook.id)}
               confirmingDelete={confirmingDeleteId === node.notebook.id}
               deleting={deleting}
               onRequestCreateChild={() => startCreate(node.notebook.id)}
@@ -291,6 +298,7 @@ function NotebookRow({
   dragOver,
   onToggle,
   onSelect,
+  onCreateNote,
   confirmingDelete,
   deleting,
   onRequestCreateChild,
@@ -307,6 +315,7 @@ function NotebookRow({
   dragOver: boolean;
   onToggle: () => void;
   onSelect: () => void;
+  onCreateNote: () => void;
   confirmingDelete: boolean;
   deleting: boolean;
   onRequestCreateChild: () => void;
@@ -364,6 +373,7 @@ function NotebookRow({
         <KebabMenu
           label={`${t("shell.notebook_actions")}: ${node.notebook.name}`}
           items={[
+            { label: t("shell.new_note_button"), onSelect: onCreateNote },
             { label: t("shell.new_notebook_menu_item"), onSelect: onRequestCreateChild },
             { label: t("shell.delete_notebook"), onSelect: onRequestDelete, destructive: true },
           ]}

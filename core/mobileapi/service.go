@@ -157,9 +157,20 @@ func (s *Service) activate(value *account.Account) (string, error) {
 		return "", errors.New("mobileapi: account has no workspace")
 	}
 	sort.Slice(workspaces, func(i, j int) bool { return workspaces[i].Compare(workspaces[j]) < 0 })
+	activeWorkspace := workspaces[0]
+	if prefs, err := loadMobilePreferences(s.root, value.DB()); err == nil && prefs.ActiveWorkspaceID != "" {
+		if preferred, err := parseID(prefs.ActiveWorkspaceID); err == nil {
+			for _, workspace := range workspaces {
+				if workspace == preferred {
+					activeWorkspace = workspace
+					break
+				}
+			}
+		}
+	}
 	s.mu.Lock()
 	previous, coordinator := s.account, s.coordinator
-	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = value, workspaces[0], nil, nil, nil
+	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = value, activeWorkspace, nil, nil, nil
 	s.mu.Unlock()
 	if coordinator != nil {
 		coordinator.Detach()
@@ -167,7 +178,7 @@ func (s *Service) activate(value *account.Account) (string, error) {
 	if previous != nil {
 		_ = previous.Lock()
 	}
-	result := map[string]any{"account_id": value.ID.String(), "device_id": value.DeviceID.String(), "workspace_id": workspaces[0].String()}
+	result := map[string]any{"account_id": value.ID.String(), "device_id": value.DeviceID.String(), "workspace_id": activeWorkspace.String()}
 	s.emit("account_unlocked", result)
 	s.reconnectSavedServer(value)
 	return marshal(result)
@@ -1057,6 +1068,9 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 			}
 			s.emit("sync_status", map[string]string{"status": string(status)})
 			s.emit("sync_progress", map[string]any{"workspace_id": progress.WorkspaceID.String(), "phase": progress.Phase, "pulled": progress.Pulled, "pushed": progress.Pushed, "cursor": progress.Cursor, "retry_ms": progress.RetryIn.Milliseconds(), "error_class": progress.ErrorClass})
+			if progress.Phase == coresync.PhaseCurrent {
+				s.emit("workspace_synced", map[string]string{"workspace_id": progress.WorkspaceID.String()})
+			}
 		},
 	})
 	if err != nil {

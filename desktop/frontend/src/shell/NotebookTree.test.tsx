@@ -11,6 +11,7 @@ function renderTree(notebooks: ReturnType<typeof fakeNotebook>[], selectedId: st
   mockLocaleCatalog();
   mockSettings();
   const onSelect = vi.fn();
+  const onCreateNote = vi.fn();
   const onCreated = vi.fn();
   const onDeleted = vi.fn();
   const onMoved = vi.fn();
@@ -21,6 +22,7 @@ function renderTree(notebooks: ReturnType<typeof fakeNotebook>[], selectedId: st
         notebooks={notebooks}
         selectedId={selectedId}
         onSelect={onSelect}
+        onCreateNote={onCreateNote}
         onCreated={onCreated}
         onDeleted={onDeleted}
         onMoved={onMoved}
@@ -28,7 +30,7 @@ function renderTree(notebooks: ReturnType<typeof fakeNotebook>[], selectedId: st
       />
     </I18nProvider>,
   );
-  return { onSelect, onCreated, onDeleted, onMoved, onNoteMoved };
+  return { onSelect, onCreateNote, onCreated, onDeleted, onMoved, onNoteMoved };
 }
 
 describe("NotebookTree", () => {
@@ -82,6 +84,16 @@ describe("NotebookTree", () => {
     expect(onCreated).toHaveBeenCalledWith(created);
   });
 
+  it("creates a note in the workspace root from the section menu", async () => {
+    const { onCreateNote } = renderTree([]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.notebooks_section_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.new_note_button" }));
+
+    expect(onCreateNote).toHaveBeenCalledWith("");
+  });
+
   it("shows an error when notebook creation fails", async () => {
     appMock.CreateNotebook.mockRejectedValue(
       new Error(JSON.stringify({ code: "internal", message: "boom" })),
@@ -117,6 +129,17 @@ describe("NotebookTree", () => {
 
     expect(appMock.CreateNotebook).toHaveBeenCalledWith(root.id, "Projects");
     expect(onCreated).toHaveBeenCalledWith(created);
+  });
+
+  it("creates a note in a notebook from its row menu", async () => {
+    const root = fakeNotebook({ name: "Work" });
+    const { onCreateNote } = renderTree([root]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.new_note_button" }));
+
+    expect(onCreateNote).toHaveBeenCalledWith(root.id);
   });
 
   it("deletes a notebook after the inline confirmation", async () => {

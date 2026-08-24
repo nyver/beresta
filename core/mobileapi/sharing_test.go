@@ -50,7 +50,7 @@ func startMobileE2EServer(t *testing.T) (*server.Runtime, string) {
 // registers it against runtime with a new single-use invite, mirroring
 // server/sharing_e2e_test.go's enrollE2EActor at the Service-bound-method
 // layer.
-func newConnectedMobileService(t *testing.T, runtime *server.Runtime, baseURL, name string) *Service {
+func newConnectedMobileService(t *testing.T, runtime *server.Runtime, baseURL, name string) (*Service, string) {
 	t.Helper()
 	// t.TempDir()'s RemoveAll cleanup must run after service.Close closes the
 	// account's SQLite handle, or Windows can still hold the file open when
@@ -80,7 +80,7 @@ func newConnectedMobileService(t *testing.T, runtime *server.Runtime, baseURL, n
 	if err := service.ConnectServer("connect-"+name, string(config)); err != nil {
 		t.Fatalf("ConnectServer(%s): %v", name, err)
 	}
-	return service
+	return service, dbPath
 }
 
 // TestServiceWorkspaceSharingAcrossTwoAccounts drives ExportIdentity,
@@ -93,8 +93,23 @@ func newConnectedMobileService(t *testing.T, runtime *server.Runtime, baseURL, n
 func TestServiceWorkspaceSharingAcrossTwoAccounts(t *testing.T) {
 	runtime, baseURL := startMobileE2EServer(t)
 
-	owner := newConnectedMobileService(t, runtime, baseURL, "owner")
-	joiner := newConnectedMobileService(t, runtime, baseURL, "joiner")
+	owner, _ := newConnectedMobileService(t, runtime, baseURL, "owner")
+	joiner, joinerDBPath := newConnectedMobileService(t, runtime, baseURL, "joiner")
+
+	preexistingNotebookJSON, err := owner.CreateNotebook("create-preexisting-notebook", "", "Shared notebook")
+	if err != nil {
+		t.Fatalf("CreateNotebook(preexisting): %v", err)
+	}
+	preexistingNotebookID, ok := decodeJSON[map[string]any](t, preexistingNotebookJSON)["id"].(string)
+	if !ok || preexistingNotebookID == "" {
+		t.Fatalf("CreateNotebook(preexisting) returned no id: %s", preexistingNotebookJSON)
+	}
+	if _, err := owner.CreateNote("create-preexisting-note", preexistingNotebookID, "Shared before join"); err != nil {
+		t.Fatalf("CreateNote(preexisting): %v", err)
+	}
+	if err := owner.SyncNow(); err != nil {
+		t.Fatalf("owner SyncNow(preexisting): %v", err)
+	}
 
 	if _, err := owner.ShareWorkspace("share-bad", "not-a-valid-identity-code"); err == nil {
 		t.Fatal("ShareWorkspace(malformed identity code) succeeded, want an error")
@@ -147,7 +162,9 @@ func TestServiceWorkspaceSharingAcrossTwoAccounts(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	sharedNoteReceived := false
-	for !sharedNoteReceived {
+	preexistingNoteReceived := false
+	preexistingNotebookReceived := false
+	for !sharedNoteReceived || !preexistingNoteReceived || !preexistingNotebookReceived {
 		joinedNotesJSON, err := joiner.ListNotes("list-shared-notes")
 		if err != nil {
 			t.Fatalf("ListNotes(shared): %v", err)
@@ -155,14 +172,26 @@ func TestServiceWorkspaceSharingAcrossTwoAccounts(t *testing.T) {
 		for _, note := range decodeJSON[[]map[string]any](t, joinedNotesJSON) {
 			if note["title"] == "Shared from desktop" {
 				sharedNoteReceived = true
+			}
+			if note["title"] == "Shared before join" {
+				preexistingNoteReceived = true
+			}
+		}
+		joinedNotebooksJSON, err := joiner.ListNotebooks("list-shared-notebooks")
+		if err != nil {
+			t.Fatalf("ListNotebooks(shared): %v", err)
+		}
+		for _, notebook := range decodeJSON[[]map[string]any](t, joinedNotebooksJSON) {
+			if notebook["name"] == "Shared notebook" {
+				preexistingNotebookReceived = true
 				break
 			}
 		}
-		if sharedNoteReceived {
+		if sharedNoteReceived && preexistingNoteReceived && preexistingNotebookReceived {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("shared note was not synchronized to the joining mobile service")
+			t.Fatalf("joining mobile service did not receive all workspace data: post-share note=%t, preexisting note=%t, preexisting notebook=%t", sharedNoteReceived, preexistingNoteReceived, preexistingNotebookReceived)
 		}
 		if err := owner.SyncNow(); err != nil {
 			t.Fatalf("owner SyncNow retry: %v", err)
@@ -234,6 +263,23 @@ func TestServiceWorkspaceSharingAcrossTwoAccounts(t *testing.T) {
 	}
 	if err := joiner.SetActiveWorkspace("switch-unknown", unknownID.String()); err == nil {
 		t.Fatal("SetActiveWorkspace(unknown id) succeeded, want an error")
+	}
+	if err := joiner.SetActiveWorkspace("restore-shared", sharedWorkspaceID); err != nil {
+		t.Fatalf("SetActiveWorkspace(shared): %v", err)
+	}
+	if err := joiner.Lock(); err != nil {
+		t.Fatalf("Lock(joiner): %v", err)
+	}
+	if _, err := joiner.UnlockAccount("unlock-shared", joinerDBPath, "correct horse battery staple joiner"); err != nil {
+		t.Fatalf("UnlockAccount(joiner): %v", err)
+	}
+	statusJSON, err := joiner.Status()
+	if err != nil {
+		t.Fatalf("Status(joiner): %v", err)
+	}
+	status := decodeJSON[map[string]any](t, statusJSON)
+	if status["workspace_id"] != sharedWorkspaceID {
+		t.Fatalf("workspace after unlock = %q, want shared workspace %q", status["workspace_id"], sharedWorkspaceID)
 	}
 }
 

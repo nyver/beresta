@@ -83,6 +83,23 @@ void main() {
     );
     expect(urlField.controller!.text, "https://sync.example.com");
   });
+
+  testWidgets("refreshes notes after the selected workspace finishes syncing", (
+    tester,
+  ) async {
+    final gateway = FakeGateway(unlocked: true)..listedNotes = [];
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    gateway.listedNotes = [
+      {...gateway.note, "title": "Shared from desktop"},
+    ];
+    gateway.events.add({"sequence": 1, "type": "workspace_synced"});
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Shared from desktop"), findsOneWidget);
+  });
 }
 
 class FakeGateway implements CoreGateway {
@@ -91,6 +108,8 @@ class FakeGateway implements CoreGateway {
   bool unlocked;
   String savedBody = "";
   String syncStatusValue = "disabled";
+  late List<Map<String, dynamic>> listedNotes = [note];
+  final events = <Map<String, dynamic>>[];
   Map<String, dynamic> connectionInfo = {
     "enabled": false,
     "url": "",
@@ -125,7 +144,7 @@ class FakeGateway implements CoreGateway {
   @override
   Future<void> lock() async => unlocked = false;
   @override
-  Future<List<Map<String, dynamic>>> listNotes() async => [note];
+  Future<List<Map<String, dynamic>>> listNotes() async => listedNotes;
   @override
   Future<Map<String, dynamic>> createNote(
     String title, {
@@ -232,5 +251,8 @@ class FakeGateway implements CoreGateway {
   @override
   Future<void> updateSettings(Map<String, dynamic> settings) async {}
   @override
-  Future<List<Map<String, dynamic>>> pollEvents(int afterSequence) async => [];
+  Future<List<Map<String, dynamic>>> pollEvents(int afterSequence) async =>
+      events
+          .where((event) => (event["sequence"] as int) > afterSequence)
+          .toList();
 }

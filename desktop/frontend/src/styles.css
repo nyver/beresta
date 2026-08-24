@@ -298,27 +298,6 @@ button:disabled {
   gap: 1.5rem;
 }
 
-.new-note-button {
-  align-self: flex-start;
-  padding: 0.45rem 0.9rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #fff;
-  background: #6b4f2a;
-  border: none;
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-.new-note-button:hover:not(:disabled) {
-  background: #5a4122;
-}
-
-.new-note-button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
 .notebook-tree h2,
 .tag-list h2 {
   font-size: 0.75rem;

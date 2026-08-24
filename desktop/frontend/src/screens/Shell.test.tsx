@@ -318,7 +318,7 @@ describe("Shell", () => {
     }
   });
 
-  it("creates a new note at the workspace root and opens it for editing", async () => {
+  it("creates a new note at the workspace root with Ctrl+N and opens it for editing", async () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);
     appMock.ListNotes.mockResolvedValue([]);
@@ -327,12 +327,7 @@ describe("Shell", () => {
     renderShell();
     const user = userEvent.setup();
 
-    // The empty detail pane shows its own "New note" button alongside the
-    // sidebar's persistent one while no note is selected; both call the
-    // same handler, so either works - the sidebar's (first in DOM order)
-    // disambiguates the query.
-    const [newNoteButton] = await screen.findAllByRole("button", { name: "shell.new_note_button" });
-    await user.click(newNoteButton);
+    await user.keyboard("{Control>}n{/Control}");
 
     expect(appMock.CreateNote).toHaveBeenCalledWith("", "");
     expect(await screen.findByLabelText("shell.detail_title_label")).toBeInTheDocument();
@@ -351,8 +346,8 @@ describe("Shell", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "Work" }));
-    const [newNoteButton] = await screen.findAllByRole("button", { name: "shell.new_note_button" });
-    await user.click(newNoteButton);
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.new_note_button" }));
 
     expect(appMock.CreateNote).toHaveBeenCalledWith(notebook.id, "");
   });
@@ -392,7 +387,7 @@ describe("Shell", () => {
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(appMock.DeleteNote).toHaveBeenCalledWith(note.id);
-    expect(await screen.findByText("shell.detail_placeholder")).toBeInTheDocument();
+    expect(screen.queryByText("shell.detail_placeholder")).not.toBeInTheDocument();
     expect(screen.queryByText("Grocery list")).not.toBeInTheDocument();
   });
 

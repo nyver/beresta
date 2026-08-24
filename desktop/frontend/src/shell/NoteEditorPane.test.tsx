@@ -29,8 +29,6 @@ function baseProps(overrides: Partial<NoteEditorPaneProps> = {}): NoteEditorPane
     assignedTagIds: [],
     onTitleCommitted: vi.fn(),
     onDeleted: vi.fn(),
-    onCreateNote: vi.fn(),
-    creatingNote: false,
     onToggleTag: vi.fn(),
     onCreateTag: vi.fn(),
     ...overrides,
@@ -38,7 +36,7 @@ function baseProps(overrides: Partial<NoteEditorPaneProps> = {}): NoteEditorPane
 }
 
 describe("NoteEditorPane", () => {
-  it("shows the placeholder when no note is selected", async () => {
+  it("leaves the editor pane empty when no note is selected", async () => {
     mockLocaleCatalog();
     mockSettings();
     render(
@@ -46,22 +44,8 @@ describe("NoteEditorPane", () => {
         <NoteEditorPane {...baseProps()} />
       </I18nProvider>,
     );
-    expect(await screen.findByText("shell.detail_placeholder")).toBeInTheDocument();
-  });
-
-  it("creates a note from the placeholder", async () => {
-    mockLocaleCatalog();
-    mockSettings();
-    const onCreateNote = vi.fn();
-    render(
-      <I18nProvider>
-        <NoteEditorPane {...baseProps({ onCreateNote })} />
-      </I18nProvider>,
-    );
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("button", { name: "shell.new_note_button" }));
-    expect(onCreateNote).toHaveBeenCalled();
+    expect(screen.queryByText("shell.detail_placeholder")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "shell.new_note_button" })).not.toBeInTheDocument();
   });
 
   it("renames the note on blur and reports the committed title", async () => {
@@ -242,25 +226,6 @@ describe("NoteEditorPane", () => {
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
-  });
-
-  it("creates a new note from the open note's menu", async () => {
-    mockLocaleCatalog();
-    mockSettings();
-    mockEmptyDocument();
-    const note = fakeNote({ title: "Title" });
-    const onCreateNote = vi.fn();
-    render(
-      <I18nProvider>
-        <NoteEditorPane {...baseProps({ note, onCreateNote })} />
-      </I18nProvider>,
-    );
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "shell.new_note_button" }));
-
-    expect(onCreateNote).toHaveBeenCalled();
   });
 
   it("assigns and removes a tag on the open note", async () => {

@@ -207,6 +207,39 @@ button:disabled {
 
 .shell-topbar h1 {
   font-size: 1.1rem;
+  margin: 0;
+}
+
+.shell-topbar-lead {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Compact icon-only controls (sidebar/focus-mode toggles, Settings gear) -
+   same circular hover treatment as .kebab-button, sized for the topbar. */
+.icon-button {
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #5a5148;
+  border: none;
+  border-radius: 0.4rem;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.icon-button:hover,
+.icon-button.active,
+.icon-button[aria-pressed="true"] {
+  background: #eee2d0;
+  color: #3a332a;
 }
 
 .shell-error {
@@ -219,26 +252,48 @@ button:disabled {
 
 .shell-body {
   display: grid;
-  /* The note list only ever shows titles, so it gets a comfortably fixed
-     width; the editor gets the rest of the window instead of a fixed
-     20rem, which left it by far the narrowest pane despite being where
-     the user actually writes. */
-  grid-template-columns: 16rem 22rem 1fr;
+  /* Navigation stays narrow (it only ever shows short names); the note
+     list gets a comfortably fixed width for a title + one preview line;
+     the editor - where the user actually writes - gets the rest of the
+     window instead of a fixed share. */
+  grid-template-columns: 13.5rem 19.5rem 1fr;
   height: calc(100vh - 3.5rem);
+}
+
+.shell-body.sidebar-collapsed {
+  grid-template-columns: 0 19.5rem 1fr;
+}
+
+.shell-body.sidebar-collapsed .shell-sidebar {
+  display: none;
+}
+
+.shell-body.focus-mode {
+  grid-template-columns: 0 0 1fr;
+}
+
+.shell-body.focus-mode .shell-notes {
+  display: none;
 }
 
 .shell-sidebar {
   overflow-y: auto;
   padding: 1rem;
-  border-right: 1px solid #d8d1c4;
+  /* A soft background tint separates the sidebar from the note list
+     instead of a vertical rule - see .shell-notes/.shell-detail below,
+     which step from this toward white across the three panes. Only the
+     notes|editor boundary keeps an actual border (task: fewer
+     file-manager-style dividers). */
+  background: #f1eee6;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
 }
 
 .new-note-button {
-  padding: 0.6rem 0.75rem;
-  font-size: 0.9rem;
+  align-self: flex-start;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: #fff;
   background: #6b4f2a;
@@ -289,6 +344,28 @@ button:disabled {
 
 .tree-section-header h2 {
   margin: 0;
+}
+
+.tree-section-add-button {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  font-size: 1rem;
+  background: transparent;
+  color: #8a7f6f;
+  border: none;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+.tree-section-add-button:hover {
+  background: #eee2d0;
+  color: #3a332a;
 }
 
 .notebook-row-container {
@@ -391,8 +468,14 @@ li:hover > .tree-row-delete,
 .shell-notes {
   overflow: hidden;
   border-right: 1px solid #d8d1c4;
+  background: #faf8f4;
   display: flex;
   flex-direction: column;
+}
+
+.shell-detail {
+  background: #fff;
+  overflow: hidden;
 }
 
 .shell-notes-toolbar {
@@ -419,9 +502,26 @@ li:hover > .tree-row-delete,
   border-bottom: 1px solid #d8d1c4;
 }
 
+.search-input-wrap {
+  position: relative;
+  display: flex;
+}
+
+.search-input-icon {
+  position: absolute;
+  left: 0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #8a7f6f;
+  font-size: 0.95rem;
+  pointer-events: none;
+}
+
 .search-bar input[type="search"] {
+  flex: 1;
+  min-width: 0;
   font: inherit;
-  padding: 0.5rem;
+  padding: 0.5rem 0.5rem 0.5rem 1.75rem;
   border: 1px solid #d8d1c4;
   border-radius: 0.35rem;
 }
@@ -489,14 +589,19 @@ li:hover > .tree-row-delete,
   padding: 0.5rem 1.25rem;
   border: none;
   border-bottom: 1px solid #eee2d0;
-  background: #fff;
+  background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .note-row.selected {
-  background: #f1e6d3;
+  /* A light tint plus a left accent bar reads as "selected" without the
+     heavier solid block a 20-100 row list would otherwise repeat down the
+     whole column; the accent is a box-shadow (not a border) so it does
+     not shift the row's padding/content by its own width. */
+  background: #f5efe3;
+  box-shadow: inset 3px 0 0 #6b4f2a;
 }
 
 .note-row-top,
@@ -552,8 +657,8 @@ li:hover > .tree-row-delete,
   flex: 1;
   min-width: 0;
   font: inherit;
-  font-size: 1.2rem;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 700;
   border: none;
   padding: 0.35rem 0;
   background: transparent;
@@ -598,18 +703,36 @@ li:hover > .tree-row-delete,
   min-height: 0;
 }
 
+/* Borderless toolbar/editor (task: the editor read as a giant <textarea>
+   with a full rectangular border around it) - a single rule under the
+   toolbar is enough separation from the text below it. */
 .note-editor-quill .ql-toolbar {
-  border-color: #d8d1c4;
-  border-radius: 0.35rem 0.35rem 0 0;
+  border: none;
+  border-bottom: 1px solid #d8d1c4;
+  border-radius: 0;
+  padding-left: 0;
 }
 
 .note-editor-quill .ql-container {
   flex: 1;
   overflow-y: auto;
-  border-color: #d8d1c4;
-  border-radius: 0 0 0.35rem 0.35rem;
+  border: none;
+  border-radius: 0;
   font-family: inherit;
   font-size: 1rem;
+}
+
+.note-editor-quill .ql-editor {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* "Normal" is Quill's own built-in label for its header dropdown's default
+   (no heading) option; "Paragraph" reads more clearly to someone writing
+   notes, not laying out a document. */
+.note-editor-quill .ql-picker.ql-header .ql-picker-label::before,
+.note-editor-quill .ql-picker.ql-header .ql-picker-item::before {
+  content: "Paragraph";
 }
 
 .attachment-panel-body {
@@ -1036,14 +1159,6 @@ li:hover > .tree-row-delete,
   margin: 0;
   padding-left: 1.25rem;
   font-size: 0.85rem;
-}
-
-.key-protection-badge {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.5rem;
-  border-radius: 1rem;
-  background: #eee2d0;
-  color: #5a5148;
 }
 
 .auto-lock-control {
@@ -1473,4 +1588,61 @@ li:hover > .tree-row-delete,
 .tag-create button {
   font-size: 0.85rem;
   padding: 0.35rem 0.6rem;
+}
+
+/* Topbar's compact synchronization status pill (replaces the old plain
+   "Sync" button - task: state visible at a glance instead of a button to
+   press). Color-coded via the same .sync-status-{value} modifier classes
+   SyncPanel's own status card uses on .sync-status-dot, so the two never
+   drift out of sync with each other visually. */
+.sync-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #3a332a;
+  background: transparent;
+  border: 1px solid #d8d1c4;
+  border-radius: 1rem;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+
+.sync-status-pill:hover {
+  background: #f1eee6;
+}
+
+.key-protection-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: #8a7f6f;
+}
+
+/* Note editor footer: the Attachments trigger and the save/sync status
+   line share one row (task: a persistent status line is more useful than
+   the old topbar Sync button for an offline-first app). */
+.note-detail-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eee2d0;
+}
+
+.save-status-line {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #8a7f6f;
+}
+
+.save-status-sync-link {
+  font-size: inherit;
+  color: #8a2c1f;
 }

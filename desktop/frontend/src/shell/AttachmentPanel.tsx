@@ -336,7 +336,7 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
     // is worthwhile.
     const trigger = (
       <button type="button" className="attachment-trigger" onClick={() => onOpenChange(true)}>
-        {t("attachments.open_button")}
+        <span aria-hidden="true">📎</span> {t("attachments.open_button")}
         {attachments.length > 0 ? <span className="attachment-count-badge">{attachments.length}</span> : null}
         {pendingCount > 0 ? <span className="attachment-pending-badge">{pendingCount}</span> : null}
       </button>

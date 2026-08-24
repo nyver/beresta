@@ -23,6 +23,10 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // Mirrors NotebookTree's creatingParentId: the inline create form only
+  // takes up sidebar space while actually in use, instead of permanently
+  // sitting under the tag list.
+  const [creatingOpen, setCreatingOpen] = useState(false);
   // Only one row's delete confirmation is shown at a time, mirroring
   // NotebookTree's confirmingDeleteId.
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
@@ -43,6 +47,7 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
       const tag = await createTag(name);
       onCreated(tag);
       setNewName("");
+      setCreatingOpen(false);
     } catch (thrown: unknown) {
       setCreateError(errorMessage(unwrapError(thrown)));
     } finally {
@@ -66,7 +71,21 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
 
   return (
     <nav aria-label={t("shell.tags_section")} className="tag-list">
-      <h2>{t("shell.tags_section")}</h2>
+      <div className="tree-section-header">
+        <h2>{t("shell.tags_section")}</h2>
+        <button
+          type="button"
+          className="tree-section-add-button"
+          aria-label={t("shell.tags_add_button")}
+          onClick={() => {
+            setCreateError(null);
+            setNewName("");
+            setCreatingOpen(true);
+          }}
+        >
+          +
+        </button>
+      </div>
       {visible.length > 0 ? (
         <ul>
           {visible.map((tag) => (
@@ -116,24 +135,30 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
           {deleteError}
         </p>
       ) : null}
-      <form
-        className="tag-create"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void handleCreate();
-        }}
-      >
-        <input
-          type="text"
-          value={newName}
-          onChange={(event) => setNewName(event.target.value)}
-          placeholder={t("shell.new_tag_placeholder")}
-          aria-label={t("shell.new_tag_placeholder")}
-        />
-        <button type="submit" disabled={creating || !newName.trim()}>
-          {t("shell.new_tag_button")}
-        </button>
-      </form>
+      {creatingOpen ? (
+        <form
+          className="tag-create"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleCreate();
+          }}
+        >
+          <input
+            type="text"
+            autoFocus
+            value={newName}
+            onChange={(event) => setNewName(event.target.value)}
+            placeholder={t("shell.new_tag_placeholder")}
+            aria-label={t("shell.new_tag_placeholder")}
+          />
+          <button type="submit" disabled={creating || !newName.trim()}>
+            {t("shell.new_tag_button")}
+          </button>
+          <button type="button" className="link-button" onClick={() => setCreatingOpen(false)} disabled={creating}>
+            {t("common.cancel")}
+          </button>
+        </form>
+      ) : null}
       {createError ? (
         <p className="error" role="alert">
           {createError}

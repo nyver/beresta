@@ -22,9 +22,14 @@ function renderList(tags: ReturnType<typeof fakeTag>[], selectedId = "") {
 }
 
 describe("TagList", () => {
-  it("shows only the create form when there are no live tags", async () => {
+  it("shows no tag rows, and no create form, until '+' is clicked", async () => {
     renderList([fakeTag({ deleted: true })]);
+    const user = userEvent.setup();
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "shell.new_tag_placeholder" })).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "shell.tags_add_button" }));
+
     expect(await screen.findByRole("textbox", { name: "shell.new_tag_placeholder" })).toBeInTheDocument();
   });
 
@@ -49,6 +54,7 @@ describe("TagList", () => {
     const { onCreated } = renderList([]);
     const user = userEvent.setup();
 
+    await user.click(await screen.findByRole("button", { name: "shell.tags_add_button" }));
     await user.type(await screen.findByRole("textbox", { name: "shell.new_tag_placeholder" }), "urgent");
     await user.click(await screen.findByRole("button", { name: "shell.new_tag_button" }));
 

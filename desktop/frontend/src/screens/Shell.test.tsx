@@ -233,9 +233,13 @@ describe("Shell", () => {
 
     await userEvent.setup().click(await screen.findByRole("button", { name: "sync.open_button" }));
 
-    expect(await screen.findByRole("dialog", { name: "sync.title" })).toBeInTheDocument();
-    expect(screen.getByText("device-local")).toBeInTheDocument();
-    expect(screen.getByText("sync.status_disabled")).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "sync.title" });
+    expect(within(dialog).getByText("device-local")).toBeInTheDocument();
+    // The topbar's own compact status pill (task: passive sync status
+    // instead of a plain button) now shows this same "sync.status_disabled"
+    // text outside the dialog too, so this must be scoped to the dialog to
+    // stay unambiguous.
+    expect(within(dialog).getByText("sync.status_disabled")).toBeInTheDocument();
   });
 
   it("changes the auto-lock duration through the Settings modal and persists it", async () => {

@@ -75,7 +75,8 @@ reparents it (and everything filed under it) via the existing
 onto a notebook row refiles it via `SetNoteNotebook` - both are plain
 reparenting/refiling, since neither `store.Notebook` nor `model.Note`
 carries a persisted sibling order to reorder within a level. Tags
-themselves are created inline from the sidebar's tag list, and assigned to
+themselves are created from the sidebar's tag list (behind a "+" toggle,
+mirroring the notebook tree's own inline-create pattern), and assigned to
 or removed from the open note via a chip editor in the note header
 (`shell/NoteTagsEditor.tsx`, backed by `App.NoteTagsByWorkspace` and the
 existing `SetNoteTag`/`CreateTag` bindings) - previously tags could only be
@@ -180,6 +181,38 @@ the installed executable before retaining or restoring the prior version.
 Desktop component/accessibility/Wails-boundary tests, an offline end-to-end
 scenario, installer/update tests, the 20,000-note search benchmark, and the
 ten-launch cold-start gate now cover the phase-available behavior.
+
+The shell's visual design leans further into "offline-first, state over
+buttons": the topbar's old full-width Sync button is now a compact,
+color-coded status pill (reusing the same disabled/offline/active/current/
+failed palette as the Synchronization dialog's own status card) that opens
+that same dialog on click, Settings is an icon-only gear, and the Windows
+key-protection indicator reads as a small muted hint instead of a
+pill that looks pressable. The three-pane layout (navigation/notes/editor)
+now separates its panes with a background tint step instead of a vertical
+rule between every column - only the notes-list/editor boundary keeps an
+actual border - and narrows navigation and the note list to make more room
+for the editor; a "☰" toggle collapses navigation (also bound to
+Ctrl/Cmd+Shift+S) and a "⛶" toggle enters a distraction-free focus mode
+(editor only), both persisted in `localStorage` across launches. The note
+list's preview snippet is now rendered as plain text (Markdown syntax
+stripped client-side - the stored preview itself is still the canonical
+Markdown source, so this is display-only), the last-modified date sits
+beside the title instead of crowding the preview line, and the selected
+row uses a lighter accent tint plus a left accent bar rather than a solid
+highlight block, so it scales better once a notebook holds dozens of notes.
+Tag creation in the sidebar is now hidden behind a "+" toggle (matching the
+notebook tree's existing pattern) instead of a permanently visible input.
+The open note's title renders larger, and its History action moved into
+the "⋮" menu alongside New note/Delete instead of sitting next to the title
+as a permanent text link; the Quill toolbar and editor area lost their
+surrounding box borders (a bottom rule under the toolbar is the only
+remaining separator), and its heading dropdown's default option now reads
+"Paragraph" instead of Quill's own default "Normal". A footer status line
+under the editor - "Saved locally", combined with the workspace's live
+synchronization state ("· Offline", "· Syncing…", "· Synced HH:MM", or a
+clickable "· Sync failed" that opens the Synchronization dialog) - replaces
+relying on the topbar Sync button alone to know whether an edit is safe.
 
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).

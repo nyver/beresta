@@ -189,7 +189,8 @@ describe("NoteEditorPane", () => {
     // Still under useNoteDocument's 800ms commit debounce: nothing sent yet.
     expect(appMock.CommitNoteBody).not.toHaveBeenCalled();
 
-    await user.click(await screen.findByRole("button", { name: "revisions.open_button" }));
+    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "revisions.open_button" }));
     await user.click(await screen.findByRole("button", { name: /2026/ }));
     await user.click(await screen.findByRole("button", { name: "revisions.restore_button" }));
     await user.click(screen.getByRole("button", { name: "revisions.restore_confirm_button" }));

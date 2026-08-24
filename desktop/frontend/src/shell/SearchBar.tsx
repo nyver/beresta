@@ -276,13 +276,18 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
 
   return (
     <div className="search-bar">
-      <input
-        type="search"
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        placeholder={t("search.placeholder")}
-        aria-label={t("search.placeholder")}
-      />
+      <div className="search-input-wrap">
+        <span className="search-input-icon" aria-hidden="true">
+          🔍
+        </span>
+        <input
+          type="search"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder={t("search.placeholder")}
+          aria-label={t("search.placeholder")}
+        />
+      </div>
       <button
         type="button"
         className="search-advanced-toggle"

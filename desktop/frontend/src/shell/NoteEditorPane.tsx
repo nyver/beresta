@@ -1,7 +1,7 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-import { deleteNote, unwrapError } from "../api";
-import { NoteEditor, type NoteEditorHandle } from "../editor/NoteEditor";
+import { deleteNote, unwrapError, type SyncStatusValue } from "../api";
+import { NoteEditor, type NoteEditorHandle, type NoteSaveState } from "../editor/NoteEditor";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { AttachmentPanel, type AttachmentPanelHandle } from "./AttachmentPanel";
@@ -9,6 +9,7 @@ import { KebabMenu } from "./KebabMenu";
 import { Modal } from "./Modal";
 import { NoteTagsEditor } from "./NoteTagsEditor";
 import { RevisionsPanel } from "./RevisionsPanel";
+import { SaveStatusLine } from "./SaveStatusLine";
 
 export interface NoteEditorPaneHandle {
   /** Flushes the currently open note's pending body edit and any
@@ -41,6 +42,20 @@ export interface NoteEditorPaneProps {
   onToggleTag: (noteId: string, tagId: string, present: boolean) => Promise<void>;
   /** Creates a new workspace tag and assigns it to the open note. */
   onCreateTag: (noteId: string, name: string) => Promise<void>;
+  /** Current workspace-wide synchronization status (see Shell's own
+   * "sync:status" subscription), rendered alongside the open note's local
+   * save state in the footer status line below. Null before the first
+   * status has loaded; defaults to null so callers that do not care about
+   * synchronization (tests) need not pass it. */
+  syncStatus?: SyncStatusValue | null;
+  /** When syncStatus last became "current", so the status line can show a
+   * static "synced at HH:MM" instead of nothing - see Shell's own doc
+   * comment on why this is not a live-ticking relative time. */
+  syncedAt?: number | null;
+  /** Opens the Sync modal - the status line's sync fragment is clickable
+   * for exactly the cases (offline/failed) where there is something to look
+   * at there. */
+  onOpenSync?: () => void;
 }
 
 /**
@@ -50,7 +65,20 @@ export interface NoteEditorPaneProps {
  */
 export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPaneProps>(
   function NoteEditorPane(
-    { note, tags, assignedTagIds, onTitleCommitted, onDeleted, onCreateNote, creatingNote, onToggleTag, onCreateTag },
+    {
+      note,
+      tags,
+      assignedTagIds,
+      onTitleCommitted,
+      onDeleted,
+      onCreateNote,
+      creatingNote,
+      onToggleTag,
+      onCreateTag,
+      syncStatus = null,
+      syncedAt = null,
+      onOpenSync = () => {},
+    },
     ref,
   ) {
     const { t, errorMessage } = useI18n();
@@ -60,6 +88,8 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
+    const [saveState, setSaveState] = useState<NoteSaveState>({ saving: false, dirty: false, savedAt: null });
+    const handleSaveStateChange = useCallback((next: NoteSaveState) => setSaveState(next), []);
     // Bumped after RestoreRevision commits a new current revision, and
     // included in NoteEditor's key below to force it to remount and
     // refetch the note's document: RestoreRevision writes through the
@@ -163,18 +193,14 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
               </button>
             </span>
           ) : (
-            <>
-              <button type="button" className="link-button" onClick={() => setHistoryOpen(true)}>
-                {t("revisions.open_button")}
-              </button>
-              <KebabMenu
-                label={t("shell.note_actions")}
-                items={[
-                  { label: t("shell.new_note_button"), onSelect: onCreateNote, disabled: creatingNote },
-                  { label: t("shell.delete_note"), onSelect: () => setConfirmingDelete(true), destructive: true },
-                ]}
-              />
-            </>
+            <KebabMenu
+              label={t("shell.note_actions")}
+              items={[
+                { label: t("shell.new_note_button"), onSelect: onCreateNote, disabled: creatingNote },
+                { label: t("revisions.open_button"), onSelect: () => setHistoryOpen(true) },
+                { label: t("shell.delete_note"), onSelect: () => setConfirmingDelete(true), destructive: true },
+              ]}
+            />
           )}
         </div>
         {deleteError ? (
@@ -193,14 +219,18 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
           ref={editorRef}
           noteId={note.id}
           onAttachFiles={(files) => attachmentPanelRef.current?.attachFiles(files)}
+          onSaveStateChange={handleSaveStateChange}
         />
-        <AttachmentPanel
-          key={note.id}
-          ref={attachmentPanelRef}
-          noteId={note.id}
-          open={attachmentsOpen}
-          onOpenChange={setAttachmentsOpen}
-        />
+        <div className="note-detail-footer">
+          <AttachmentPanel
+            key={note.id}
+            ref={attachmentPanelRef}
+            noteId={note.id}
+            open={attachmentsOpen}
+            onOpenChange={setAttachmentsOpen}
+          />
+          <SaveStatusLine saveState={saveState} syncStatus={syncStatus} syncedAt={syncedAt} onOpenSync={onOpenSync} />
+        </div>
         {historyOpen ? (
           <Modal title={t("revisions.section_title")} onClose={() => setHistoryOpen(false)}>
             <RevisionsPanel

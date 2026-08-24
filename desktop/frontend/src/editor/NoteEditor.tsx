@@ -11,6 +11,14 @@ export interface NoteEditorHandle {
   flush: (title?: string) => Promise<boolean>;
 }
 
+/** The open note's local save state, reported to onSaveStateChange below -
+ * see shell/SaveStatusLine.tsx, the only current consumer. */
+export interface NoteSaveState {
+  saving: boolean;
+  dirty: boolean;
+  savedAt: number | null;
+}
+
 export interface NoteEditorProps {
   noteId: string;
   /** Called with one or more pasted image files when the user pastes an
@@ -19,6 +27,10 @@ export interface NoteEditorProps {
    * the canonical Markdown projection (see TOOLBAR_FORMATS above), so a
    * pasted image becomes a note attachment instead of an inline blot. */
   onAttachFiles?: (files: File[]) => void;
+  /** Called whenever this note's local save state changes, so a footer
+   * status line (owned by NoteEditorPane, not this component) can render
+   * it alongside the workspace's synchronization status. */
+  onSaveStateChange?: (state: NoteSaveState) => void;
 }
 
 // The Yjs root name for a note's body, matching core/account's
@@ -52,16 +64,22 @@ const TOOLBAR_FORMATS = [
  * extra wiring).
  */
 export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEditor(
-  { noteId, onAttachFiles },
+  { noteId, onAttachFiles, onSaveStateChange },
   ref,
 ) {
   const { t, errorMessage } = useI18n();
-  const { ydoc, ready, error, flush } = useNoteDocument(noteId);
+  const { ydoc, ready, error, flush, saving, dirty, savedAt } = useNoteDocument(noteId);
   const containerRef = useRef<HTMLDivElement>(null);
   const onAttachFilesRef = useRef(onAttachFiles);
   onAttachFilesRef.current = onAttachFiles;
 
   useImperativeHandle(ref, () => ({ flush }), [flush]);
+
+  const onSaveStateChangeRef = useRef(onSaveStateChange);
+  onSaveStateChangeRef.current = onSaveStateChange;
+  useEffect(() => {
+    onSaveStateChangeRef.current?.({ saving, dirty, savedAt });
+  }, [saving, dirty, savedAt]);
 
   useEffect(() => {
     if (!ready || !ydoc || !containerRef.current) return;

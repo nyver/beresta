@@ -13,6 +13,18 @@ export interface NoteDocumentState {
   ydoc: Y.Doc | null;
   ready: boolean;
   error: ApiError | null;
+  /** True for the span of an in-flight commitNoteBody call - see the
+   * status line this feeds (shell/SaveStatusLine.tsx). */
+  saving: boolean;
+  /** True once an edit has been made that no successful flush has covered
+   * yet (set on the Yjs doc's "update" event, cleared when that update is
+   * durably committed). */
+  dirty: boolean;
+  /** When the most recent flush last committed successfully, or null
+   * before the first one. Not reset by a later failed flush - the
+   * previously committed content is still durably saved even if a newer
+   * edit is not. */
+  savedAt: number | null;
   /**
    * flush commits any pending body edits (merged into one update) right
    * now, bypassing the debounce, optionally renaming the note in the same
@@ -35,6 +47,9 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
   const [ydoc, setYdoc] = useState<Y.Doc | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const pendingRef = useRef<Uint8Array[]>([]);
   const timerRef = useRef<number | undefined>(undefined);
@@ -67,6 +82,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
       return true;
     }
 
+    setSaving(true);
     try {
       await commitNoteBody({
         note_id: noteIdRef.current,
@@ -75,6 +91,11 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
         title,
       });
       setError(null);
+      // Only clear dirty when nothing has queued again while this commit
+      // was in flight (doc.on("update") below may have already pushed a
+      // newer edit into pendingRef and set dirty back to true).
+      if (pendingRef.current.length === 0) setDirty(false);
+      setSavedAt(Date.now());
       return true;
     } catch (thrown) {
       setError(unwrapError(thrown));
@@ -85,6 +106,8 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
       // (merged with whatever else has since queued) as a normal delta.
       pendingRef.current = [payload, ...pendingRef.current];
       return false;
+    } finally {
+      setSaving(false);
     }
   }, []);
 
@@ -93,6 +116,9 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
     let canceled = false;
     setReady(false);
     setError(null);
+    setSaving(false);
+    setDirty(false);
+    setSavedAt(null);
     pendingRef.current = [];
     window.clearTimeout(timerRef.current);
 
@@ -110,6 +136,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
         }
         doc.on("update", (update: Uint8Array) => {
           pendingRef.current.push(update);
+          setDirty(true);
           window.clearTimeout(timerRef.current);
           timerRef.current = window.setTimeout(() => {
             void flush();
@@ -134,5 +161,5 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteId]);
 
-  return { ydoc, ready, error, flush };
+  return { ydoc, ready, error, flush, saving, dirty, savedAt };
 }

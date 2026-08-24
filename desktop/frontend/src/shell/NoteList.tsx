@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Fragment, useRef, type KeyboardEvent, type ReactNode } from "react";
 
-import { formatNoteTimestamp } from "../format";
+import { formatNoteTimestamp, stripMarkdown } from "../format";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 
@@ -164,10 +164,10 @@ export function NoteList({
                     ★
                   </span>
                 ) : null}
+                {meta ? <span className="note-row-date">{formatNoteTimestamp(meta.updatedMs)}</span> : null}
               </span>
               <span className="note-row-bottom">
-                {meta?.preview ? <span className="note-row-preview">{meta.preview}</span> : null}
-                {meta ? <span className="note-row-date">{formatNoteTimestamp(meta.updatedMs)}</span> : null}
+                {meta?.preview ? <span className="note-row-preview">{stripMarkdown(meta.preview)}</span> : null}
               </span>
             </button>
           );

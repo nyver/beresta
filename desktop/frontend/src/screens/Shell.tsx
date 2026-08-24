@@ -13,9 +13,11 @@ import {
   noteTagsByWorkspace,
   searchByTag,
   setNoteTag,
+  syncStatus,
   updateSettings,
   unwrapError,
   verifyAllBackups,
+  type SyncStatusValue,
 } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
@@ -34,6 +36,15 @@ import { TagList } from "../shell/TagList";
 
 // Matches desktop/events.go's EventQuickNoteOpen.
 const EVENT_QUICK_NOTE_OPEN = "quicknote:open";
+// Matches desktop/events.go's EventSyncStatus (see also SyncPanel.tsx's own
+// subscription - this one feeds the topbar's compact status pill and the
+// open note's footer status line instead of the full Sync modal).
+const EVENT_SYNC_STATUS = "sync:status";
+
+// Persisted across launches (task: collapsible sidebar/focus mode for
+// smaller windows) so the user's chosen layout survives a restart.
+const SIDEBAR_COLLAPSED_KEY = "beresta.sidebar-collapsed";
+const FOCUS_MODE_KEY = "beresta.focus-mode";
 
 export interface ShellProps {
   account: main.AccountInfo;
@@ -80,6 +91,19 @@ export function Shell({ account, onLocked }: ShellProps) {
   const [highlightTerms, setHighlightTerms] = useState<string[]>([]);
   const [dataModalOpen, setDataModalOpen] = useState(false);
   const [syncModalOpen, setSyncModalOpen] = useState(false);
+  // Workspace-wide synchronization status, shared by the topbar's compact
+  // pill and the open note's footer status line (SaveStatusLine) so the two
+  // never disagree; loaded once and kept live via the same "sync:status"
+  // event SyncPanel itself listens for.
+  const [syncStatusValue, setSyncStatusValue] = useState<SyncStatusValue | null>(null);
+  // Set only when syncStatusValue transitions to "current", so the status
+  // line can show a static "synced at HH:MM" - see SaveStatusLine's doc
+  // comment on why this is not a live-ticking relative time.
+  const [syncedAt, setSyncedAt] = useState<number | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1",
+  );
+  const [focusMode, setFocusMode] = useState(() => window.localStorage.getItem(FOCUS_MODE_KEY) === "1");
   // Bumped on every quicknote:open so QuickNotePanel remounts (and thus
   // creates a fresh note) for each capture session instead of reusing
   // whatever note the previous session left mounted.
@@ -146,6 +170,40 @@ export function Shell({ account, onLocked }: ShellProps) {
     });
     return () => EventsOff(EVENT_QUICK_NOTE_OPEN);
   }, [ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    function applyStatus(next: SyncStatusValue) {
+      setSyncStatusValue(next);
+      if (next === "current") setSyncedAt(Date.now());
+    }
+    syncStatus()
+      .then(applyStatus)
+      .catch(() => {});
+    EventsOn(EVENT_SYNC_STATUS, (next: unknown) => {
+      if (typeof next === "string") applyStatus(next as SyncStatusValue);
+    });
+    return () => EventsOff(EVENT_SYNC_STATUS);
+  }, [ready]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? "1" : "0");
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    window.localStorage.setItem(FOCUS_MODE_KEY, focusMode ? "1" : "0");
+  }, [focusMode]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        setSidebarCollapsed((current) => !current);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     setSelectedNoteId("");
@@ -396,20 +454,62 @@ export function Shell({ account, onLocked }: ShellProps) {
   return (
     <main className="screen shell" aria-labelledby={shellTitleId}>
       <header className="shell-topbar">
-        <h1 id={shellTitleId}>{t("shell.title")}</h1>
+        <div className="shell-topbar-lead">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={sidebarCollapsed ? t("shell.expand_sidebar") : t("shell.collapse_sidebar")}
+            title={sidebarCollapsed ? t("shell.expand_sidebar") : t("shell.collapse_sidebar")}
+            // Focus mode already hides the sidebar regardless of
+            // sidebarCollapsed's own value (see shell-body's class list
+            // below); disabling this button while it's active avoids a
+            // click here silently changing state with no visible effect.
+            disabled={focusMode}
+            onClick={() => setSidebarCollapsed((current) => !current)}
+          >
+            ☰
+          </button>
+          <button
+            type="button"
+            className={`icon-button${focusMode ? " active" : ""}`}
+            aria-label={focusMode ? t("shell.exit_focus_mode") : t("shell.enter_focus_mode")}
+            title={focusMode ? t("shell.exit_focus_mode") : t("shell.enter_focus_mode")}
+            aria-pressed={focusMode}
+            onClick={() => setFocusMode((current) => !current)}
+          >
+            ⛶
+          </button>
+          <h1 id={shellTitleId}>{t("shell.title")}</h1>
+        </div>
         <div className="shell-topbar-actions">
           {account.key_protection ? (
-            <span className="key-protection-badge">
-              {account.key_protection === "windows-hello"
-                ? t("shell.key_protection_hello")
-                : t("shell.key_protection_dpapi")}
+            <span className="key-protection-hint">
+              <span aria-hidden="true">🔒</span>{" "}
+              <span>
+                {account.key_protection === "windows-hello"
+                  ? t("shell.key_protection_hello")
+                  : t("shell.key_protection_dpapi")}
+              </span>
             </span>
           ) : null}
-          <button type="button" onClick={() => setDataModalOpen(true)}>
-            {t("settings.title")}
+          <button
+            type="button"
+            className={`sync-status-pill sync-status-${syncStatusValue ?? "disabled"}`}
+            aria-label={t("sync.open_button")}
+            title={t("sync.open_button")}
+            onClick={() => setSyncModalOpen(true)}
+          >
+            <span className="sync-status-dot" aria-hidden="true" />
+            {syncStatusValue ? t(`sync.status_${syncStatusValue}`) : t("sync.open_button")}
           </button>
-          <button type="button" onClick={() => setSyncModalOpen(true)}>
-            {t("sync.open_button")}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={t("settings.title")}
+            title={t("settings.title")}
+            onClick={() => setDataModalOpen(true)}
+          >
+            ⚙
           </button>
           <button type="button" onClick={() => void handleLock()} disabled={locking}>
             {t("shell.lock_button")}
@@ -472,7 +572,9 @@ export function Shell({ account, onLocked }: ShellProps) {
           </button>
         </div>
       ) : (
-        <div className="shell-body">
+        <div
+          className={`shell-body${sidebarCollapsed || focusMode ? " sidebar-collapsed" : ""}${focusMode ? " focus-mode" : ""}`}
+        >
           <aside className="shell-sidebar">
             <button
               type="button"
@@ -480,7 +582,7 @@ export function Shell({ account, onLocked }: ShellProps) {
               onClick={() => void handleCreateNote()}
               disabled={creatingNote}
             >
-              {t("shell.new_note_button")}
+              <span aria-hidden="true">+</span> {t("shell.new_note_button")}
             </button>
             <NotebookTree
               notebooks={notebooks}
@@ -556,6 +658,9 @@ export function Shell({ account, onLocked }: ShellProps) {
               creatingNote={creatingNote}
               onToggleTag={handleToggleNoteTag}
               onCreateTag={handleCreateAndAssignTag}
+              syncStatus={syncStatusValue}
+              syncedAt={syncedAt}
+              onOpenSync={() => setSyncModalOpen(true)}
             />
           </section>
         </div>

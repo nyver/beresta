@@ -10,10 +10,14 @@ passphrase.
 
 The navigation drawer filters the virtualized note list by notebook and shows
 available tags. Search uses the encrypted local FTS index and supports the same
-text/filter language as desktop. The editor saves Markdown through the shared
-Yjs core; Preview is a derived view, while revisions can restore an older body
-as a new current revision. Photo/document attachments are read from Android
-content URIs into a bounded in-memory stream and encrypted immediately.
+text/filter language as desktop. The editor is WYSIWYG (bold/italic/strike/
+inline code, headings, ordered/bullet lists, blockquotes, code blocks, and
+links, matching desktop's own formatting toolbar) rather than raw Markdown
+source with a separate preview: it saves through the shared Yjs core's
+canonical Markdown projection, so formatting made on either client survives a
+sync to the other. Revisions can restore an older body as a new current
+revision. Photo/document attachments are read from Android content URIs into
+a bounded in-memory stream and encrypted immediately.
 
 Local saves do not wait for a server. Foreground entry and constrained periodic
 WorkManager jobs trigger pending synchronization when a server is configured.

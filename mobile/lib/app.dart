@@ -5,9 +5,11 @@ import "package:flutter/foundation.dart" show kDebugMode;
 import "package:flutter/material.dart";
 import "package:flutter/services.dart"
     show Clipboard, ClipboardData, PlatformException;
-import "package:flutter_markdown_plus/flutter_markdown_plus.dart";
+import "package:flutter_localizations/flutter_localizations.dart";
+import "package:flutter_quill/flutter_quill.dart";
 
 import "core_gateway.dart";
+import "markdown_delta.dart";
 import "strings.dart";
 
 /// Renders a localized error with the underlying platform failure appended
@@ -90,6 +92,19 @@ class _BerestaAppState extends State<BerestaApp> {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF754C29)),
         useMaterial3: true,
       ),
+      // The note editor's flutter_quill toolbar reads its tooltip strings
+      // from FlutterQuillLocalizations.of(context), which throws if no
+      // delegate is registered - unrelated to this app's own hand-rolled
+      // Strings lookup (see strings.dart), but required for the toolbar to
+      // work at all.
+      locale: Locale(language),
+      supportedLocales: const [Locale("en"), Locale("ru")],
+      localizationsDelegates: const [
+        FlutterQuillLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       home: AppLifecycleLock(
         gateway: gateway,
         onSessionLocked: () => setState(() => sessionGeneration += 1),
@@ -1881,6 +1896,41 @@ class _BackupSheetState extends State<BackupSheet> {
   }
 }
 
+// Restricted to exactly the formatting keys core/sync/yjsadapter's
+// canonical Markdown projection understands (see Attr* in
+// core/sync/yjsadapter/document.go and markdown_delta.dart's port of it) -
+// matching desktop's own TOOLBAR_FORMATS restriction in
+// desktop/frontend/src/editor/NoteEditor.tsx. Any other flutter_quill
+// format (underline, color, font, alignment, checklists, ...) would
+// round-trip through the editor's own Document harmlessly but silently
+// vanish the next time this note's Markdown is saved and re-parsed, so it
+// is deliberately not offered here either.
+final _editorToolbarConfig = QuillSimpleToolbarConfig(
+  buttonOptions: QuillSimpleToolbarButtonOptions(
+    selectHeaderStyleDropdownButton:
+        QuillToolbarSelectHeaderStyleDropdownButtonOptions(
+          attributes: [
+            Attribute.h1,
+            Attribute.h2,
+            Attribute.h3,
+            Attribute.header,
+          ],
+        ),
+  ),
+  showFontFamily: false,
+  showFontSize: false,
+  showUnderLineButton: false,
+  showColorButton: false,
+  showBackgroundColorButton: false,
+  showListCheck: false,
+  showIndent: false,
+  showUndo: false,
+  showRedo: false,
+  showSearchButton: false,
+  showSubscript: false,
+  showSuperscript: false,
+);
+
 class EditorScreen extends StatefulWidget {
   const EditorScreen({
     required this.gateway,
@@ -1899,9 +1949,14 @@ class EditorScreen extends StatefulWidget {
 
 class _EditorScreenState extends State<EditorScreen> {
   final title = TextEditingController();
-  final body = TextEditingController();
+  // Built once GetNote resolves (see initState): flutter_quill's Document
+  // takes over its content immediately on construction, so there is no
+  // useful "empty" QuillController to show before the note's actual body
+  // is known, unlike title's plain TextEditingController.
+  QuillController? body;
+  final bodyFocusNode = FocusNode();
+  final bodyScrollController = ScrollController();
   bool loading = true;
-  bool preview = false;
   bool dirty = false;
   List<Map<String, dynamic>> attachments = [];
   bool capturingPhoto = false;
@@ -1915,10 +1970,16 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) return;
       final note = value["note"] as Map<String, dynamic>;
       title.text = note["title"] as String;
-      body.text = value["body"] as String;
-      setState(() => loading = false);
+      final quillBody = QuillController(
+        document: Document.fromDelta(markdownToDelta(value["body"] as String)),
+        selection: const TextSelection.collapsed(offset: 0),
+      );
+      quillBody.addListener(markDirty);
+      setState(() {
+        body = quillBody;
+        loading = false;
+      });
       title.addListener(markDirty);
-      body.addListener(markDirty);
     });
     refreshAttachments();
     refreshTags();
@@ -2087,7 +2148,11 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> save() async {
-    await widget.gateway.saveNote(widget.noteId, title.text, body.text);
+    // dirty only ever becomes true via body's own listener (see initState),
+    // so by the time save can be invoked (the save button, or a dirty pop)
+    // body is guaranteed to be loaded.
+    final markdown = deltaToMarkdown(body!.document.toDelta());
+    await widget.gateway.saveNote(widget.noteId, title.text, markdown);
     requestCurrentWorkspaceSync(widget.gateway);
     if (mounted) setState(() => dirty = false);
   }
@@ -2095,12 +2160,15 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void dispose() {
     title.dispose();
-    body.dispose();
+    body?.dispose();
+    bodyFocusNode.dispose();
+    bodyScrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final quillBody = body;
     return PopScope(
       canPop: !dirty,
       onPopInvokedWithResult: (didPop, _) async {
@@ -2120,12 +2188,6 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
           actions: [
             IconButton(
-              tooltip:
-                  preview ? widget.strings("edit") : widget.strings("preview"),
-              onPressed: () => setState(() => preview = !preview),
-              icon: Icon(preview ? Icons.edit : Icons.visibility),
-            ),
-            IconButton(
               tooltip: widget.strings("save"),
               onPressed: dirty ? save : null,
               icon: const Icon(Icons.save_outlined),
@@ -2133,34 +2195,27 @@ class _EditorScreenState extends State<EditorScreen> {
           ],
         ),
         body:
-            loading
+            loading || quillBody == null
                 ? const Center(child: CircularProgressIndicator())
                 : Column(
                   children: [
                     if (attachments.isNotEmpty) attachmentsStrip(),
                     tagsRow(),
+                    QuillSimpleToolbar(
+                      controller: quillBody,
+                      config: _editorToolbarConfig,
+                    ),
                     Expanded(
-                      child:
-                          preview
-                              ? SingleChildScrollView(
-                                padding: const EdgeInsets.all(20),
-                                child: MarkdownBody(
-                                  data: body.text,
-                                  selectable: true,
-                                ),
-                              )
-                              : TextField(
-                                controller: body,
-                                expands: true,
-                                maxLines: null,
-                                minLines: null,
-                                textAlignVertical: TextAlignVertical.top,
-                                decoration: InputDecoration(
-                                  hintText: widget.strings("body"),
-                                  contentPadding: const EdgeInsets.all(20),
-                                  border: InputBorder.none,
-                                ),
-                              ),
+                      child: QuillEditor(
+                        focusNode: bodyFocusNode,
+                        scrollController: bodyScrollController,
+                        controller: quillBody,
+                        config: QuillEditorConfig(
+                          placeholder: widget.strings("body"),
+                          padding: const EdgeInsets.all(20),
+                          expands: true,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -2203,7 +2258,9 @@ class _EditorScreenState extends State<EditorScreen> {
             onRestored: () async {
               Navigator.pop(sheetContext);
               final value = await widget.gateway.getNote(widget.noteId);
-              body.text = value["body"] as String;
+              body?.document = Document.fromDelta(
+                markdownToDelta(value["body"] as String),
+              );
             },
           ),
     );

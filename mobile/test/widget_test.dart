@@ -2,6 +2,7 @@ import "dart:typed_data";
 
 import "package:beresta/main.dart";
 import "package:flutter/material.dart";
+import "package:flutter_quill/flutter_quill.dart";
 import "package:flutter_test/flutter_test.dart";
 
 void main() {
@@ -28,26 +29,40 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.add));
     await tester.pumpAndSettle();
-    final body = find.widgetWithText(TextField, "Markdown body");
-    await tester.enterText(body, "Offline paragraph");
+    // QuillController.replaceText is the same high-level entry point the
+    // real on-screen keyboard drives internally; going through it directly
+    // (rather than simulating IME TextInputClient calls) exercises the
+    // editor/controller wiring under test without depending on flutter_
+    // quill's own IME-diffing internals, which are unrelated to what this
+    // test verifies.
+    const enteredText = "Offline paragraph";
+    final controller =
+        tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
+    controller.replaceText(
+      0,
+      0,
+      enteredText,
+      const TextSelection.collapsed(offset: enteredText.length),
+    );
     // The save button only enables once the body controller's listener
     // marks the editor dirty (see _EditorScreenState.markDirty), which
     // takes effect on the next frame rather than synchronously with
-    // enterText; without this pump the tap below hits a still-disabled
+    // replaceText; without this pump the tap below hits a still-disabled
     // button and silently does nothing.
     await tester.pump();
     await tester.tap(find.byIcon(Icons.save_outlined));
     await tester.pumpAndSettle();
 
-    expect(gateway.savedBody, "Offline paragraph");
+    expect(gateway.savedBody, enteredText);
   });
 
   testWidgets("unlocks an existing account with device authentication", (
     tester,
   ) async {
-    final gateway = FakeGateway(unlocked: false)
-      ..accountExists = true
-      ..deviceUnlockAvailable = true;
+    final gateway =
+        FakeGateway(unlocked: false)
+          ..accountExists = true
+          ..deviceUnlockAvailable = true;
     await tester.pumpWidget(BerestaApp(gateway: gateway));
     await tester.pumpAndSettle();
 
@@ -83,7 +98,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(gateway.createdNoteNotebookId, "");
-    expect(find.text("Markdown body"), findsOneWidget);
+    expect(find.byType(QuillEditor), findsOneWidget);
   });
 
   testWidgets("attachment can be deleted from its visible action", (
@@ -104,10 +119,10 @@ void main() {
 
     await tester.tap(find.widgetWithText(FilledButton, "Delete"));
     await tester.pumpAndSettle();
-    expect(
-      gateway.removedAttachment,
-      ("018f0000-0000-7000-8000-000000000001", "attachment-1"),
-    );
+    expect(gateway.removedAttachment, (
+      "018f0000-0000-7000-8000-000000000001",
+      "attachment-1",
+    ));
   });
 
   testWidgets("background transition does not expose note text", (
@@ -279,6 +294,7 @@ class FakeGateway implements CoreGateway {
     createdNoteNotebookId = notebookId;
     return note;
   }
+
   @override
   Future<Map<String, dynamic>> getNote(String id) async => {
     "note": note,
@@ -312,10 +328,12 @@ class FakeGateway implements CoreGateway {
   @override
   Future<void> removeAttachmentData(String noteId, String blobId) async {
     removedAttachment = (noteId, blobId);
-    attachmentList = attachmentList
-        .where((attachment) => attachment["blob_id"] != blobId)
-        .toList();
+    attachmentList =
+        attachmentList
+            .where((attachment) => attachment["blob_id"] != blobId)
+            .toList();
   }
+
   @override
   Future<List<Map<String, dynamic>>> listTags() async => [];
   @override

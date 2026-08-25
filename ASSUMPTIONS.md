@@ -9,7 +9,7 @@ This file records implementation decisions that fill gaps without changing the f
 3. Note bodies are rich-text CRDT documents with a canonical Markdown projection. Markdown is used for search/export/diff presentation but is not the merge source.
 4. Tags use per-tag metadata registers so concurrent changes to unrelated tags do not replace the entire tag set.
 5. Restore creates new current operations rather than rewinding synchronization history.
-6. Revision rollback and portable/Evernote import recreate a note's content as plain text. Neither the canonical Markdown export nor Evernote's ENML has a parser back into the CRDT rich-text model in this codebase, so formatting is not round-tripped through either path; both report this to the user (rollback implicitly, import as a per-note warning) rather than silently dropping it.
+6. Revision rollback and portable/Evernote import recreate a note's content as plain text; formatting is not round-tripped through either path, and both report this to the user (rollback implicitly, import as a per-note warning) rather than silently dropping it. `core/sync/yjsadapter` does have a Markdown-to-CRDT parser (`Document.ReplaceMarkdown`), the inverse of the canonical Markdown projection, but only the mobile editor's `SaveNote` uses it: that is the one path where the text being written back is Beresta's own canonical Markdown produced moments earlier by `GetNote`, rather than a foreign format (Evernote's ENML) or an arbitrary historical snapshot with no live editor to round-trip against.
 
 ## Identity and Keys
 

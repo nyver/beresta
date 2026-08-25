@@ -136,6 +136,167 @@ func TestMarkdownRejectsEmbeddedContent(t *testing.T) {
 	}
 }
 
+func TestReplaceMarkdownAppliesInlineFormattingInsteadOfLiteralSyntax(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	md := "**bold** plain `code`[ link](https://example.com)"
+	if err := doc.ReplaceMarkdown("body", md); err != nil {
+		t.Fatalf("ReplaceMarkdown: %v", err)
+	}
+
+	// This is the regression a naive plain-text write introduces: without
+	// parsing the Markdown back into attributed runs, "**bold**" ends up as
+	// eight literal characters instead of the word "bold" carrying a bold
+	// attribute, which is what a Quill-style editor (see
+	// desktop/frontend/src/editor/NoteEditor.tsx) renders directly from this
+	// same Y.Text root.
+	text, err := doc.Text("body")
+	if err != nil {
+		t.Fatalf("Text: %v", err)
+	}
+	wantText := "bold plain code link"
+	if text != wantText {
+		t.Fatalf("Text = %q, want %q (Markdown syntax must become formatting, not literal characters)", text, wantText)
+	}
+
+	got, err := doc.Markdown("body")
+	if err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	if got != md {
+		t.Fatalf("Markdown = %q, want %q", got, md)
+	}
+}
+
+func TestReplaceMarkdownAppliesBlockFormatting(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	md := "## Title\n> quoted\n1. one\n2. two"
+	if err := doc.ReplaceMarkdown("body", md); err != nil {
+		t.Fatalf("ReplaceMarkdown: %v", err)
+	}
+
+	text, err := doc.Text("body")
+	if err != nil {
+		t.Fatalf("Text: %v", err)
+	}
+	wantText := "Title\nquoted\none\ntwo\n"
+	if text != wantText {
+		t.Fatalf("Text = %q, want %q (block markers must become formatting, not literal characters)", text, wantText)
+	}
+
+	got, err := doc.Markdown("body")
+	if err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	if got != md {
+		t.Fatalf("Markdown = %q, want %q", got, md)
+	}
+}
+
+func TestReplaceMarkdownRoundTripsNestedInlineFormatting(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	md := "***~~text~~***"
+	if err := doc.ReplaceMarkdown("body", md); err != nil {
+		t.Fatalf("ReplaceMarkdown: %v", err)
+	}
+	got, err := doc.Markdown("body")
+	if err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	if got != md {
+		t.Fatalf("Markdown = %q, want %q", got, md)
+	}
+}
+
+func TestReplaceMarkdownRoundTripsCodeFence(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	md := "```\nline one\nline two\n```\nafter"
+	if err := doc.ReplaceMarkdown("body", md); err != nil {
+		t.Fatalf("ReplaceMarkdown: %v", err)
+	}
+	got, err := doc.Markdown("body")
+	if err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	if got != md {
+		t.Fatalf("Markdown = %q, want %q", got, md)
+	}
+}
+
+func TestReplaceMarkdownPlainTextRoundTripsExactly(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	md := "hello from the mobile facade"
+	if err := doc.ReplaceMarkdown("body", md); err != nil {
+		t.Fatalf("ReplaceMarkdown: %v", err)
+	}
+	text, err := doc.Text("body")
+	if err != nil {
+		t.Fatalf("Text: %v", err)
+	}
+	if text != md {
+		t.Fatalf("Text = %q, want %q (plain text must round-trip without a trailing newline)", text, md)
+	}
+}
+
+func TestReplaceMarkdownReplacesExistingFormattedContent(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	if err := doc.Insert("body", 0, "old", Attributes{AttrBold: true}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := doc.ReplaceMarkdown("body", "new"); err != nil {
+		t.Fatalf("ReplaceMarkdown: %v", err)
+	}
+	got, err := doc.Markdown("body")
+	if err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	if got != "new" {
+		t.Fatalf("Markdown = %q, want %q", got, "new")
+	}
+}
+
+func TestReplaceMarkdownEmptyStringClearsRoot(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	if err := doc.Insert("body", 0, "old", nil); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := doc.ReplaceMarkdown("body", ""); err != nil {
+		t.Fatalf("ReplaceMarkdown: %v", err)
+	}
+	text, err := doc.Text("body")
+	if err != nil {
+		t.Fatalf("Text: %v", err)
+	}
+	if text != "" {
+		t.Fatalf("Text = %q, want empty", text)
+	}
+}
+
+func TestReplaceMarkdownRejectsInvalidInput(t *testing.T) {
+	doc := New()
+	defer doc.Close()
+
+	if err := doc.ReplaceMarkdown("", "x"); !errors.Is(err, ErrInvalidRootName) {
+		t.Fatalf("empty root error = %v", err)
+	}
+	if err := doc.ReplaceMarkdown("body", "\xff"); !errors.Is(err, ErrInvalidText) {
+		t.Fatalf("invalid utf8 error = %v", err)
+	}
+}
+
 func TestMarkdownEmptyDocument(t *testing.T) {
 	doc := New()
 	defer doc.Close()

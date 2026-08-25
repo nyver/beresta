@@ -1,11 +1,16 @@
 package mobileapi
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/beresta-app/beresta/core/sync/yjsadapter"
 )
 
 func newTestServiceDeviceSecret(t *testing.T) []byte {
@@ -31,6 +36,38 @@ func must(value string, err error) string {
 		panic(err)
 	}
 	return value
+}
+
+// retryTempDir behaves like t.TempDir, except its cleanup retries
+// os.RemoveAll for a few seconds instead of failing on the first attempt.
+// Windows endpoint protection can briefly retain a just-closed SQLCipher
+// database or WAL file past when Close() returns (see the identical retry
+// loop in TestSQLCipherProbeFacade in document_test.go), which otherwise
+// turns a successful encrypted round trip into a flaky test failure through
+// no fault of the test itself.
+func retryTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "beresta-mobileapi-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			err := os.RemoveAll(dir)
+			if err == nil {
+				if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+					return
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("remove temp directory %s: %v", dir, err)
+				return
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+	})
+	return dir
 }
 
 func TestListNotesOrdersByLastModified(t *testing.T) {
@@ -71,6 +108,74 @@ func TestListNotesOrdersByLastModified(t *testing.T) {
 	}
 	if _, ok := listed[0]["updated_unix_ms"].(float64); !ok {
 		t.Fatalf("ListNotes did not return updated_unix_ms: %v", listed[0])
+	}
+}
+
+// TestSaveNotePreservesRichFormattingForOtherClients guards against a
+// regression where SaveNote wrote the mobile editor's plain-text body
+// straight into the note's Y.Text root. GetNote always hands the mobile
+// editor the note's canonical Markdown projection (see noteText), so a
+// literal write-back turns "**bold**" into eight literal characters instead
+// of the word "bold" carrying a bold attribute — which desktop's Quill
+// editor (bound directly to this same root, see
+// desktop/frontend/src/editor/NoteEditor.tsx) then renders as raw,
+// unformatted Markdown syntax instead of rich text.
+func TestSaveNotePreservesRichFormattingForOtherClients(t *testing.T) {
+	service, err := NewService(newTestServiceDeviceSecret(t))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	// Registered before t.Cleanup(service.Close) so it runs after it (Go
+	// runs cleanups last-registered-first): the database file must be closed
+	// before its directory is removed, which Windows enforces unlike POSIX.
+	dbPath := filepath.Join(retryTempDir(t), "beresta.db")
+	t.Cleanup(service.Close)
+	if _, err := service.CreateAccount("create-account", dbPath, "correct horse battery staple"); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	noteJSON, err := service.CreateNote("create-note", "", "Formatted")
+	if err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+	note := decodeJSON[map[string]any](t, noteJSON)
+	noteID, _ := note["id"].(string)
+	if noteID == "" {
+		t.Fatalf("unexpected CreateNote response: %v", note)
+	}
+
+	body := "**bold** and a list:\n- one\n- two"
+	if err := service.SaveNote("save-note", noteID, "Formatted", body); err != nil {
+		t.Fatalf("SaveNote: %v", err)
+	}
+
+	fetched := decodeJSON[map[string]any](t, must(service.GetNote("get-note", noteID)))
+	if fetched["body"] != body {
+		t.Fatalf("GetNote body = %v, want %q", fetched["body"], body)
+	}
+
+	value, workspaceID, id, err := service.noteContext(noteID)
+	if err != nil {
+		t.Fatalf("noteContext: %v", err)
+	}
+	state, format, err := value.NoteDocumentState(context.Background(), workspaceID, id)
+	if err != nil {
+		t.Fatalf("NoteDocumentState: %v", err)
+	}
+	doc, err := yjsadapter.Restore(format, state)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	defer doc.Close()
+	plain, err := doc.Text("body")
+	if err != nil {
+		t.Fatalf("Text: %v", err)
+	}
+	if strings.ContainsAny(plain, "*-") {
+		t.Fatalf("underlying CRDT text still contains literal Markdown syntax: %q", plain)
+	}
+	wantPlain := "bold and a list:\none\ntwo\n"
+	if plain != wantPlain {
+		t.Fatalf("underlying CRDT text = %q, want %q", plain, wantPlain)
 	}
 }
 

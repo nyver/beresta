@@ -392,19 +392,13 @@ func (s *Service) SaveNote(requestID, noteID, title, body string) error {
 		return err
 	}
 	defer doc.Close()
-	current, err := doc.Text("body")
-	if err != nil {
+	// The mobile editor only ever sees the note's canonical Markdown
+	// projection (see noteText), so writing body back must parse it as
+	// Markdown rather than inserting it as plain text — otherwise a plain
+	// Insert would flatten any bold/italic/list/link formatting from other
+	// clients into literal, unrendered Markdown syntax.
+	if err := doc.ReplaceMarkdown("body", body); err != nil {
 		return err
-	}
-	if current != "" {
-		if err := doc.Delete("body", 0, len([]rune(current))); err != nil {
-			return err
-		}
-	}
-	if body != "" {
-		if err := doc.Insert("body", 0, body, nil); err != nil {
-			return err
-		}
 	}
 	update, err := doc.EncodeStateAsUpdate(yjsadapter.FormatV2)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/reearth/ygo/crdt"
@@ -73,6 +74,7 @@ type DocumentCRDT interface {
 	Insert(root string, index int, text string, attrs Attributes) error
 	Delete(root string, index, length int) error
 	Format(root string, index, length int, attrs Attributes) error
+	ReplaceMarkdown(root, markdown string) error
 	Close()
 }
 
@@ -267,6 +269,100 @@ func (d *Document) Format(root string, index, length int, attrs Attributes) (err
 			panic(ErrInvalidRange)
 		}
 		t.Format(txn, index, length, crdt.Attributes(attrs))
+	})
+	return nil
+}
+
+// noteAttrKeys enumerates every attribute key ReplaceMarkdown ever writes.
+// Insert treats a nil or empty attrs argument as "inherit the ContentFormat
+// markers in effect at the insertion point" (matching Yjs JS insertText
+// semantics; see ygo's YText.Insert). Reconstructing a whole document from a
+// sequence of Insert calls therefore requires an explicit nil for every key
+// that must NOT carry over from whatever run was inserted immediately
+// before, rather than relying on an empty map to mean "plain text".
+var noteAttrKeys = []string{
+	AttrBold, AttrItalic, AttrStrike, AttrCode, AttrLink,
+	AttrHeader, AttrBlockquote, AttrList, AttrCodeBlock,
+}
+
+// explicitAttrs returns a complete attribute map: every key ReplaceMarkdown
+// understands explicitly nil (cleared), overridden by overrides. Passing the
+// result to Insert guarantees the new run's formatting is exactly overrides,
+// regardless of what was typed immediately before it in the same rebuild.
+func explicitAttrs(overrides Attributes) Attributes {
+	attrs := make(Attributes, len(noteAttrKeys))
+	for _, key := range noteAttrKeys {
+		attrs[key] = nil
+	}
+	for key, value := range overrides {
+		attrs[key] = value
+	}
+	return attrs
+}
+
+// utf16Len returns the length of s in UTF-16 code units, matching Y.Text's
+// indexing (see YText.Len): text indices are UTF-16 code units for
+// JavaScript-Yjs interoperability, not Go runes or bytes. A supplementary
+// character (U+10000 and above) counts as 2 units.
+func utf16Len(s string) int {
+	return len(utf16.Encode([]rune(s)))
+}
+
+// ReplaceMarkdown replaces the entire content of a named Y.Text root with the
+// structured form of a Markdown string, restoring the bold/italic/strike/
+// code/link/header/blockquote/list/code-block formatting that a plain
+// Delete-then-Insert of the same string would flatten into literal Markdown
+// syntax (asterisks, list markers, and so on rendered as inert text). It is
+// the write-side counterpart to Markdown, for a caller (such as the mobile
+// editor, which only ever sees the Markdown projection) that must write a
+// Markdown-edited string back without destroying the rich-text formatting
+// other clients render from the same root.
+func (d *Document) ReplaceMarkdown(root, markdown string) (err error) {
+	if err := validateRootName(root); err != nil {
+		return err
+	}
+	if !utf8.ValidString(markdown) {
+		return ErrInvalidText
+	}
+	lines := parseMarkdownLines(markdown)
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.doc == nil {
+		return ErrClosed
+	}
+	defer func() {
+		if recover() != nil {
+			err = ErrInvalidRange
+		}
+	}()
+
+	d.doc.Transact(func(txn *crdt.Transaction) {
+		t := txn.GetText(root)
+		if n := t.Len(); n > 0 {
+			t.Delete(txn, 0, n)
+		}
+		if markdown == "" {
+			return
+		}
+		index := 0
+		for i, ln := range lines {
+			for _, r := range ln.runs {
+				if r.text == "" {
+					continue
+				}
+				t.Insert(txn, index, r.text, crdt.Attributes(explicitAttrs(r.attrs)))
+				index += utf16Len(r.text)
+			}
+			// Block-level formatting lives on the newline that ends a line
+			// (Quill/Yjs convention), so the last line only needs one when it
+			// actually carries block formatting to preserve; otherwise a
+			// trailing newline would be new, uninserted-by-the-user state.
+			if i < len(lines)-1 || len(ln.block) > 0 {
+				t.Insert(txn, index, "\n", crdt.Attributes(explicitAttrs(ln.block)))
+				index++
+			}
+		}
 	})
 	return nil
 }

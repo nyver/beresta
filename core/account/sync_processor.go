@@ -240,6 +240,16 @@ func (v *verifiedNoteOperation) applyMetadata(ctx context.Context, tx store.Exec
 	op := v.metadata
 	switch op.Kind {
 	case coresync.NoteMetadataKindNotebook:
+		// A newly connected device can receive a "move note to notebook X"
+		// operation before notebook X's own creation operation. Filing a note
+		// back at the workspace root (NotebookID zero) never needs a
+		// notebooks row, but any other target must exist first to satisfy
+		// notes.notebook_id's foreign key.
+		if !op.NotebookID.IsZero() {
+			if err := store.EnsureNotebookPlaceholder(ctx, tx, v.wire.WorkspaceID, op.NotebookID, v.wire.Clock); err != nil {
+				return err
+			}
+		}
 		return store.SetNoteNotebook(ctx, tx, op.NoteID, op.NotebookID, v.wire.Clock)
 	case coresync.NoteMetadataKindTag:
 		// Tag definitions are structural workspace state and may not yet be

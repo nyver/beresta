@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -141,6 +142,47 @@ func UpsertSnapshotNotebook(ctx context.Context, exec Executor, notebook Noteboo
 		notebook.CreatedAt.PhysicalMS, notebook.CreatedAt.Logical, notebook.CreatedAt.DeviceID.Bytes(),
 	); err != nil {
 		return fmt.Errorf("store: upsert snapshot notebook: %w", err)
+	}
+	return nil
+}
+
+// EnsureNotebookPlaceholder creates a hidden tombstoned notebook when a
+// synchronized note-notebook assignment arrives before the matching notebook
+// catalog row (e.g. a newly connected device receiving the "move note"
+// operation before the "create notebook" operation). This satisfies notes'
+// notebook_id foreign key without exposing a guessed notebook name in the
+// user interface, mirroring EnsureTagPlaceholder. It always files the
+// placeholder at the workspace root; a later CreateNotebook or snapshot
+// replay never touches this row's id, so any real parent arrives as its own
+// separate, ordinary update.
+func EnsureNotebookPlaceholder(ctx context.Context, exec Executor, workspaceID, notebookID model.ID, clock model.HLC) error {
+	if notebookID.IsZero() {
+		return errors.New("store: notebook placeholder ID is zero")
+	}
+	name := "sync-pending-" + hex.EncodeToString(notebookID.Bytes())
+	if _, err := exec.ExecContext(ctx,
+		`INSERT INTO notebooks (
+			id, workspace_id, name, name_physical_ms, name_logical, name_device_id,
+			deleted, deleted_physical_ms, deleted_logical, deleted_device_id,
+			created_physical_ms, created_logical, created_device_id
+		) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING`,
+		notebookID.Bytes(), workspaceID.Bytes(), name, clock.PhysicalMS, clock.Logical, clock.DeviceID.Bytes(),
+		clock.PhysicalMS, clock.Logical, clock.DeviceID.Bytes(),
+		clock.PhysicalMS, clock.Logical, clock.DeviceID.Bytes(),
+	); err != nil {
+		return fmt.Errorf("store: insert notebook placeholder: %w", err)
+	}
+	var storedWorkspaceID []byte
+	if err := exec.QueryRowContext(ctx, `SELECT workspace_id FROM notebooks WHERE id = ?`, notebookID.Bytes()).Scan(&storedWorkspaceID); err != nil {
+		return fmt.Errorf("store: get notebook placeholder workspace: %w", err)
+	}
+	storedWorkspace, err := model.ParseID(storedWorkspaceID)
+	if err != nil {
+		return fmt.Errorf("store: stored notebook placeholder workspace ID: %w", err)
+	}
+	if storedWorkspace != workspaceID {
+		return ErrWrongWorkspace
 	}
 	return nil
 }

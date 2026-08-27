@@ -117,3 +117,58 @@ func TestTagMetadataCreatesPlaceholderBeforeReference(t *testing.T) {
 		t.Fatalf("NoteTagIDs() = %v, want [%v]", tagIDs, tagID)
 	}
 }
+
+func TestNotebookMetadataCreatesPlaceholderBeforeReference(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "note")
+	if err != nil {
+		t.Fatalf("CreateNote() error = %v", err)
+	}
+	notebookID, err := model.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := model.HLC{PhysicalMS: 1_000, DeviceID: created.DeviceID}
+	transaction, err := created.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := verifiedNoteOperation{
+		account: created,
+		wire: coresync.WireOperation{
+			WorkspaceID: workspaceID,
+			Clock:       clock,
+		},
+		metadata: &coresync.NoteMetadataOperation{
+			NoteID:     note.ID,
+			Kind:       coresync.NoteMetadataKindNotebook,
+			NotebookID: notebookID,
+		},
+	}
+	// Before the fix, this failed with "FOREIGN KEY constraint failed"
+	// because notebookID had never been materialized locally.
+	if err := operation.applyMetadata(ctx, transaction); err != nil {
+		transaction.Rollback()
+		t.Fatalf("applyMetadata() error = %v", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	var deleted bool
+	if err := created.db.QueryRowContext(ctx, `SELECT deleted FROM notebooks WHERE id = ?`, notebookID.Bytes()).Scan(&deleted); err != nil {
+		t.Fatalf("query placeholder notebook: %v", err)
+	}
+	if !deleted {
+		t.Fatal("notebook placeholder must be hidden as deleted")
+	}
+	got, err := store.GetNote(ctx, created.db, note.ID)
+	if err != nil {
+		t.Fatalf("GetNote() error = %v", err)
+	}
+	if got.NotebookID.Value != notebookID {
+		t.Fatalf("NotebookID = %v, want %v", got.NotebookID.Value, notebookID)
+	}
+}

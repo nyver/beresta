@@ -27,6 +27,11 @@ abstract interface class CoreGateway {
   Future<void> setNoteTag(String noteId, String tagId, bool present);
   Future<List<String>> listNoteTags(String noteId);
   Future<List<Map<String, dynamic>>> listRevisions(String noteId);
+  Future<List<Map<String, dynamic>>> diffRevisions(
+    String noteId,
+    String fromRevisionId,
+    String toRevisionId,
+  );
   Future<void> restoreRevision(String noteId, String revisionId);
   Future<void> syncNow();
   Future<void> connectServer(Map<String, dynamic> config);
@@ -177,6 +182,19 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<List<Map<String, dynamic>>> listRevisions(String noteId) async =>
       _list(await _invoke("listRevisions", {"noteId": noteId}));
+
+  @override
+  Future<List<Map<String, dynamic>>> diffRevisions(
+    String noteId,
+    String fromRevisionId,
+    String toRevisionId,
+  ) async => _list(
+    await _invoke("diffRevisions", {
+      "noteId": noteId,
+      "fromRevisionId": fromRevisionId,
+      "toRevisionId": toRevisionId,
+    }),
+  );
 
   @override
   Future<void> restoreRevision(String noteId, String revisionId) =>

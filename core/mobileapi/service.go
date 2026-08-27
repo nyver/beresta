@@ -793,7 +793,45 @@ func (s *Service) ListRevisions(requestID, noteID string) (string, error) {
 	}
 	result := make([]map[string]any, len(rows))
 	for i, row := range rows {
-		result[i] = map[string]any{"id": row.ID.String(), "kind": row.Kind, "created_unix_ms": row.CreatedUnixMS}
+		result[i] = map[string]any{"id": row.ID.String(), "checkpoint": row.Kind == store.RevisionKindCheckpoint, "created_unix_ms": row.CreatedUnixMS}
+	}
+	return marshal(result)
+}
+
+var diffOpNames = [...]string{"equal", "delete", "insert"}
+
+// DiffRevisions returns a line-based diff from fromRevisionID to
+// toRevisionID's Markdown content. An empty fromRevisionID diffs against
+// the note's state before its first revision, mirroring desktop's
+// DiffRevisions binding.
+func (s *Service) DiffRevisions(requestID, noteID, fromRevisionID, toRevisionID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	value, workspaceID, id, err := s.noteContext(noteID)
+	if err != nil {
+		return "", err
+	}
+	from := model.Nil
+	if fromRevisionID != "" {
+		from, err = parseID(fromRevisionID)
+		if err != nil {
+			return "", err
+		}
+	}
+	to, err := parseID(toRevisionID)
+	if err != nil {
+		return "", err
+	}
+	lines, err := value.DiffRevisions(ctx, workspaceID, id, from, to)
+	if err != nil {
+		return "", err
+	}
+	result := make([]map[string]any, len(lines))
+	for i, line := range lines {
+		result[i] = map[string]any{"op": diffOpNames[line.Op], "text": line.Text}
 	}
 	return marshal(result)
 }

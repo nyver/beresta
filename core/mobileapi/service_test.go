@@ -265,7 +265,17 @@ func TestServiceFullAccountLifecycle(t *testing.T) {
 	if len(revisions) == 0 {
 		t.Fatalf("expected at least one revision after SaveNote")
 	}
+	if _, ok := revisions[0]["checkpoint"].(bool); !ok {
+		t.Fatalf("ListRevisions did not return a checkpoint bool: %v", revisions[0])
+	}
 	firstRevisionID, _ := revisions[0]["id"].(string)
+	diff := decodeJSON[[]map[string]any](t, must(service.DiffRevisions("diff-revisions", noteID, "", firstRevisionID)))
+	if len(diff) == 0 {
+		t.Fatalf("expected at least one diff line from empty content to the first revision")
+	}
+	if diff[0]["op"] != "insert" {
+		t.Fatalf("first revision's diff from empty content = %v, want an insert op", diff[0])
+	}
 	if err := service.RestoreRevision("restore-revision", noteID, firstRevisionID); err != nil {
 		t.Fatalf("RestoreRevision: %v", err)
 	}

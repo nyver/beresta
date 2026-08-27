@@ -2453,7 +2453,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
   }
 }
 
-class RevisionSheet extends StatelessWidget {
+class RevisionSheet extends StatefulWidget {
   const RevisionSheet({
     required this.gateway,
     required this.strings,
@@ -2468,39 +2468,251 @@ class RevisionSheet extends StatelessWidget {
   final Future<void> Function() onRestored;
 
   @override
+  State<RevisionSheet> createState() => _RevisionSheetState();
+}
+
+class _RevisionSheetState extends State<RevisionSheet> {
+  // Oldest first, exactly as the gateway returns it: RevisionDetailSheet's
+  // diff-against-previous lookup relies on this order, matching desktop's
+  // RevisionsPanel (see its "Newest first for display" comment).
+  List<Map<String, dynamic>>? revisions;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final result = await widget.gateway.listRevisions(widget.noteId);
+    if (mounted) setState(() => revisions = result);
+  }
+
+  Future<void> _openDetail(int oldestFirstIndex) async {
+    final all = revisions!;
+    final fromId = oldestFirstIndex > 0 ? all[oldestFirstIndex - 1]["id"] as String : "";
+    final revision = all[oldestFirstIndex];
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder:
+          (sheetContext) => RevisionDetailSheet(
+            gateway: widget.gateway,
+            strings: widget.strings,
+            noteId: widget.noteId,
+            revisionId: revision["id"] as String,
+            fromRevisionId: fromId,
+            createdUnixMs: revision["created_unix_ms"] as int,
+            checkpoint: revision["checkpoint"] == true,
+            onRestored: () async {
+              Navigator.pop(sheetContext);
+              await widget.onRestored();
+            },
+          ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: gateway.listRevisions(noteId),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        return ListView.builder(
-          itemCount: snapshot.data!.length,
-          itemBuilder: (context, index) {
-            final revision = snapshot.data![index];
-            return ListTile(
-              leading: const Icon(Icons.history),
-              title: Text(
-                DateTime.fromMillisecondsSinceEpoch(
-                  revision["created_unix_ms"] as int,
-                ).toLocal().toString(),
-              ),
-              trailing: TextButton(
-                onPressed: () async {
-                  await gateway.restoreRevision(
-                    noteId,
-                    revision["id"] as String,
-                  );
-                  requestCurrentWorkspaceSync(gateway);
-                  await onRestored();
-                },
-                child: Text(strings("restore")),
-              ),
-            );
-          },
+    final loaded = revisions;
+    if (loaded == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (loaded.isEmpty) {
+      return Center(child: Text(widget.strings("revisions_empty")));
+    }
+    // Newest first for display; the gateway itself returns oldest first.
+    return ListView.builder(
+      itemCount: loaded.length,
+      itemBuilder: (context, displayIndex) {
+        final oldestFirstIndex = loaded.length - 1 - displayIndex;
+        final revision = loaded[oldestFirstIndex];
+        return ListTile(
+          leading: const Icon(Icons.history),
+          title: Text(
+            DateTime.fromMillisecondsSinceEpoch(
+              revision["created_unix_ms"] as int,
+            ).toLocal().toString(),
+          ),
+          trailing:
+              revision["checkpoint"] == true
+                  ? Chip(label: Text(widget.strings("revisions_checkpoint")))
+                  : null,
+          onTap: () => _openDetail(oldestFirstIndex),
         );
       },
     );
   }
+}
+
+/// RevisionDetailSheet shows one revision's line-based diff against the
+/// revision immediately before it (or against empty content, for the
+/// oldest one) and offers restoring it, mirroring desktop's RevisionsPanel
+/// selection/diff/restore behavior.
+class RevisionDetailSheet extends StatefulWidget {
+  const RevisionDetailSheet({
+    required this.gateway,
+    required this.strings,
+    required this.noteId,
+    required this.revisionId,
+    required this.fromRevisionId,
+    required this.createdUnixMs,
+    required this.checkpoint,
+    required this.onRestored,
+    super.key,
+  });
+
+  final CoreGateway gateway;
+  final Strings strings;
+  final String noteId;
+  final String revisionId;
+  final String fromRevisionId;
+  final int createdUnixMs;
+  final bool checkpoint;
+  final Future<void> Function() onRestored;
+
+  @override
+  State<RevisionDetailSheet> createState() => _RevisionDetailSheetState();
+}
+
+class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
+  List<Map<String, dynamic>>? diffLines;
+  Object? diffError;
+  Object? restoreError;
+  bool restoring = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDiff();
+  }
+
+  Future<void> _loadDiff() async {
+    try {
+      final result = await widget.gateway.diffRevisions(
+        widget.noteId,
+        widget.fromRevisionId,
+        widget.revisionId,
+      );
+      if (mounted) setState(() => diffLines = result);
+    } catch (failure) {
+      if (mounted) setState(() => diffError = failure);
+    }
+  }
+
+  Future<void> _restore() async {
+    setState(() {
+      restoring = true;
+      restoreError = null;
+    });
+    try {
+      await widget.gateway.restoreRevision(widget.noteId, widget.revisionId);
+      requestCurrentWorkspaceSync(widget.gateway);
+      await widget.onRestored();
+    } catch (failure) {
+      if (mounted) {
+        setState(() {
+          restoring = false;
+          restoreError = failure;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  DateTime.fromMillisecondsSinceEpoch(
+                    widget.createdUnixMs,
+                  ).toLocal().toString(),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              if (widget.checkpoint)
+                Chip(label: Text(widget.strings("revisions_checkpoint"))),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Flexible(
+            child:
+                diffError != null
+                    ? Text(
+                      describeFailure(widget.strings, diffError!),
+                      style: TextStyle(color: scheme.error),
+                    )
+                    : diffLines == null
+                    ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                    : SingleChildScrollView(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            for (final line in diffLines!)
+                              TextSpan(
+                                text: "${_diffMarker(line["op"] as String)}${line["text"]}\n",
+                                style: TextStyle(
+                                  color: _diffColor(
+                                    line["op"] as String,
+                                    scheme,
+                                  ),
+                                  fontFamily: "monospace",
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+          ),
+          const SizedBox(height: 8),
+          if (restoreError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                describeFailure(widget.strings, restoreError!),
+                style: TextStyle(color: scheme.error),
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton(
+              onPressed: restoring ? null : _restore,
+              child:
+                  restoring
+                      ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                      : Text(widget.strings("restore")),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _diffMarker(String op) => switch (op) {
+    "insert" => "+ ",
+    "delete" => "- ",
+    _ => "  ",
+  };
+
+  Color? _diffColor(String op, ColorScheme scheme) => switch (op) {
+    "insert" => Colors.green,
+    "delete" => scheme.error,
+    _ => null,
+  };
 }

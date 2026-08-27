@@ -278,6 +278,7 @@ class MainActivity : FlutterFragmentActivity() {
             "setNoteTag" -> service.setNoteTag(requestId, required(call, "noteId"), required(call, "tagId"), call.argument<Boolean>("present") == true)
             "listNoteTags" -> service.listNoteTags(requestId, required(call, "noteId"))
             "listRevisions" -> service.listRevisions(requestId, required(call, "noteId"))
+            "diffRevisions" -> service.diffRevisions(requestId, required(call, "noteId"), required(call, "fromRevisionId"), required(call, "toRevisionId"))
             "restoreRevision" -> service.restoreRevision(requestId, required(call, "noteId"), required(call, "revisionId"))
             "syncNow" -> service.syncNow()
             "connectServer" -> service.connectServer(requestId, required(call, "encoded"))

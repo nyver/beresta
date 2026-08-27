@@ -56,6 +56,62 @@ void main() {
     expect(gateway.savedBody, enteredText);
   });
 
+  testWidgets(
+    "revision history lists newest first with a checkpoint badge and shows a diff",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..revisionList = [
+              {
+                "id": "rev-1",
+                "checkpoint": true,
+                "created_unix_ms": 1710000000000,
+              },
+              {
+                "id": "rev-2",
+                "checkpoint": false,
+                "created_unix_ms": 1710000100000,
+              },
+            ];
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Revisions"));
+      await tester.pumpAndSettle();
+
+      final oldestDate =
+          DateTime.fromMillisecondsSinceEpoch(
+            1710000000000,
+          ).toLocal().toString();
+      final newestDate =
+          DateTime.fromMillisecondsSinceEpoch(
+            1710000100000,
+          ).toLocal().toString();
+      expect(find.byType(ListTile), findsNWidgets(2));
+      expect(find.text("Checkpoint"), findsOneWidget);
+      // Newest first: the later revision's row sits above the older one's.
+      expect(
+        tester.getTopLeft(find.text(newestDate)).dy,
+        lessThan(tester.getTopLeft(find.text(oldestDate)).dy),
+      );
+
+      await tester.tap(find.text(newestDate));
+      await tester.pumpAndSettle();
+
+      // Diffed against the revision immediately before it in oldest-first
+      // order (rev-1), not against empty content.
+      expect(find.textContaining("from rev-1"), findsOneWidget);
+      expect(find.textContaining("to rev-2"), findsOneWidget);
+
+      await tester.tap(find.text("Restore"));
+      await tester.pumpAndSettle();
+
+      expect(gateway.restoredRevisionId, "rev-2");
+    },
+  );
+
   testWidgets("unlocks an existing account with device authentication", (
     tester,
   ) async {
@@ -347,10 +403,24 @@ class FakeGateway implements CoreGateway {
   Future<void> setNoteTag(String noteId, String tagId, bool present) async {}
   @override
   Future<List<String>> listNoteTags(String noteId) async => [];
+  // Oldest first, matching the real gateway's contract.
+  List<Map<String, dynamic>> revisionList = [];
+  String? restoredRevisionId;
   @override
-  Future<List<Map<String, dynamic>>> listRevisions(String noteId) async => [];
+  Future<List<Map<String, dynamic>>> listRevisions(String noteId) async =>
+      revisionList;
   @override
-  Future<void> restoreRevision(String noteId, String revisionId) async {}
+  Future<List<Map<String, dynamic>>> diffRevisions(
+    String noteId,
+    String fromRevisionId,
+    String toRevisionId,
+  ) async => [
+    {"op": "delete", "text": "from $fromRevisionId"},
+    {"op": "insert", "text": "to $toRevisionId"},
+  ];
+  @override
+  Future<void> restoreRevision(String noteId, String revisionId) async =>
+      restoredRevisionId = revisionId;
   @override
   Future<void> syncNow() async => syncNowCalls++;
   @override

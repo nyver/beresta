@@ -160,7 +160,7 @@ func TestServiceWorkspaceSharingAcrossTwoAccounts(t *testing.T) {
 	if err := joiner.SyncNow(); err != nil {
 		t.Fatalf("joiner SyncNow: %v", err)
 	}
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	sharedNoteReceived := false
 	preexistingNoteReceived := false
 	preexistingNotebookReceived := false

@@ -47,6 +47,37 @@ func TestSearchNotesMatchesTitleAndBody(t *testing.T) {
 	}
 }
 
+func TestSearchNotesMatchesPartialWordPrefix(t *testing.T) {
+	db := repoTestDB(t)
+	workspaceID := seedWorkspace(t, db)
+
+	needle := seedSearchNote(t, db, workspaceID, "Running list", "shoes to buy before the marathon", nil, 100)
+	seedSearchNote(t, db, workspaceID, "Unrelated", "nothing to see here", nil, 100)
+
+	results, err := SearchNotes(context.Background(), db, workspaceID, SearchQuery{Text: "run"})
+	if err != nil {
+		t.Fatalf("SearchNotes() error = %v", err)
+	}
+	if len(results) != 1 || results[0].Note.ID != needle.ID {
+		t.Fatalf("SearchNotes(%q) = %+v, want just %v", "run", results, needle.ID)
+	}
+}
+
+func TestSearchNotesIsCaseInsensitive(t *testing.T) {
+	db := repoTestDB(t)
+	workspaceID := seedWorkspace(t, db)
+
+	needle := seedSearchNote(t, db, workspaceID, "Grocery List", "Buy Oat Milk", nil, 100)
+
+	results, err := SearchNotes(context.Background(), db, workspaceID, SearchQuery{Text: "GROCERY milk"})
+	if err != nil {
+		t.Fatalf("SearchNotes() error = %v", err)
+	}
+	if len(results) != 1 || results[0].Note.ID != needle.ID {
+		t.Fatalf("SearchNotes(%q) = %+v, want just %v", "GROCERY milk", results, needle.ID)
+	}
+}
+
 func TestSearchNotesRanksTitleAboveBody(t *testing.T) {
 	db := repoTestDB(t)
 	workspaceID := seedWorkspace(t, db)

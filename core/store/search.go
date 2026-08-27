@@ -170,14 +170,19 @@ const noteSearchColumns = `n.id, n.workspace_id, n.notebook_id, n.notebook_physi
 	n.created_physical_ms, n.created_logical, n.created_device_id`
 
 // ftsMatchQuery turns free-form user text into an FTS5 MATCH expression that
-// treats every word as a literal phrase (implicit AND between them), so
-// FTS5 query-syntax characters typed by the user (-, ", *, NEAR, OR, ...)
-// never change the query's meaning or fail to parse.
+// treats every word as a literal phrase prefix (implicit AND between them),
+// so FTS5 query-syntax characters typed by the user (-, ", *, NEAR, OR, ...)
+// never change the query's meaning or fail to parse, and a partial word (for
+// example "run") matches any note containing a token that starts with it
+// (for example "running"), not only an exact token match. The trailing "*"
+// must sit outside the closing quote - FTS5 parses `"word"*` as a
+// phrase-prefix query, but `"word*"` as a literal (and never indexed)
+// asterisk character inside the phrase.
 func ftsMatchQuery(text string) string {
 	fields := strings.Fields(text)
 	parts := make([]string, 0, len(fields))
 	for _, f := range fields {
-		parts = append(parts, `"`+strings.ReplaceAll(f, `"`, `""`)+`"`)
+		parts = append(parts, `"`+strings.ReplaceAll(f, `"`, `""`)+`"*`)
 	}
 	return strings.Join(parts, " ")
 }

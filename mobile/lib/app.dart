@@ -36,6 +36,22 @@ void requestCurrentWorkspaceSync(CoreGateway gateway) {
   unawaited(gateway.syncNow().catchError((_) {}));
 }
 
+/// Reports whether the free-text search box already contains one of the
+/// backend filter language's special tokens (tag:/after:/before:/
+/// deleted:true), mirroring desktop's identical check in SearchBar.tsx.
+/// Without this, such a query would be misread as a literal, tokens-and-all
+/// substring to match against note titles instead of being sent to the
+/// backend to parse as a filter.
+bool containsQueryToken(String text) {
+  return text.trim().split(RegExp(r"\s+")).any(
+    (word) =>
+        word.startsWith("tag:") ||
+        word.startsWith("after:") ||
+        word.startsWith("before:") ||
+        word == "deleted:true",
+  );
+}
+
 /// Maps a core/transport.Status value ("disabled", "offline", "active",
 /// "current", "failed") to the icon shown next to it in the sync UI.
 IconData syncStatusIcon(String status) {
@@ -502,6 +518,11 @@ class NotesShell extends StatefulWidget {
 
 class _NotesShellState extends State<NotesShell> {
   List<Map<String, dynamic>> notes = [];
+  // The complete workspace collection, kept stable across an in-progress
+  // client-side title search (see runSearch) even though notes itself is
+  // temporarily replaced by that search's - or the backend search's -
+  // narrowed results.
+  List<Map<String, dynamic>> allNotes = [];
   List<Map<String, dynamic>> notebooks = [];
   List<Map<String, dynamic>> tags = [];
   bool loading = true;
@@ -553,6 +574,7 @@ class _NotesShellState extends State<NotesShell> {
       if (mounted) {
         setState(() {
           notes = values[0];
+          allNotes = values[0];
           notebooks = values[1];
           tags = values[2];
           loading = false;
@@ -637,8 +659,31 @@ class _NotesShellState extends State<NotesShell> {
 
   void runSearch(String value) {
     searchDebounce?.cancel();
+    final trimmed = value.trim();
+    if (trimmed.isNotEmpty && !containsQueryToken(trimmed)) {
+      // Partial title match, entirely client-side: the full collection is
+      // already loaded in allNotes, so there is no need to debounce or hit
+      // the backend for the common case of typing a few letters of a
+      // title. The backend's FTS index only matches whole-word prefixes
+      // (see core/store/search.go's ftsMatchQuery), so this also covers
+      // mid-word substrings FTS alone would miss.
+      final needle = trimmed.toLowerCase();
+      setState(() {
+        notes =
+            allNotes
+                .where(
+                  (note) =>
+                      note["deleted"] != true &&
+                      (note["title"] as String).toLowerCase().contains(
+                        needle,
+                      ),
+                )
+                .toList();
+      });
+      return;
+    }
     searchDebounce = Timer(const Duration(milliseconds: 250), () async {
-      if (value.trim().isEmpty) {
+      if (trimmed.isEmpty) {
         await refresh();
         return;
       }

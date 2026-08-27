@@ -606,9 +606,17 @@ func (s *Service) Search(requestID, query string, limit int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	metadataByNote, err := value.NoteListMetaByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
 	result := make([]noteDTO, len(rows))
 	for i, row := range rows {
 		result[i] = mobileNote(row.Note)
+		result[i].UpdatedMS = int64(row.Note.CreatedAt.PhysicalMS)
+		if metadata, ok := metadataByNote[row.Note.ID]; ok {
+			result[i].UpdatedMS = metadata.UpdatedUnixMS
+		}
 		for _, tagID := range tagsByNote[row.Note.ID] {
 			result[i].TagIDs = append(result[i].TagIDs, tagID.String())
 		}

@@ -141,6 +141,37 @@ void main() {
     expect(gateway.createdNoteTitle, "Untitled");
   });
 
+  testWidgets(
+    "typing a plain query matches titles by partial, case-insensitive substring without hitting the backend",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..listedNotes = [
+              {...FakeGateway.noteFixture, "id": "note-1", "title": "Running list"},
+              {...FakeGateway.noteFixture, "id": "note-2", "title": "Grocery list"},
+            ];
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Running list"), findsOneWidget);
+      expect(find.text("Grocery list"), findsOneWidget);
+
+      // Uppercase and a mid-word (not just prefix) fragment of "Running".
+      await tester.enterText(find.byType(SearchBar), "UNN");
+      await tester.pump();
+
+      expect(find.text("Running list"), findsOneWidget);
+      expect(find.text("Grocery list"), findsNothing);
+      expect(gateway.searchCalls, 0);
+
+      // A filter-language token routes to the backend instead.
+      await tester.enterText(find.byType(SearchBar), "tag:urgent");
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(gateway.searchCalls, 1);
+    },
+  );
+
   testWidgets("notebook menu creates a root note", (tester) async {
     final gateway = FakeGateway(unlocked: true);
     await tester.pumpWidget(BerestaApp(gateway: gateway));
@@ -365,8 +396,12 @@ class FakeGateway implements CoreGateway {
   @override
   Future<void> moveNote(String id, String notebookId) async =>
       note["notebook_id"] = notebookId;
+  int searchCalls = 0;
   @override
-  Future<List<Map<String, dynamic>>> search(String query) async => [note];
+  Future<List<Map<String, dynamic>>> search(String query) async {
+    searchCalls++;
+    return [note];
+  }
   @override
   Future<Map<String, dynamic>> createNotebook(
     String name, {

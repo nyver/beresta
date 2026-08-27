@@ -111,6 +111,50 @@ func TestListNotesOrdersByLastModified(t *testing.T) {
 	}
 }
 
+// TestSearchReturnsAccurateLastModifiedTimestamp guards against a regression
+// where Search, unlike ListNotes, never enriched its results with each
+// note's real last-modified time - noteDTO.UpdatedMS has no `omitempty`, so
+// it serialized as the literal JSON 0 rather than being absent, and the
+// mobile client's `?? created_unix_ms` fallback never triggered on an
+// already-present zero, showing the Unix epoch as every search result's
+// modified date instead of when it was actually last edited.
+func TestSearchReturnsAccurateLastModifiedTimestamp(t *testing.T) {
+	service, err := NewService(newTestServiceDeviceSecret(t))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	dbPath := filepath.Join(retryTempDir(t), "beresta.db")
+	t.Cleanup(service.Close)
+	if _, err := service.CreateAccount("create-account", dbPath, "correct horse battery staple"); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	noteJSON, err := service.CreateNote("create-note", "", "Findable title")
+	if err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+	note := decodeJSON[map[string]any](t, noteJSON)
+	noteID, _ := note["id"].(string)
+	createdMS, _ := note["created_unix_ms"].(float64)
+
+	// A short gap so the edit's timestamp is distinguishable from creation.
+	time.Sleep(2 * time.Millisecond)
+	if err := service.SaveNote("edit-note", noteID, "Findable title", "edited body"); err != nil {
+		t.Fatalf("SaveNote: %v", err)
+	}
+
+	results := decodeJSON[[]map[string]any](t, must(service.Search("search", "Findable", 10)))
+	if len(results) != 1 || results[0]["id"] != noteID {
+		t.Fatalf("Search() = %v, want just %s", results, noteID)
+	}
+	updatedMS, ok := results[0]["updated_unix_ms"].(float64)
+	if !ok {
+		t.Fatalf("Search() did not return updated_unix_ms: %v", results[0])
+	}
+	if updatedMS <= createdMS {
+		t.Fatalf("Search() updated_unix_ms = %v, want it to reflect the later SaveNote edit (created at %v)", updatedMS, createdMS)
+	}
+}
+
 // TestSaveNotePreservesRichFormattingForOtherClients guards against a
 // regression where SaveNote wrote the mobile editor's plain-text body
 // straight into the note's Y.Text root. GetNote always hands the mobile

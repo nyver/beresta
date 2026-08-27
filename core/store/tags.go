@@ -81,7 +81,7 @@ func EnsureTagPlaceholder(ctx context.Context, exec Executor, workspaceID, tagID
 	if tagID.IsZero() {
 		return errors.New("store: tag placeholder ID is zero")
 	}
-	name := "sync-pending-" + hex.EncodeToString(tagID.Bytes())
+	name := syncPlaceholderNamePrefix + hex.EncodeToString(tagID.Bytes())
 	if _, err := exec.ExecContext(ctx,
 		`INSERT INTO tags (
 			id, workspace_id, name, created_physical_ms, created_logical, created_device_id,

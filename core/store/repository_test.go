@@ -262,6 +262,84 @@ func TestSetNoteTagIsIndependentPerTag(t *testing.T) {
 	}
 }
 
+func TestHasPendingSyncPlaceholdersDetectsAndClearsEachKind(t *testing.T) {
+	db := repoTestDB(t)
+	ctx := context.Background()
+	workspaceID := seedWorkspace(t, db)
+
+	if pending, err := HasPendingSyncPlaceholders(ctx, db, workspaceID); err != nil {
+		t.Fatal(err)
+	} else if pending {
+		t.Fatal("HasPendingSyncPlaceholders() = true on an empty workspace")
+	}
+
+	notebookID, err := model.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureNotebookPlaceholder(ctx, db, workspaceID, notebookID, repoClock(t, 10, 0, 0x02)); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := HasPendingSyncPlaceholders(ctx, db, workspaceID); err != nil {
+		t.Fatal(err)
+	} else if !pending {
+		t.Fatal("HasPendingSyncPlaceholders() = false with a pending notebook placeholder")
+	}
+	// The real catalog entry (e.g. from a later snapshot) must clear it.
+	if err := UpsertSnapshotNotebook(ctx, db, Notebook{
+		ID: notebookID, WorkspaceID: workspaceID, Name: "Real notebook", NameClock: repoClock(t, 11, 0, 0x02), CreatedAt: repoClock(t, 11, 0, 0x02),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := HasPendingSyncPlaceholders(ctx, db, workspaceID); err != nil {
+		t.Fatal(err)
+	} else if pending {
+		t.Fatal("HasPendingSyncPlaceholders() = true after the real notebook replaced its placeholder")
+	}
+
+	tagID, err := model.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureTagPlaceholder(ctx, db, workspaceID, tagID, repoClock(t, 10, 0, 0x02)); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := HasPendingSyncPlaceholders(ctx, db, workspaceID); err != nil {
+		t.Fatal(err)
+	} else if !pending {
+		t.Fatal("HasPendingSyncPlaceholders() = false with a pending tag placeholder")
+	}
+	if err := UpsertSnapshotTag(ctx, db, Tag{ID: tagID, WorkspaceID: workspaceID, Name: "real-tag", CreatedAt: repoClock(t, 11, 0, 0x02)}); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := HasPendingSyncPlaceholders(ctx, db, workspaceID); err != nil {
+		t.Fatal(err)
+	} else if pending {
+		t.Fatal("HasPendingSyncPlaceholders() = true after the real tag replaced its placeholder")
+	}
+
+	blobID, err := ParseBlobID(make([]byte, BlobIDBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureAttachmentPlaceholder(ctx, db, workspaceID, blobID, 1_000); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := HasPendingSyncPlaceholders(ctx, db, workspaceID); err != nil {
+		t.Fatal(err)
+	} else if !pending {
+		t.Fatal("HasPendingSyncPlaceholders() = false with a pending attachment placeholder")
+	}
+	if _, err := CreateAttachment(ctx, db, workspaceID, blobID, []byte("key"), []byte("manifest"), 4, 1, 1_000); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := HasPendingSyncPlaceholders(ctx, db, workspaceID); err != nil {
+		t.Fatal(err)
+	} else if pending {
+		t.Fatal("HasPendingSyncPlaceholders() = true after the real attachment replaced its placeholder")
+	}
+}
+
 func TestNoteTagIDsByWorkspaceMatchesPerNoteLookupAndScopesToWorkspace(t *testing.T) {
 	db := repoTestDB(t)
 	ctx := context.Background()

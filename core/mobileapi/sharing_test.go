@@ -160,7 +160,7 @@ func TestServiceWorkspaceSharingAcrossTwoAccounts(t *testing.T) {
 	if err := joiner.SyncNow(); err != nil {
 		t.Fatalf("joiner SyncNow: %v", err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	sharedNoteReceived := false
 	preexistingNoteReceived := false
 	preexistingNotebookReceived := false
@@ -191,7 +191,7 @@ func TestServiceWorkspaceSharingAcrossTwoAccounts(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("joining mobile service did not receive all workspace data: post-share note=%t, preexisting note=%t, preexisting notebook=%t", sharedNoteReceived, preexistingNoteReceived, preexistingNotebookReceived)
+			t.Fatalf("joining mobile service did not receive all workspace data: post-share note=%t, preexisting note=%t, preexisting notebook=%t, joiner sync error=%q, joiner notebooks=%s", sharedNoteReceived, preexistingNoteReceived, preexistingNotebookReceived, joiner.SyncError(), joinedNotebooksJSON)
 		}
 		if err := owner.SyncNow(); err != nil {
 			t.Fatalf("owner SyncNow retry: %v", err)

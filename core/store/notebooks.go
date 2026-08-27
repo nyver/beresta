@@ -12,6 +12,11 @@ import (
 
 const maxNotebookNameBytes = 256
 
+// syncPlaceholderNamePrefix marks a hidden, tombstoned notebook or tag row
+// created by EnsureNotebookPlaceholder or EnsureTagPlaceholder to satisfy a
+// foreign key before the real catalog entry has synced in from a peer.
+const syncPlaceholderNamePrefix = "sync-pending-"
+
 var (
 	// ErrNotFound reports that a referenced record does not exist.
 	ErrNotFound = errors.New("store: record not found")
@@ -159,7 +164,7 @@ func EnsureNotebookPlaceholder(ctx context.Context, exec Executor, workspaceID, 
 	if notebookID.IsZero() {
 		return errors.New("store: notebook placeholder ID is zero")
 	}
-	name := "sync-pending-" + hex.EncodeToString(notebookID.Bytes())
+	name := syncPlaceholderNamePrefix + hex.EncodeToString(notebookID.Bytes())
 	if _, err := exec.ExecContext(ctx,
 		`INSERT INTO notebooks (
 			id, workspace_id, name, name_physical_ms, name_logical, name_device_id,
@@ -185,6 +190,35 @@ func EnsureNotebookPlaceholder(ctx context.Context, exec Executor, workspaceID, 
 		return ErrWrongWorkspace
 	}
 	return nil
+}
+
+// HasPendingSyncPlaceholders reports whether workspaceID still has any hidden
+// placeholder notebook, tag, or attachment row (see EnsureNotebookPlaceholder,
+// EnsureTagPlaceholder, EnsureAttachmentPlaceholder) that has not yet been
+// replaced by its real catalog entry. A device must not author a workspace
+// snapshot while this is true: publishing would advertise the placeholder's
+// name-less, parent-less stand-in as this workspace's authoritative
+// structural state, and since nothing re-triggers a republish once every
+// device's local catalog digest stops changing, a newly joined device could
+// be left with hidden placeholders indefinitely instead of the real
+// notebooks, tags, or attachments.
+func HasPendingSyncPlaceholders(ctx context.Context, exec Executor, workspaceID model.ID) (bool, error) {
+	var exists int
+	if err := exec.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM notebooks WHERE workspace_id = ? AND deleted = 1 AND name LIKE ?
+			UNION ALL
+			SELECT 1 FROM tags WHERE workspace_id = ? AND deleted = 1 AND name LIKE ?
+			UNION ALL
+			SELECT 1 FROM attachments WHERE workspace_id = ? AND length(manifest) = 0
+		)`,
+		workspaceID.Bytes(), syncPlaceholderNamePrefix+"%",
+		workspaceID.Bytes(), syncPlaceholderNamePrefix+"%",
+		workspaceID.Bytes(),
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("store: check pending sync placeholders: %w", err)
+	}
+	return exists != 0, nil
 }
 
 // RenameNotebook applies an LWW update to a notebook's name. A stale clock

@@ -1082,6 +1082,23 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 			return value.SynchronizeWorkspaceAttachments(ctx, workspaceID, remote)
 		},
 		PublishSnapshot: func(ctx context.Context, cursor coresync.Cursor) error {
+			// This device's own catalog (notebooks/tags/attachments, which
+			// travel only inside snapshots, never as incremental operations)
+			// can still contain an EnsureNotebookPlaceholder/EnsureTagPlaceholder
+			// stand-in applied from a pulled note-metadata operation, ahead of
+			// ever reviewing the sharer's own snapshot. Publishing that
+			// placeholder-only catalog would overwrite the server's "latest"
+			// snapshot with incomplete data - and since neither side's local
+			// catalog digest ever changes again afterward, neither device
+			// would ever republish a corrected one, permanently stranding
+			// this member with hidden placeholders instead of the real
+			// notebooks/tags. Deferring self-publish until every placeholder
+			// resolves lets a future ReviewSnapshot catch up first.
+			if pending, err := store.HasPendingSyncPlaceholders(ctx, value.DB(), workspaceID); err != nil {
+				return err
+			} else if pending {
+				return nil
+			}
 			catalogDigest, err := value.WorkspaceCatalogDigest(ctx, workspaceID)
 			if err != nil {
 				return err

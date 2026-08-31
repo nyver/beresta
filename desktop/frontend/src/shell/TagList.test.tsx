@@ -48,7 +48,7 @@ describe("TagList", () => {
     expect(await screen.findByRole("button", { name: "urgent" })).toHaveClass("selected");
   });
 
-  it("creates a new tag from the inline form", async () => {
+  it("creates a new tag from the create dialog", async () => {
     const created = fakeTag({ name: "urgent" });
     appMock.CreateTag.mockResolvedValue(created);
     const { onCreated } = renderList([]);

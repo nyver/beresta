@@ -4,6 +4,7 @@ import { createTag, deleteTag, unwrapError } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { KebabMenu } from "./KebabMenu";
+import { Modal } from "./Modal";
 
 export interface TagListProps {
   tags: main.TagDTO[];
@@ -53,6 +54,11 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
     } finally {
       setCreating(false);
     }
+  }
+
+  function closeCreateDialog() {
+    if (creating) return;
+    setCreatingOpen(false);
   }
 
   async function handleDelete(id: string) {
@@ -136,33 +142,35 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
         </p>
       ) : null}
       {creatingOpen ? (
-        <form
-          className="tag-create"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void handleCreate();
-          }}
-        >
-          <input
-            type="text"
-            autoFocus
-            value={newName}
-            onChange={(event) => setNewName(event.target.value)}
-            placeholder={t("shell.new_tag_placeholder")}
-            aria-label={t("shell.new_tag_placeholder")}
-          />
-          <button type="submit" disabled={creating || !newName.trim()}>
-            {t("shell.new_tag_button")}
-          </button>
-          <button type="button" className="link-button" onClick={() => setCreatingOpen(false)} disabled={creating}>
-            {t("common.cancel")}
-          </button>
-        </form>
-      ) : null}
-      {createError ? (
-        <p className="error" role="alert">
-          {createError}
-        </p>
+        <Modal title={t("shell.tags_add_button")} onClose={closeCreateDialog}>
+          <form
+            className="tag-create"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreate();
+            }}
+          >
+            <input
+              type="text"
+              autoFocus
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
+              placeholder={t("shell.new_tag_placeholder")}
+              aria-label={t("shell.new_tag_placeholder")}
+            />
+            <button type="submit" disabled={creating || !newName.trim()}>
+              {t("shell.new_tag_button")}
+            </button>
+            <button type="button" className="link-button" onClick={closeCreateDialog} disabled={creating}>
+              {t("common.cancel")}
+            </button>
+          </form>
+          {createError ? (
+            <p className="error" role="alert">
+              {createError}
+            </p>
+          ) : null}
+        </Modal>
       ) : null}
     </nav>
   );

@@ -452,6 +452,11 @@ li:hover > .tree-row-delete,
   padding: 0.35rem 0.6rem;
 }
 
+.dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .shell-notes {
   /* See .shell-sidebar's doc comment: pinned to its own track so a
      display:none-collapsed sidebar cannot shift this into track 1. */

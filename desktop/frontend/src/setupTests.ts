@@ -38,6 +38,7 @@ export const appMock = {
   PickSaveDestination: vi.fn(),
   ListNotebooks: vi.fn(),
   CreateNotebook: vi.fn(),
+  RenameNotebook: vi.fn(),
   SetNotebookDeleted: vi.fn(),
   MoveNotebook: vi.fn(),
   SetNoteNotebook: vi.fn(),

@@ -13,6 +13,7 @@ function renderTree(notebooks: ReturnType<typeof fakeNotebook>[], selectedId: st
   const onSelect = vi.fn();
   const onCreateNote = vi.fn();
   const onCreated = vi.fn();
+  const onRenamed = vi.fn();
   const onDeleted = vi.fn();
   const onMoved = vi.fn();
   const onNoteMoved = vi.fn();
@@ -24,13 +25,14 @@ function renderTree(notebooks: ReturnType<typeof fakeNotebook>[], selectedId: st
         onSelect={onSelect}
         onCreateNote={onCreateNote}
         onCreated={onCreated}
+        onRenamed={onRenamed}
         onDeleted={onDeleted}
         onMoved={onMoved}
         onNoteMoved={onNoteMoved}
       />
     </I18nProvider>,
   );
-  return { onSelect, onCreateNote, onCreated, onDeleted, onMoved, onNoteMoved };
+  return { onSelect, onCreateNote, onCreated, onRenamed, onDeleted, onMoved, onNoteMoved };
 }
 
 describe("NotebookTree", () => {
@@ -142,7 +144,7 @@ describe("NotebookTree", () => {
     expect(onCreateNote).toHaveBeenCalledWith(root.id);
   });
 
-  it("deletes a notebook after the inline confirmation", async () => {
+  it("deletes a notebook after confirming in the dialog", async () => {
     const root = fakeNotebook({ name: "Work" });
     appMock.SetNotebookDeleted.mockResolvedValue(undefined);
     const { onDeleted } = renderTree([root]);
@@ -150,6 +152,9 @@ describe("NotebookTree", () => {
 
     await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
     await user.click(await screen.findByRole("menuitem", { name: "shell.delete_notebook" }));
+    expect(
+      await screen.findByRole("dialog", { name: "shell.delete_notebook: Work" }),
+    ).toHaveTextContent("shell.delete_notebook_confirm");
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(appMock.SetNotebookDeleted).toHaveBeenCalledWith(root.id, true);
@@ -167,6 +172,7 @@ describe("NotebookTree", () => {
 
     expect(appMock.SetNotebookDeleted).not.toHaveBeenCalled();
     expect(onDeleted).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "shell.notebook_actions: Work" })).toBeInTheDocument();
   });
 
@@ -181,6 +187,39 @@ describe("NotebookTree", () => {
     await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
     await user.click(await screen.findByRole("menuitem", { name: "shell.delete_notebook" }));
     await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
+  });
+
+  it("renames a notebook via the rename dialog, pre-filled with its current name", async () => {
+    const root = fakeNotebook({ name: "Work" });
+    appMock.RenameNotebook.mockResolvedValue(undefined);
+    const { onRenamed } = renderTree([root]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.rename_notebook" }));
+    const input = await screen.findByRole("textbox", { name: "shell.new_notebook_placeholder" });
+    expect(input).toHaveValue("Work");
+    await user.clear(input);
+    await user.type(input, "Projects");
+    await user.click(await screen.findByRole("button", { name: "shell.rename_notebook_button" }));
+
+    expect(appMock.RenameNotebook).toHaveBeenCalledWith(root.id, "Projects");
+    expect(onRenamed).toHaveBeenCalledWith(root.id, "Projects");
+  });
+
+  it("shows an error when renaming a notebook fails", async () => {
+    const root = fakeNotebook({ name: "Work" });
+    appMock.RenameNotebook.mockRejectedValue(
+      new Error(JSON.stringify({ code: "internal", message: "boom" })),
+    );
+    renderTree([root]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.rename_notebook" }));
+    await user.click(await screen.findByRole("button", { name: "shell.rename_notebook_button" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
   });

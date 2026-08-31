@@ -361,6 +361,12 @@ export function Shell({ account, onLocked }: ShellProps) {
     );
   }
 
+  function handleNotebookRenamed(notebookId: string, name: string) {
+    setNotebooks((current) =>
+      current.map((notebook) => (notebook.id === notebookId ? { ...notebook, name } : notebook)),
+    );
+  }
+
   function handleNoteMoved(noteId: string, notebookId: string) {
     // Same three-state patch as handleTitleCommitted/handleDeleteNote: a
     // note dragged onto a different notebook needs its notebook_id updated
@@ -657,6 +663,7 @@ export function Shell({ account, onLocked }: ShellProps) {
               }}
               onCreateNote={(notebookId) => void handleCreateNote(notebookId)}
               onCreated={(notebook) => setNotebooks((current) => [...current, notebook])}
+              onRenamed={handleNotebookRenamed}
               onDeleted={(notebookId) => {
                 setNotebooks((current) => current.filter((notebook) => notebook.id !== notebookId));
                 // The deleted notebook can no longer be a valid selection;

@@ -67,19 +67,23 @@ accessible notebook tree, tag navigation (via a dedicated `SearchByTag`
 binding that reuses the same search index as the search box, without its
 text-query quoting limitations), and a virtualized note list
 (`@tanstack/react-virtual`, since the account ceiling is 20,000 notes)
-selecting into a working note editor. Notebook, note, and tag creation and
-deletion live behind a per-row "⋮" kebab menu (`shell/KebabMenu.tsx`) next
-to each item's name rather than always-visible buttons. Choosing "New note"
-from a notebook's menu files it directly in that notebook; the Notebooks
-section menu creates a note in the workspace root. Both trees
-support drag-and-drop reorganization: dropping a notebook onto another
-reparents it (and everything filed under it) via the existing
-`MoveNotebook` cycle-checked binding, and dragging a note from the list
-onto a notebook row refiles it via `SetNoteNotebook` - both are plain
-reparenting/refiling, since neither `store.Notebook` nor `model.Note`
-carries a persisted sibling order to reorder within a level. Tags
-themselves are created from the sidebar's tag list (behind a "+" toggle,
-mirroring the notebook tree's own inline-create pattern), and assigned to
+selecting into a working note editor. Notebook, note, and tag creation,
+notebook rename, and notebook/tag deletion live behind a per-row "⋮" kebab
+menu (`shell/KebabMenu.tsx`) next to each item's name rather than
+always-visible buttons. Choosing "New note" from a notebook's menu files it
+directly in that notebook; the Notebooks section menu creates a note in the
+workspace root. Naming a notebook or tag (on create or, for notebooks, on
+rename via the new `RenameNotebook` binding) and confirming a notebook
+deletion each open as a modal dialog (`shell/Modal.tsx`) rather than an
+inline row form, so the sidebar tree never grows or shifts rows underneath
+the pointer while one is open. Both trees support drag-and-drop
+reorganization: dropping a notebook onto another reparents it (and
+everything filed under it) via the existing `MoveNotebook` cycle-checked
+binding, and dragging a note from the list onto a notebook row refiles it
+via `SetNoteNotebook` - both are plain reparenting/refiling, since neither
+`store.Notebook` nor `model.Note` carries a persisted sibling order to
+reorder within a level. Tags themselves are created from the sidebar's tag
+list (behind a "+" toggle that opens the same naming dialog), and assigned to
 or removed from the open note via a chip editor in the note header
 (`shell/NoteTagsEditor.tsx`, backed by `App.NoteTagsByWorkspace` and the
 existing `SetNoteTag`/`CreateTag` bindings) - previously tags could only be
@@ -207,8 +211,11 @@ Markdown source, so this is display-only), the last-modified date sits
 beside the title instead of crowding the preview line, and the selected
 row uses a lighter accent tint plus a left accent bar rather than a solid
 highlight block, so it scales better once a notebook holds dozens of notes.
-Tag creation in the sidebar is now hidden behind a "+" toggle (matching the
-notebook tree's existing pattern) instead of a permanently visible input.
+Tag creation in the sidebar is now hidden behind a "+" toggle instead of a
+permanently visible input; both it and notebook creation/rename open a
+modal naming dialog rather than an inline row form, and notebook deletion is
+confirmed in a modal instead of inline, so none of the three shift sidebar
+rows around while open.
 The open note's title renders larger, and its History action moved into
 the "⋮" menu alongside New note/Delete instead of sitting next to the title
 as a permanent text link; the Quill toolbar and editor area lost their

@@ -48,6 +48,7 @@ import {
   PreviewBackup,
   ReadAttachmentPreview,
   RemoveAttachment,
+  RenameNotebook,
   RestoreRevision,
   RestoreSelective,
   RestoreWhole,
@@ -409,6 +410,11 @@ export async function deleteNotebook(notebookId: string): Promise<void> {
  * descendant). */
 export async function moveNotebook(notebookId: string, newParentId: string): Promise<void> {
   return MoveNotebook(notebookId, newParentId);
+}
+
+/** renameNotebook applies an LWW rename to a notebook. */
+export async function renameNotebook(notebookId: string, name: string): Promise<void> {
+  return RenameNotebook(notebookId, name);
 }
 
 /** setNoteNotebook refiles a note into a different notebook (drag-and-drop),

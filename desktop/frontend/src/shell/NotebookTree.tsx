@@ -1,9 +1,10 @@
 import { useMemo, useState, type DragEvent } from "react";
 
-import { createNotebook, deleteNotebook, moveNotebook, setNoteNotebook, unwrapError } from "../api";
+import { createNotebook, deleteNotebook, moveNotebook, renameNotebook, setNoteNotebook, unwrapError } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { KebabMenu } from "./KebabMenu";
+import { Modal } from "./Modal";
 import { buildNotebookTree, flattenVisibleNotebooks, type NotebookNode } from "./notebookTreeModel";
 
 // Custom drag payload types (see NoteList.tsx for the note-side source):
@@ -11,6 +12,16 @@ import { buildNotebookTree, flattenVisibleNotebooks, type NotebookNode } from ".
 // dragged notebook (reparent) apart from a dragged note (refile).
 const DRAG_TYPE_NOTEBOOK = "application/x-beresta-notebook-id";
 const DRAG_TYPE_NOTE = "application/x-beresta-note-id";
+
+// The single modal that can be open at a time: naming a new notebook,
+// renaming an existing one, or confirming a deletion. Modeling these as one
+// discriminated union (rather than three separate open/id state pairs)
+// makes "only one dialog open at once" structural instead of a convention
+// callers have to maintain.
+type NotebookDialog =
+  | { kind: "create"; parentId: string }
+  | { kind: "rename"; notebookId: string }
+  | { kind: "delete"; notebookId: string; name: string };
 
 export interface NotebookTreeProps {
   notebooks: main.NotebookDTO[];
@@ -23,6 +34,9 @@ export interface NotebookTreeProps {
   /** Called after a new notebook has been durably created, so the caller
    * (Shell) can add it to its own notebooks state. */
   onCreated: (notebook: main.NotebookDTO) => void;
+  /** Called after a notebook has been durably renamed, so the caller
+   * (Shell) can patch its own notebooks state's name. */
+  onRenamed: (notebookId: string, name: string) => void;
   /** Called after a notebook has been durably tombstoned, so the caller
    * (Shell) can drop it from its own notebooks state. */
   onDeleted: (notebookId: string) => void;
@@ -48,26 +62,17 @@ export function NotebookTree({
   onSelect,
   onCreateNote,
   onCreated,
+  onRenamed,
   onDeleted,
   onMoved,
   onNoteMoved,
 }: NotebookTreeProps) {
   const { t, errorMessage } = useI18n();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  // Which row's "create a notebook here" inline form is open: "" means the
-  // root-level form (triggered from the section header's kebab), a
-  // notebook id means that row's "new subnotebook" form, null means none
-  // open. Only one at a time, mirroring confirmingDeleteId below.
-  const [creatingParentId, setCreatingParentId] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  // Only one row's delete confirmation is shown at a time, tracked by
-  // notebook id rather than a plain boolean so switching the confirm
-  // target (clicking a different row's delete button) just moves it.
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<NotebookDialog | null>(null);
+  const [formName, setFormName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   // Id of the row currently under a valid drag-over (for the highlight
   // outline); "" is the "All Notes" root drop target.
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -89,39 +94,71 @@ export function NotebookTree({
   }
 
   function startCreate(parentId: string) {
-    setCreateError(null);
-    setNewName("");
-    setCreatingParentId(parentId);
+    setFormError(null);
+    setFormName("");
+    setDialog({ kind: "create", parentId });
   }
 
-  async function handleCreate() {
-    const name = newName.trim();
-    if (!name || creating || creatingParentId === null) return;
-    setCreating(true);
-    setCreateError(null);
+  function startRename(notebook: main.NotebookDTO) {
+    setFormError(null);
+    setFormName(notebook.name);
+    setDialog({ kind: "rename", notebookId: notebook.id });
+  }
+
+  function startDelete(notebook: main.NotebookDTO) {
+    setFormError(null);
+    setDialog({ kind: "delete", notebookId: notebook.id, name: notebook.name });
+  }
+
+  function closeDialog() {
+    if (busy) return;
+    setDialog(null);
+  }
+
+  async function handleCreateSubmit() {
+    const name = formName.trim();
+    if (!name || busy || dialog?.kind !== "create") return;
+    setBusy(true);
+    setFormError(null);
     try {
-      const notebook = await createNotebook(creatingParentId, name);
+      const notebook = await createNotebook(dialog.parentId, name);
       onCreated(notebook);
-      setNewName("");
-      setCreatingParentId(null);
+      setDialog(null);
     } catch (thrown: unknown) {
-      setCreateError(errorMessage(unwrapError(thrown)));
+      setFormError(errorMessage(unwrapError(thrown)));
     } finally {
-      setCreating(false);
+      setBusy(false);
     }
   }
 
-  async function handleDelete(id: string) {
-    setDeleting(true);
-    setDeleteError(null);
+  async function handleRenameSubmit() {
+    const name = formName.trim();
+    if (!name || busy || dialog?.kind !== "rename") return;
+    setBusy(true);
+    setFormError(null);
     try {
-      await deleteNotebook(id);
-      onDeleted(id);
-      setConfirmingDeleteId(null);
+      await renameNotebook(dialog.notebookId, name);
+      onRenamed(dialog.notebookId, name);
+      setDialog(null);
     } catch (thrown: unknown) {
-      setDeleteError(errorMessage(unwrapError(thrown)));
+      setFormError(errorMessage(unwrapError(thrown)));
     } finally {
-      setDeleting(false);
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteConfirm() {
+    if (busy || dialog?.kind !== "delete") return;
+    setBusy(true);
+    setFormError(null);
+    try {
+      await deleteNotebook(dialog.notebookId);
+      onDeleted(dialog.notebookId);
+      setDialog(null);
+    } catch (thrown: unknown) {
+      setFormError(errorMessage(unwrapError(thrown)));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -182,20 +219,6 @@ export function NotebookTree({
       >
         {t("shell.all_notes")}
       </button>
-      {creatingParentId === "" ? (
-        <NotebookCreateForm
-          name={newName}
-          creating={creating}
-          onChange={setNewName}
-          onSubmit={() => void handleCreate()}
-          onCancel={() => setCreatingParentId(null)}
-        />
-      ) : null}
-      {createError && creatingParentId === "" ? (
-        <p className="error" role="alert">
-          {createError}
-        </p>
-      ) : null}
       <ul>
         {visible.map((node) => (
           <li key={node.notebook.id} style={{ paddingLeft: `${node.depth}rem` }}>
@@ -207,87 +230,74 @@ export function NotebookTree({
               onToggle={() => toggle(node.notebook.id)}
               onSelect={() => onSelect(node.notebook.id)}
               onCreateNote={() => onCreateNote(node.notebook.id)}
-              confirmingDelete={confirmingDeleteId === node.notebook.id}
-              deleting={deleting}
               onRequestCreateChild={() => startCreate(node.notebook.id)}
-              onRequestDelete={() => {
-                setDeleteError(null);
-                setConfirmingDeleteId(node.notebook.id);
-              }}
-              onCancelDelete={() => setConfirmingDeleteId(null)}
-              onConfirmDelete={() => void handleDelete(node.notebook.id)}
+              onRequestRename={() => startRename(node.notebook)}
+              onRequestDelete={() => startDelete(node.notebook)}
               onDragOver={(event) => handleDragOver(node.notebook.id, event)}
               onDragLeave={() => handleDragLeave(node.notebook.id)}
               onDrop={(event) => void handleDrop(node.notebook.id, event)}
             />
-            {creatingParentId === node.notebook.id ? (
-              <NotebookCreateForm
-                name={newName}
-                creating={creating}
-                onChange={setNewName}
-                onSubmit={() => void handleCreate()}
-                onCancel={() => setCreatingParentId(null)}
-              />
-            ) : null}
-            {createError && creatingParentId === node.notebook.id ? (
-              <p className="error" role="alert">
-                {createError}
-              </p>
-            ) : null}
           </li>
         ))}
       </ul>
-      {deleteError ? (
-        <p className="error" role="alert">
-          {deleteError}
-        </p>
-      ) : null}
       {moveError ? (
         <p className="error" role="alert">
           {moveError}
         </p>
       ) : null}
+      {dialog?.kind === "create" || dialog?.kind === "rename" ? (
+        <Modal
+          title={dialog.kind === "create" ? t("shell.new_notebook_menu_item") : t("shell.rename_notebook")}
+          onClose={closeDialog}
+        >
+          <form
+            className="notebook-create"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void (dialog.kind === "create" ? handleCreateSubmit() : handleRenameSubmit());
+            }}
+          >
+            <input
+              type="text"
+              autoFocus
+              value={formName}
+              onChange={(event) => setFormName(event.target.value)}
+              placeholder={t("shell.new_notebook_placeholder")}
+              aria-label={t("shell.new_notebook_placeholder")}
+            />
+            <button type="submit" disabled={busy || !formName.trim()}>
+              {dialog.kind === "create" ? t("shell.new_notebook_button") : t("shell.rename_notebook_button")}
+            </button>
+            <button type="button" className="link-button" onClick={closeDialog} disabled={busy}>
+              {t("common.cancel")}
+            </button>
+          </form>
+          {formError ? (
+            <p className="error" role="alert">
+              {formError}
+            </p>
+          ) : null}
+        </Modal>
+      ) : null}
+      {dialog?.kind === "delete" ? (
+        <Modal title={`${t("shell.delete_notebook")}: ${dialog.name}`} onClose={closeDialog}>
+          <p>{t("shell.delete_notebook_confirm")}</p>
+          <div className="dialog-actions">
+            <button type="button" disabled={busy} onClick={() => void handleDeleteConfirm()}>
+              {busy ? t("shell.deleting") : t("shell.delete_confirm_button")}
+            </button>
+            <button type="button" className="link-button" disabled={busy} onClick={closeDialog}>
+              {t("common.cancel")}
+            </button>
+          </div>
+          {formError ? (
+            <p className="error" role="alert">
+              {formError}
+            </p>
+          ) : null}
+        </Modal>
+      ) : null}
     </nav>
-  );
-}
-
-function NotebookCreateForm({
-  name,
-  creating,
-  onChange,
-  onSubmit,
-  onCancel,
-}: {
-  name: string;
-  creating: boolean;
-  onChange: (value: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <form
-      className="notebook-create"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit();
-      }}
-    >
-      <input
-        type="text"
-        autoFocus
-        value={name}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={t("shell.new_notebook_placeholder")}
-        aria-label={t("shell.new_notebook_placeholder")}
-      />
-      <button type="submit" disabled={creating || !name.trim()}>
-        {t("shell.new_notebook_button")}
-      </button>
-      <button type="button" className="link-button" onClick={onCancel} disabled={creating}>
-        {t("common.cancel")}
-      </button>
-    </form>
   );
 }
 
@@ -299,12 +309,9 @@ function NotebookRow({
   onToggle,
   onSelect,
   onCreateNote,
-  confirmingDelete,
-  deleting,
   onRequestCreateChild,
+  onRequestRename,
   onRequestDelete,
-  onCancelDelete,
-  onConfirmDelete,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -316,12 +323,9 @@ function NotebookRow({
   onToggle: () => void;
   onSelect: () => void;
   onCreateNote: () => void;
-  confirmingDelete: boolean;
-  deleting: boolean;
   onRequestCreateChild: () => void;
+  onRequestRename: () => void;
   onRequestDelete: () => void;
-  onCancelDelete: () => void;
-  onConfirmDelete: () => void;
   onDragOver: (event: DragEvent) => void;
   onDragLeave: () => void;
   onDrop: (event: DragEvent) => void;
@@ -360,25 +364,15 @@ function NotebookRow({
       >
         {node.notebook.name}
       </button>
-      {confirmingDelete ? (
-        <span className="tree-row-delete-confirm">
-          <button type="button" disabled={deleting} onClick={onConfirmDelete}>
-            {deleting ? t("shell.deleting") : t("shell.delete_confirm_button")}
-          </button>
-          <button type="button" className="link-button" disabled={deleting} onClick={onCancelDelete}>
-            {t("common.cancel")}
-          </button>
-        </span>
-      ) : (
-        <KebabMenu
-          label={`${t("shell.notebook_actions")}: ${node.notebook.name}`}
-          items={[
-            { label: t("shell.new_note_button"), onSelect: onCreateNote },
-            { label: t("shell.new_notebook_menu_item"), onSelect: onRequestCreateChild },
-            { label: t("shell.delete_notebook"), onSelect: onRequestDelete, destructive: true },
-          ]}
-        />
-      )}
+      <KebabMenu
+        label={`${t("shell.notebook_actions")}: ${node.notebook.name}`}
+        items={[
+          { label: t("shell.new_note_button"), onSelect: onCreateNote },
+          { label: t("shell.new_notebook_menu_item"), onSelect: onRequestCreateChild },
+          { label: t("shell.rename_notebook"), onSelect: onRequestRename },
+          { label: t("shell.delete_notebook"), onSelect: onRequestDelete, destructive: true },
+        ]}
+      />
     </div>
   );
 }

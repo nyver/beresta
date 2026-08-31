@@ -1029,10 +1029,16 @@ class _NotesShellState extends State<NotesShell> {
             trailing: PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert),
               onSelected: (action) {
-                if (action == "add") {
-                  createNotebook(parentId: item["id"] as String);
-                } else {
-                  deleteNotebook(item["id"] as String);
+                switch (action) {
+                  case "add":
+                    createNotebook(parentId: item["id"] as String);
+                  case "rename":
+                    renameNotebook(
+                      item["id"] as String,
+                      item["name"] as String,
+                    );
+                  default:
+                    deleteNotebook(item["id"] as String);
                 }
               },
               itemBuilder:
@@ -1040,6 +1046,10 @@ class _NotesShellState extends State<NotesShell> {
                     PopupMenuItem(
                       value: "add",
                       child: Text(widget.strings("new_notebook")),
+                    ),
+                    PopupMenuItem(
+                      value: "rename",
+                      child: Text(widget.strings("rename")),
                     ),
                     PopupMenuItem(
                       value: "delete",
@@ -1080,7 +1090,7 @@ class _NotesShellState extends State<NotesShell> {
               FilledButton(
                 onPressed:
                     () => Navigator.pop(dialogContext, controller.text.trim()),
-                child: Text(widget.strings("create")),
+                child: Text(widget.strings("create_action")),
               ),
             ],
           ),
@@ -1088,6 +1098,47 @@ class _NotesShellState extends State<NotesShell> {
     if (name == null || name.isEmpty) return;
     try {
       await widget.gateway.createNotebook(name, parentId: parentId);
+      requestCurrentWorkspaceSync(widget.gateway);
+      await refresh();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    }
+  }
+
+  Future<void> renameNotebook(String id, String currentName) async {
+    final controller = TextEditingController(text: currentName);
+    final name = await showDialog<String>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(widget.strings("rename_notebook")),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: widget.strings("notebook_name"),
+              ),
+              onSubmitted:
+                  (value) => Navigator.pop(dialogContext, value.trim()),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed:
+                    () => Navigator.pop(dialogContext, controller.text.trim()),
+                child: Text(widget.strings("rename")),
+              ),
+            ],
+          ),
+    );
+    if (name == null || name.isEmpty || name == currentName) return;
+    try {
+      await widget.gateway.renameNotebook(id, name);
       requestCurrentWorkspaceSync(widget.gateway);
       await refresh();
     } catch (failure) {
@@ -1162,7 +1213,7 @@ class _NotesShellState extends State<NotesShell> {
               FilledButton(
                 onPressed:
                     () => Navigator.pop(dialogContext, controller.text.trim()),
-                child: Text(widget.strings("create")),
+                child: Text(widget.strings("create_action")),
               ),
             ],
           ),
@@ -1818,7 +1869,10 @@ class _BackupSheetState extends State<BackupSheet> {
       widget.gateway.listBackups();
   String? error;
 
-  void reload() => setState(() => backups = widget.gateway.listBackups());
+  void reload() =>
+      setState(() {
+        backups = widget.gateway.listBackups();
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -2130,7 +2184,7 @@ class _EditorScreenState extends State<EditorScreen> {
               FilledButton(
                 onPressed:
                     () => Navigator.pop(dialogContext, controller.text.trim()),
-                child: Text(widget.strings("create")),
+                child: Text(widget.strings("create_action")),
               ),
             ],
           ),
@@ -2202,6 +2256,41 @@ class _EditorScreenState extends State<EditorScreen> {
     if (mounted) setState(() => dirty = false);
   }
 
+  Future<void> deleteNote() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(widget.strings("delete_note")),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(widget.strings("delete")),
+              ),
+            ],
+          ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.gateway.deleteNote(widget.noteId, true);
+      requestCurrentWorkspaceSync(widget.gateway);
+      if (mounted) {
+        setState(() => dirty = false);
+        Navigator.pop(context);
+      }
+    } catch (failure) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeFailure(widget.strings, failure))),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     title.dispose();
@@ -2236,6 +2325,11 @@ class _EditorScreenState extends State<EditorScreen> {
               tooltip: widget.strings("save"),
               onPressed: dirty ? save : null,
               icon: const Icon(Icons.save_outlined),
+            ),
+            IconButton(
+              tooltip: widget.strings("delete"),
+              onPressed: deleteNote,
+              icon: const Icon(Icons.delete_forever_outlined),
             ),
           ],
         ),

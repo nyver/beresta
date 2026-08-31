@@ -56,6 +56,18 @@ android {
     }
 
     buildTypes {
+        debug {
+            // A debug build must never share a signature-verified identity
+            // with a release build: Android refuses to install an APK over
+            // an existing app when the certificates differ
+            // (INSTALL_FAILED_UPDATE_INCOMPATIBLE), which made a release
+            // APK unable to replace a previously installed debug one under
+            // the shared "app.beresta.notes" id. The suffix makes debug
+            // builds a distinct app instead, so both can be installed
+            // side by side and a release build always installs cleanly.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             if (releaseSigningConfigured) {
                 signingConfig = signingConfigs.getByName("release")

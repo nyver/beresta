@@ -13,7 +13,7 @@ packaged Windows application; the following phases added the optional opaque
 home server, convergent client synchronization, and the Android application:
 
 - a buildable Wails v2 Windows host with a React/TypeScript frontend;
-- a Flutter Android application with local onboarding/unlock, a nested notebook hierarchy (create/delete, move notes between notebooks), tag management (create/delete, assign/unassign per note, filter the note list by tag), virtualized notes, a `flutter_quill` WYSIWYG body editor toolbar-restricted to match desktop's own Quill formatting set (bold/italic/strike/inline code, H1-H3, ordered/bullet list, blockquote, code block, link) and round-tripped through the same canonical Markdown projection as `GetNote`/`SaveNote` (`mobile/lib/markdown_delta.dart`, a Dart port of `core/sync/yjsadapter`'s Markdown parser/renderer kept byte-identical to it), attachments with an inline thumbnail/preview strip and per-attachment deletion, search, revisions, secure lifecycle handling, background synchronization, encrypted SAF backups, share capture, and a private quick-note widget;
+- a Flutter Android application with local onboarding/unlock, a nested notebook hierarchy (create/rename/delete, move notes between notebooks), tag management (create/delete, assign/unassign per note, filter the note list by tag), virtualized notes with per-note deletion, a `flutter_quill` WYSIWYG body editor toolbar-restricted to match desktop's own Quill formatting set (bold/italic/strike/inline code, H1-H3, ordered/bullet list, blockquote, code block, link) and round-tripped through the same canonical Markdown projection as `GetNote`/`SaveNote` (`mobile/lib/markdown_delta.dart`, a Dart port of `core/sync/yjsadapter`'s Markdown parser/renderer kept byte-identical to it), attachments with an inline thumbnail/preview strip and per-attachment deletion, search, revisions, secure lifecycle handling, background synchronization, encrypted SAF backups, share capture, and a private quick-note widget;
 - a Yjs V1/V2 adapter plus a SQLCipher 4.14 encrypted-database probe whose Android AAR is produced by `gomobile bind`;
 - owned mutable secret buffers, device-bounded Argon2id, domain-separated HKDF, X25519/Ed25519 identities, XChaCha20-Poly1305 keybag/object/attachment/backup encryption, and the shared Windows DPAPI and Android Keystore/biometric key-wrapping contract (phase 2A);
 - validated UUIDv7 identifiers, Hybrid Logical Clock persistence, and deterministic last-writer-wins registers with device-ID and logical-counter tie breaks;
@@ -366,6 +366,12 @@ The commands mean:
 | `mobile-package-android` | Produce a signed release APK and AAB (requires `BERESTA_ANDROID_KEYSTORE_*`; see [docs/android-build.md](docs/android-build.md)) |
 | `mobile-test-android` | Run the SQLCipher instrumentation round trip on a connected `arm64-v8a` Android device |
 | `verify` | Run format checks, lint, tests, and package the phase-available artifacts |
+
+`build-mobile-release.bat`, at the repository root, wraps `build.cmd
+mobile-package-android` for local release builds. It is not checked into
+version control because it holds real upload-keystore credentials for the
+`BERESTA_ANDROID_KEYSTORE_*`/`BERESTA_ANDROID_KEY_*` signing variables; see
+[docs/android-build.md](docs/android-build.md) before creating it locally.
 
 The server, Windows executable, updater, and installer are copied to
 `build/output/beresta-server.exe`,

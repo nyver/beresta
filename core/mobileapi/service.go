@@ -667,6 +667,27 @@ func (s *Service) ListNotebooks(requestID string) (string, error) {
 	return marshal(result)
 }
 
+func (s *Service) RenameNotebook(requestID, notebookID, name string) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return err
+	}
+	id, err := parseID(notebookID)
+	if err != nil {
+		return err
+	}
+	if err := value.RenameNotebook(ctx, workspaceID, id, name); err != nil {
+		return err
+	}
+	s.emit("notebooks_changed", map[string]string{"notebook_id": id.String()})
+	return nil
+}
+
 func (s *Service) DeleteNotebook(requestID, notebookID string, deleted bool) error {
 	ctx, done, err := s.begin(requestID)
 	if err != nil {

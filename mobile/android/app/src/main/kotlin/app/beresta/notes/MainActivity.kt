@@ -268,6 +268,7 @@ class MainActivity : FlutterFragmentActivity() {
             "search" -> service.search(requestId, required(call, "query"), 100L)
             "createNotebook" -> service.createNotebook(requestId, call.argument<String>("parentId") ?: "", required(call, "name"))
             "listNotebooks" -> service.listNotebooks(requestId)
+            "renameNotebook" -> service.renameNotebook(requestId, required(call, "notebookId"), required(call, "name"))
             "deleteNotebook" -> service.deleteNotebook(requestId, required(call, "notebookId"), call.argument<Boolean>("deleted") == true)
             "listNoteAttachments" -> service.listNoteAttachments(requestId, required(call, "noteId"))
             "readAttachmentData" -> service.readAttachmentData(requestId, required(call, "blobId"))

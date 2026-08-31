@@ -17,6 +17,7 @@ abstract interface class CoreGateway {
   Future<List<Map<String, dynamic>>> search(String query);
   Future<Map<String, dynamic>> createNotebook(String name, {String parentId});
   Future<List<Map<String, dynamic>>> listNotebooks();
+  Future<void> renameNotebook(String id, String name);
   Future<void> deleteNotebook(String id, bool deleted);
   Future<List<Map<String, dynamic>>> listNoteAttachments(String noteId);
   Future<Uint8List> readAttachmentData(String blobId);
@@ -138,6 +139,10 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<List<Map<String, dynamic>>> listNotebooks() async =>
       _list(await _invoke("listNotebooks"));
+
+  @override
+  Future<void> renameNotebook(String id, String name) =>
+      _invoke("renameNotebook", {"notebookId": id, "name": name});
 
   @override
   Future<void> deleteNotebook(String id, bool deleted) =>

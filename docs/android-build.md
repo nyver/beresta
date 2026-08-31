@@ -36,3 +36,18 @@ into the repository:
 Gradle fails the release build closed (see
 `mobile/android/app/build.gradle.kts`) rather than falling back to a
 debug-signed artifact if any of these are unset.
+
+`build-mobile-release.bat`, at the repository root, wraps
+`build.cmd mobile-package-android` for local release builds. It is excluded
+from version control (see `.gitignore`) because it sets the four
+`BERESTA_ANDROID_*` signing variables directly at the top of the script;
+edit those values with your real keystore path, keystore password, key
+alias, and key password before running it. The script refuses to run if the
+configured keystore path does not exist.
+
+Debug builds use the application ID `app.beresta.notes.debug` (an
+`applicationIdSuffix` set in `mobile/android/app/build.gradle.kts`), distinct
+from the release app's `app.beresta.notes`. Android refuses to install an APK
+over an existing app when the signing certificates differ, so without this
+split a debug-signed build and the upload-keystore-signed release build could
+not coexist on the same device; the two now install side by side instead.

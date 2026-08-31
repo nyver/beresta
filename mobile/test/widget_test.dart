@@ -188,6 +188,42 @@ void main() {
     expect(find.byType(QuillEditor), findsOneWidget);
   });
 
+  testWidgets("a notebook can be renamed from a popup dialog", (
+    tester,
+  ) async {
+    final gateway = FakeGateway(unlocked: true)
+      ..notebooksList = [
+        {"id": "notebook-1", "parent_id": "", "name": "Old name"},
+      ];
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.widgetWithText(ListTile, "Old name"),
+        matching: find.byIcon(Icons.more_vert),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(PopupMenuItem<String>, "Rename"));
+    await tester.pumpAndSettle();
+    expect(find.text("Rename notebook"), findsOneWidget);
+
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      "New name",
+    );
+    await tester.tap(find.widgetWithText(FilledButton, "Rename"));
+    await tester.pumpAndSettle();
+
+    expect(gateway.renamedNotebook, ("notebook-1", "New name"));
+  });
+
   testWidgets("attachment can be deleted from its visible action", (
     tester,
   ) async {
@@ -210,6 +246,25 @@ void main() {
       "018f0000-0000-7000-8000-000000000001",
       "attachment-1",
     ));
+  });
+
+  testWidgets("a note can be deleted from the editor", (tester) async {
+    final gateway = FakeGateway(unlocked: true);
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text("Offline note"));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.delete_forever_outlined));
+    await tester.pumpAndSettle();
+    expect(find.text("Delete this note?"), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, "Delete"));
+    await tester.pumpAndSettle();
+
+    expect(gateway.note["deleted"], true);
+    expect(find.byType(QuillEditor), findsNothing);
+    expect(find.text("Offline note"), findsNothing);
   });
 
   testWidgets("background transition does not expose note text", (
@@ -407,8 +462,17 @@ class FakeGateway implements CoreGateway {
     String name, {
     String parentId = "",
   }) async => {"id": "018f0000-0000-7000-8000-000000000003", "name": name};
+  List<Map<String, dynamic>> notebooksList = [];
   @override
-  Future<List<Map<String, dynamic>>> listNotebooks() async => [];
+  Future<List<Map<String, dynamic>>> listNotebooks() async => notebooksList;
+  (String, String)? renamedNotebook;
+  @override
+  Future<void> renameNotebook(String id, String name) async {
+    renamedNotebook = (id, name);
+    final notebook = notebooksList.firstWhere((item) => item["id"] == id);
+    notebook["name"] = name;
+  }
+
   @override
   Future<void> deleteNotebook(String id, bool deleted) async {}
   @override

@@ -1,15 +1,15 @@
 export namespace main {
-
+	
 	export class AccountInfo {
 	    account_id: string;
 	    device_id: string;
 	    workspace_id: string;
 	    key_protection: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AccountInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.account_id = source["account_id"];
@@ -21,17 +21,17 @@ export namespace main {
 	export class AccountStatus {
 	    unlocked: boolean;
 	    account?: AccountInfo;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AccountStatus(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.unlocked = source["unlocked"];
 	        this.account = this.convertValues(source["account"], AccountInfo);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -730,11 +730,11 @@ export namespace main {
 	    role: string;
 	    // Go type: time
 	    revoked_at?: any;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new WorkspaceMemberDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.user_id = source["user_id"];
@@ -742,7 +742,7 @@ export namespace main {
 	        this.role = source["role"];
 	        this.revoked_at = this.convertValues(source["revoked_at"], null);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -766,11 +766,11 @@ export namespace main {
 	    role: string;
 	    active: boolean;
 	    member_count?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new WorkspaceSummaryDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.workspace_id = source["workspace_id"];
@@ -848,3 +848,4 @@ export namespace transport {
 	}
 
 }
+

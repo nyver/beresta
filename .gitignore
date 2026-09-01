@@ -9,6 +9,9 @@ CLAUDE.md
 
 # Local configuration and generated artifacts
 config.yaml
+/build-mobile-release.bat
+*.jks
+*.keystore
 /data/
 /cmd/beresta-server/data/
 bin/

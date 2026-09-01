@@ -545,3 +545,7 @@ seven valid daily backups are retained.
 - The Go mobile binding, SQLCipher-linked Android AAR, and Flutter debug APK builds pass on Windows.
 - Development packages are intentionally unsigned unless release signing is configured (`BERESTA_REQUIRE_SIGNING`, `BERESTA_SIGN_CERT_SHA1` for Windows Authenticode; `BERESTA_ANDROID_KEYSTORE_*` for Android release signing). `cmd/beresta-release-sign` publishes the signed desktop update manifest and can also produce a generic detached signature (for example, over a server release's `SHA256SUMS`); automatic update discovery/download by a running client and store packaging remain later-phase work. Server cross-builds additionally publish `SHA256SUMS`, a per-binary `go version -m` module manifest, and `provenance.json` (source commit, Go version, build timestamp) under `build/output/server/`.
 - Desktop cold start, mobile cache/background behavior on physical hardware, and Raspberry Pi idle measurement require reference hardware this development environment does not have; their acceptance harnesses (`build.cmd cold-start`, Android instrumentation tests, `build/server/measure-idle-pi.sh`) are implemented and were not re-run as part of this change. The 20,000-note search budget and the 1,000-operation LAN sync budget were both re-verified in this environment and pass with headroom.
+
+## License
+
+Beresta is licensed under the [MIT License](LICENSE).

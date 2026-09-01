@@ -145,6 +145,8 @@ jobs:
     environment: release
     permissions:
       contents: write
+    env:
+      BERESTA_RELEASE_PRIVATE_KEY_BASE64: ${{ secrets.BERESTA_RELEASE_PRIVATE_KEY_BASE64 }}
     steps:
       - name: Check out source
         uses: actions/checkout@v5
@@ -183,14 +185,10 @@ jobs:
       - name: Cross-build server release artifacts
         shell: cmd
         run: build.cmd server-cross-build
-        env:
-          BERESTA_RELEASE_PRIVATE_KEY_BASE64: ${{ secrets.BERESTA_RELEASE_PRIVATE_KEY_BASE64 }}
 
       - name: Publish the signed desktop update manifest
-        if: ${{ secrets.BERESTA_RELEASE_PRIVATE_KEY_BASE64 != '' }}
+        if: ${{ env.BERESTA_RELEASE_PRIVATE_KEY_BASE64 != '' }}
         shell: pwsh
-        env:
-          BERESTA_RELEASE_PRIVATE_KEY_BASE64: ${{ secrets.BERESTA_RELEASE_PRIVATE_KEY_BASE64 }}
         run: |
           # The tag carries a leading "v" (v1.2.0); the manifest schema
           # requires the plain semver form (1.2.0).

@@ -1,6 +1,7 @@
 # Local agent and OpenSpec working material
 .agents/
 .claude/
+.cursor/
 .gigacode/
 .history/
 openspec/

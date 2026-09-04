@@ -71,18 +71,20 @@ export function ShellIntegrationPanel() {
     <section className="shell-integration-panel">
       <h3>{t("shellintegration.title")}</h3>
 
-      <label className="quick-note-hotkey-control">
-        <span>{t("shellintegration.hotkey_label")}</span>
-        <input
-          type="text"
-          value={hotkey}
-          onChange={(event) => setHotkey(event.target.value)}
-          placeholder={t("shellintegration.hotkey_placeholder")}
-        />
-      </label>
-      <button type="button" disabled={savingHotkey} onClick={() => void handleSaveHotkey()}>
-        {savingHotkey ? t("shellintegration.saving_hotkey_button") : t("shellintegration.save_hotkey_button")}
-      </button>
+      <div className="quick-note-hotkey-row">
+        <label className="quick-note-hotkey-control">
+          <span>{t("shellintegration.hotkey_label")}</span>
+          <input
+            type="text"
+            value={hotkey}
+            onChange={(event) => setHotkey(event.target.value)}
+            placeholder={t("shellintegration.hotkey_placeholder")}
+          />
+        </label>
+        <button type="button" disabled={savingHotkey} onClick={() => void handleSaveHotkey()}>
+          {savingHotkey ? t("shellintegration.saving_hotkey_button") : t("shellintegration.save_hotkey_button")}
+        </button>
+      </div>
       {hotkeyError ? (
         <p className="error" role="alert">
           {hotkeyError}

@@ -1003,6 +1003,14 @@ li:hover > .tree-row-delete,
   gap: 0.75rem;
 }
 
+.export-section,
+.import-section,
+.shell-integration-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .backups-panel h3,
 .backups-panel h4,
 .import-export-panel h3 {
@@ -1019,6 +1027,16 @@ li:hover > .tree-row-delete,
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.export-destination-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.export-destination-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .backup-directory-path {
@@ -1159,6 +1177,50 @@ li:hover > .tree-row-delete,
   padding: 0.4rem;
   border: 1px solid #d8d1c4;
   border-radius: 0.35rem;
+}
+
+.import-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.quick-note-hotkey-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.quick-note-hotkey-control {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.quick-note-hotkey-control input {
+  width: 100%;
+  min-width: 0;
+}
+
+.autostart-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (max-width: 34rem) {
+  .import-actions,
+  .quick-note-hotkey-row {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-note-hotkey-control {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
 }
 
 .import-warnings {

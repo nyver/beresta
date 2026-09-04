@@ -141,12 +141,14 @@ export function ImportExportPanel({ onImported }: ImportExportPanelProps) {
 
       <div className="import-section">
         <h3>{t("import.title")}</h3>
-        <button type="button" disabled={importing} onClick={() => void handleImport("beresta")}>
-          {importing ? t("import.importing_button") : t("import.beresta_button")}
-        </button>
-        <button type="button" disabled={importing} onClick={() => void handleImport("evernote")}>
-          {importing ? t("import.importing_button") : t("import.evernote_button")}
-        </button>
+        <div className="import-actions">
+          <button type="button" disabled={importing} onClick={() => void handleImport("beresta")}>
+            {importing ? t("import.importing_button") : t("import.beresta_button")}
+          </button>
+          <button type="button" disabled={importing} onClick={() => void handleImport("evernote")}>
+            {importing ? t("import.importing_button") : t("import.evernote_button")}
+          </button>
+        </div>
         {importError ? (
           <p className="error" role="alert">
             {importError}

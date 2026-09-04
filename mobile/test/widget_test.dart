@@ -141,6 +141,28 @@ void main() {
     expect(gateway.createdNoteTitle, "Untitled");
   });
 
+  testWidgets("focusing a new note title clears its default placeholder", (
+    tester,
+  ) async {
+    final gateway = FakeGateway(unlocked: true)..note["title"] = "Untitled";
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+
+    final titleField = find.descendant(
+      of: find.byType(AppBar),
+      matching: find.byType(TextField),
+    );
+    expect(tester.widget<TextField>(titleField).controller!.text, "Untitled");
+
+    await tester.tap(titleField);
+    await tester.pump();
+
+    expect(tester.widget<TextField>(titleField).controller!.text, isEmpty);
+  });
+
   testWidgets(
     "typing a plain query matches titles by partial, case-insensitive substring without hitting the backend",
     (tester) async {

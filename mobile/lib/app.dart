@@ -941,7 +941,7 @@ class _NotesShellState extends State<NotesShell> {
       requestCurrentWorkspaceSync(widget.gateway);
       if (!mounted) return;
       if (closeDrawer) Navigator.pop(context);
-      await openEditor(created["id"] as String);
+      await openEditor(created["id"] as String, clearDefaultTitleOnFocus: true);
     } catch (failure) {
       if (mounted) {
         setState(() => error = describeFailure(widget.strings, failure));
@@ -949,7 +949,10 @@ class _NotesShellState extends State<NotesShell> {
     }
   }
 
-  Future<void> openEditor(String noteId) async {
+  Future<void> openEditor(
+    String noteId, {
+    bool clearDefaultTitleOnFocus = false,
+  }) async {
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -958,6 +961,7 @@ class _NotesShellState extends State<NotesShell> {
               gateway: widget.gateway,
               strings: widget.strings,
               noteId: noteId,
+              clearDefaultTitleOnFocus: clearDefaultTitleOnFocus,
             ),
       ),
     );
@@ -2035,12 +2039,17 @@ class EditorScreen extends StatefulWidget {
     required this.gateway,
     required this.strings,
     required this.noteId,
+    this.clearDefaultTitleOnFocus = false,
     super.key,
   });
 
   final CoreGateway gateway;
   final Strings strings;
   final String noteId;
+  // True only for a note created from this mobile session. Existing notes
+  // titled "Untitled" deliberately remain unchanged: that can be a title
+  // the user chose themselves.
+  final bool clearDefaultTitleOnFocus;
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -2048,6 +2057,7 @@ class EditorScreen extends StatefulWidget {
 
 class _EditorScreenState extends State<EditorScreen> {
   final title = TextEditingController();
+  final titleFocusNode = FocusNode();
   // Built once GetNote resolves (see initState): flutter_quill's Document
   // takes over its content immediately on construction, so there is no
   // useful "empty" QuillController to show before the note's actual body
@@ -2061,14 +2071,19 @@ class _EditorScreenState extends State<EditorScreen> {
   bool capturingPhoto = false;
   List<Map<String, dynamic>> allTags = [];
   List<String> noteTagIds = [];
+  bool titleLoaded = false;
+  bool clearDefaultTitleOnFocus = false;
 
   @override
   void initState() {
     super.initState();
+    clearDefaultTitleOnFocus = widget.clearDefaultTitleOnFocus;
+    titleFocusNode.addListener(clearDefaultTitle);
     widget.gateway.getNote(widget.noteId).then((value) {
       if (!mounted) return;
       final note = value["note"] as Map<String, dynamic>;
       title.text = note["title"] as String;
+      titleLoaded = true;
       final quillBody = QuillController(
         document: Document.fromDelta(markdownToDelta(value["body"] as String)),
         selection: const TextSelection.collapsed(offset: 0),
@@ -2079,6 +2094,7 @@ class _EditorScreenState extends State<EditorScreen> {
         loading = false;
       });
       title.addListener(markDirty);
+      clearDefaultTitle();
     });
     refreshAttachments();
     refreshTags();
@@ -2086,6 +2102,16 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void markDirty() {
     if (!dirty && mounted) setState(() => dirty = true);
+  }
+
+  void clearDefaultTitle() {
+    if (!clearDefaultTitleOnFocus || !titleLoaded || !titleFocusNode.hasFocus) return;
+    // A newly created mobile note is initialized with the localized default
+    // title for compatibility with the existing core boundary. Treat that
+    // value as a placeholder in the title editor, without erasing a custom
+    // title if the backend returned one instead.
+    clearDefaultTitleOnFocus = false;
+    if (title.text == widget.strings("untitled")) title.clear();
   }
 
   Future<void> refreshAttachments() async {
@@ -2294,6 +2320,7 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void dispose() {
     title.dispose();
+    titleFocusNode.dispose();
     body?.dispose();
     bodyFocusNode.dispose();
     bodyScrollController.dispose();
@@ -2315,6 +2342,7 @@ class _EditorScreenState extends State<EditorScreen> {
         appBar: AppBar(
           title: TextField(
             controller: title,
+            focusNode: titleFocusNode,
             decoration: InputDecoration(
               hintText: widget.strings("title"),
               border: InputBorder.none,

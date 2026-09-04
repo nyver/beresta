@@ -71,8 +71,9 @@ selecting into a working note editor. Notebook, note, and tag creation,
 notebook rename, and notebook/tag deletion live behind a per-row "⋮" kebab
 menu (`shell/KebabMenu.tsx`) next to each item's name rather than
 always-visible buttons. Choosing "New note" from a notebook's menu files it
-directly in that notebook; the Notebooks section menu creates a note in the
-workspace root. Naming a notebook or tag (on create or, for notebooks, on
+directly in that notebook, switches the list to it, and opens the new note;
+the Notebooks section menu creates a note in the workspace root. Naming a
+notebook or tag (on create or, for notebooks, on
 rename via the new `RenameNotebook` binding) and confirming a notebook
 deletion each open as a modal dialog (`shell/Modal.tsx`) rather than an
 inline row form, so the sidebar tree never grows or shifts rows underneath
@@ -98,7 +99,8 @@ they flush immediately (not debounced) when a note closes or the account
 locks, and a failed commit is retried rather than dropped. Attachments are
 fully wired into the editor pane: native drag-and-drop (Wails'
 `OnFileDrop`, scoped to the attachment panel via the `--wails-drop-target`
-CSS marker) and clipboard image paste (intercepted before Quill's own
+CSS marker) and clipboard image paste (from either the editor or an open
+Attachments dialog, intercepted before Quill's own
 clipboard module can turn it into an unexportable inline blot — see
 `docs/architecture.md`) both feed the same upload queue as the "Attach
 file…" picker button; a still-queued item can be canceled, image

@@ -243,6 +243,23 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
     useImperativeHandle(ref, () => ({ attachFiles }), [attachFiles]);
 
     useEffect(() => {
+      // While the attachment modal is open, accept a pasted image even when
+      // focus is on one of the modal controls rather than in the editor.
+      // This listener is deliberately scoped to the open modal, so ordinary
+      // paste behavior elsewhere in the application remains untouched.
+      if (!open || viewingBlobId !== null) return;
+      const interceptImagePaste = (event: ClipboardEvent) => {
+        const files = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith("image/"));
+        if (files.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        attachFiles(files);
+      };
+      document.addEventListener("paste", interceptImagePaste, true);
+      return () => document.removeEventListener("paste", interceptImagePaste, true);
+    }, [open, viewingBlobId, attachFiles]);
+
+    useEffect(() => {
       OnFileDrop((_x: number, _y: number, paths: string[]) => {
         enqueue(
           paths.map((path) => ({

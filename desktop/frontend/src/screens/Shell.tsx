@@ -124,6 +124,10 @@ export function Shell({ account, onLocked }: ShellProps) {
   const [quickNoteOpen, setQuickNoteOpen] = useState(false);
   const [creatingNote, setCreatingNote] = useState(false);
   const [noteCreateError, setNoteCreateError] = useState<string | null>(null);
+  // The selection-change effect normally closes the open note. Creating a
+  // note in another notebook is the exception: after navigating to that
+  // notebook, keep the just-created note selected and open.
+  const preserveCreatedNoteSelectionRef = useRef(false);
 
   const loadAll = useCallback(() => {
     setLoading(true);
@@ -243,7 +247,11 @@ export function Shell({ account, onLocked }: ShellProps) {
   }, []);
 
   useEffect(() => {
-    setSelectedNoteId("");
+    if (preserveCreatedNoteSelectionRef.current) {
+      preserveCreatedNoteSelectionRef.current = false;
+    } else {
+      setSelectedNoteId("");
+    }
     if (selection.kind !== "tag") return;
     let canceled = false;
     setTagLoading(true);
@@ -329,10 +337,19 @@ export function Shell({ account, onLocked }: ShellProps) {
       const created = await createNote(notebookId, "");
       setNotes((current) => [created, ...current]);
       searchBarRef.current?.clear();
-      // A tag selection would otherwise hide the freshly created (as yet
-      // untagged) note, since visibleNotes' "tag" branch only shows
-      // tagNotes; switching to "all" makes it immediately visible.
-      if (selection.kind === "tag") setSelection({ kind: "all" });
+      const targetSelection: Selection = notebookId ? { kind: "notebook", id: notebookId } : { kind: "all" };
+      const alreadyInTarget =
+        (targetSelection.kind === "all" && selection.kind === "all") ||
+        (targetSelection.kind === "notebook" &&
+          selection.kind === "notebook" &&
+          selection.id === targetSelection.id);
+      if (!alreadyInTarget) {
+        // A note created from another notebook's menu must be visible right
+        // away, rather than remaining hidden by the prior notebook, tag, or
+        // search selection.
+        preserveCreatedNoteSelectionRef.current = true;
+        setSelection(targetSelection);
+      }
       setSelectedNoteId(created.id);
     } catch (thrown: unknown) {
       setNoteCreateError(errorMessage(unwrapError(thrown)));

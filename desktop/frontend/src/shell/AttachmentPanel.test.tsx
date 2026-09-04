@@ -187,6 +187,28 @@ describe("AttachmentPanel", () => {
     expect(dataBase64.length).toBeGreaterThan(0);
   });
 
+  it("attaches an image pasted while the attachment modal is open", async () => {
+    appMock.ListNoteAttachments.mockResolvedValueOnce([]).mockResolvedValueOnce([fakeAttachment()]);
+    appMock.AddAttachmentFromBytes.mockResolvedValue(fakeAttachment());
+    renderPanel("note-1");
+    await screen.findByText("attachments.empty");
+
+    const file = new File(["clipboard bytes"], "screenshot.png", { type: "image/png" });
+    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(pasteEvent, "clipboardData", { value: { files: [file] } });
+    document.dispatchEvent(pasteEvent);
+
+    await waitFor(() =>
+      expect(appMock.AddAttachmentFromBytes).toHaveBeenCalledWith(
+        "note-1",
+        "screenshot.png",
+        "image/png",
+        expect.any(String),
+      ),
+    );
+    expect(pasteEvent.defaultPrevented).toBe(true);
+  });
+
   it("cancels a still-queued upload without calling the backend for it", async () => {
     appMock.ListNoteAttachments.mockResolvedValue([]);
     appMock.PickAttachmentFile.mockResolvedValueOnce("C:\\a.bin").mockResolvedValueOnce("C:\\b.bin");

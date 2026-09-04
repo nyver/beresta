@@ -391,23 +391,26 @@ describe("Shell", () => {
     expect(await screen.findByLabelText("shell.detail_title_label")).toBeInTheDocument();
   });
 
-  it("creates a new note inside the currently selected notebook", async () => {
-    const notebook = fakeNotebook({ name: "Work" });
-    appMock.ListNotebooks.mockResolvedValue([notebook]);
+  it("switches to another notebook and opens the note created from its menu", async () => {
+    const currentNotebook = fakeNotebook({ name: "Current" });
+    const destinationNotebook = fakeNotebook({ name: "Destination" });
+    appMock.ListNotebooks.mockResolvedValue([currentNotebook, destinationNotebook]);
     appMock.ListTags.mockResolvedValue([]);
     appMock.ListNotes.mockResolvedValue([]);
     mockEmptyNoteDocument();
     appMock.CreateNote.mockResolvedValue(
-      fakeNote({ id: "new-note", title: "", notebook_id: notebook.id }),
+      fakeNote({ id: "new-note", title: "", notebook_id: destinationNotebook.id }),
     );
     renderShell();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "Work" }));
-    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("button", { name: "Current" }));
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Destination" }));
     await user.click(await screen.findByRole("menuitem", { name: "shell.new_note_button" }));
 
-    expect(appMock.CreateNote).toHaveBeenCalledWith(notebook.id, "");
+    expect(appMock.CreateNote).toHaveBeenCalledWith(destinationNotebook.id, "");
+    expect(await screen.findByRole("button", { name: "Destination" })).toHaveClass("selected");
+    expect(await screen.findByLabelText("shell.detail_title_label")).toBeInTheDocument();
   });
 
   it("deletes the selected notebook and falls back to All Notes", async () => {

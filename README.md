@@ -62,7 +62,8 @@ The first screens built on top of that layer are now in place: English/Russian
 onboarding with "Only on this computer" selected by default and a "Connect
 to server" path accepting an invite or trusted connection QR without blocking
 local account creation, a returning-user unlock screen (chosen automatically when
-a previous local account is on record), and a main shell with a keyboard-
+a previous local account is on record, and submitted with either its Unlock
+button or Enter in the passphrase field), and a main shell with a keyboard-
 accessible notebook tree, tag navigation (via a dedicated `SearchByTag`
 binding that reuses the same search index as the search box, without its
 text-query quoting limitations), and a virtualized note list

@@ -46,6 +46,25 @@ describe("Unlock", () => {
     });
   });
 
+  it("unlocks when Enter is pressed in the passphrase field", async () => {
+    const account = fakeAccountInfo();
+    appMock.UnlockAccount.mockResolvedValue(account);
+    const { onAccountReady } = renderUnlock();
+    const user = userEvent.setup();
+
+    await user.type(
+      await screen.findByLabelText("onboarding.passphrase_label"),
+      "correct horse battery{Enter}",
+    );
+
+    await waitFor(() => expect(onAccountReady).toHaveBeenCalledWith(account));
+    expect(appMock.UnlockAccount).toHaveBeenCalledTimes(1);
+    expect(appMock.UnlockAccount).toHaveBeenCalledWith({
+      database_path: "C:\\Users\\test\\Beresta\\beresta.db",
+      passphrase: "correct horse battery",
+    });
+  });
+
   it("shows the uniform unlock-failed message on a wrong passphrase", async () => {
     appMock.UnlockAccount.mockRejectedValue(
       new Error(JSON.stringify({ code: "unlock_failed", message: "wrong" })),

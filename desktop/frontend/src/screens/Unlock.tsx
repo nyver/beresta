@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { unlockAccount, unwrapError, wipeLocalAccount } from "../api";
 import { useI18n } from "../i18n";
@@ -35,8 +35,7 @@ export function Unlock({ databasePath, onAccountReady, onSwitchToOnboarding }: U
   // just-opened UnlockAccount would race the deletion against it).
   const busy = submitting || wiping;
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
+  async function submitUnlock() {
     if (busy) return;
     setError(null);
     setSubmitting(true);
@@ -48,6 +47,20 @@ export function Unlock({ databasePath, onAccountReady, onSwitchToOnboarding }: U
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submitUnlock();
+  }
+
+  function handlePassphraseKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing || !passphrase) return;
+
+    // Wails' WebView does not consistently translate Enter in this input into
+    // a form submit, so dispatch the same action as the Unlock button here.
+    event.preventDefault();
+    void submitUnlock();
   }
 
   async function handleWipe() {
@@ -69,13 +82,14 @@ export function Unlock({ databasePath, onAccountReady, onSwitchToOnboarding }: U
       <h1>{t("unlock.title")}</h1>
       <p className="tagline">{t("unlock.description")}</p>
 
-      <form className="unlock-form" onSubmit={(event) => void handleSubmit(event)}>
+      <form className="unlock-form" onSubmit={handleSubmit}>
         <label>
           {t("onboarding.passphrase_label")}
           <input
             type="password"
             value={passphrase}
             onChange={(event) => setPassphrase(event.target.value)}
+            onKeyDown={handlePassphraseKeyDown}
             autoComplete="current-password"
             autoFocus
             required

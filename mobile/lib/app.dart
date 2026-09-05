@@ -43,13 +43,16 @@ void requestCurrentWorkspaceSync(CoreGateway gateway) {
 /// substring to match against note titles instead of being sent to the
 /// backend to parse as a filter.
 bool containsQueryToken(String text) {
-  return text.trim().split(RegExp(r"\s+")).any(
-    (word) =>
-        word.startsWith("tag:") ||
-        word.startsWith("after:") ||
-        word.startsWith("before:") ||
-        word == "deleted:true",
-  );
+  return text
+      .trim()
+      .split(RegExp(r"\s+"))
+      .any(
+        (word) =>
+            word.startsWith("tag:") ||
+            word.startsWith("after:") ||
+            word.startsWith("before:") ||
+            word == "deleted:true",
+      );
 }
 
 /// Maps a core/transport.Status value ("disabled", "offline", "active",
@@ -617,9 +620,11 @@ class _NotesShellState extends State<NotesShell> {
       } else {
         final detail = await widget.gateway.syncError();
         setState(
-          () => error = detail.isEmpty
-              ? widget.strings("workspace_sync_pending")
-              : "${widget.strings("sync_error_details")}: $detail",
+          () =>
+              error =
+                  detail.isEmpty
+                      ? widget.strings("workspace_sync_pending")
+                      : "${widget.strings("sync_error_details")}: $detail",
         );
       }
       await refreshSyncStatus();
@@ -674,9 +679,7 @@ class _NotesShellState extends State<NotesShell> {
                 .where(
                   (note) =>
                       note["deleted"] != true &&
-                      (note["title"] as String).toLowerCase().contains(
-                        needle,
-                      ),
+                      (note["title"] as String).toLowerCase().contains(needle),
                 )
                 .toList();
       });
@@ -800,16 +803,17 @@ class _NotesShellState extends State<NotesShell> {
                       createNotebook();
                     }
                   },
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      value: "new_note",
-                      child: Text(widget.strings("new_note")),
-                    ),
-                    PopupMenuItem(
-                      value: "new_notebook",
-                      child: Text(widget.strings("new_notebook")),
-                    ),
-                  ],
+                  itemBuilder:
+                      (context) => [
+                        PopupMenuItem(
+                          value: "new_note",
+                          child: Text(widget.strings("new_note")),
+                        ),
+                        PopupMenuItem(
+                          value: "new_notebook",
+                          child: Text(widget.strings("new_notebook")),
+                        ),
+                      ],
                 ),
               ],
             ),
@@ -1305,6 +1309,10 @@ class _ServerSheetState extends State<ServerSheet> {
   bool sharingBusy = false;
   String syncStatusValue = "disabled";
   String syncErrorDetail = "";
+  bool connectionEnabled = false;
+  String connectedURL = "";
+  String connectedProtocol = "";
+  String connectedSecurityMode = "pinned";
   List<Map<String, dynamic>> workspaces = const [];
   Timer? syncStatusTimer;
 
@@ -1325,9 +1333,15 @@ class _ServerSheetState extends State<ServerSheet> {
         .then((info) {
           if (!mounted) return;
           setState(() {
+            connectionEnabled = info["enabled"] as bool? ?? false;
             url.text = info["url"] as String? ?? "";
             fingerprint.text = info["fingerprint"] as String? ?? "";
             securityMode = info["security_mode"] as String? ?? "pinned";
+            connectedURL = url.text;
+            connectedProtocol =
+                info["protocol"] as String? ??
+                (connectedURL.isEmpty ? "" : "https");
+            connectedSecurityMode = securityMode;
           });
         })
         .catchError((_) {
@@ -1432,6 +1446,38 @@ class _ServerSheetState extends State<ServerSheet> {
             ),
           ],
           const SizedBox(height: 12),
+          if (connectionEnabled && connectedURL.isNotEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.strings("current_server"),
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                    SelectableText(connectedURL),
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.strings("connection_protocol"),
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                    Text(
+                      connectedProtocol == "https"
+                          ? widget.strings("protocol_https")
+                          : connectedProtocol,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.strings("certificate_verification"),
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                    Text(widget.strings(connectedSecurityMode)),
+                  ],
+                ),
+              ),
+            ),
           TextField(
             controller: url,
             keyboardType: TextInputType.url,
@@ -1445,6 +1491,8 @@ class _ServerSheetState extends State<ServerSheet> {
               labelText: widget.strings("invite_code"),
             ),
           ),
+          const SizedBox(height: 12),
+          Text(widget.strings("certificate_verification")),
           SegmentedButton<String>(
             segments: [
               ButtonSegment(
@@ -1475,7 +1523,11 @@ class _ServerSheetState extends State<ServerSheet> {
           const SizedBox(height: 12),
           FilledButton(
             onPressed: busy ? null : connect,
-            child: Text(widget.strings("connect")),
+            child: Text(
+              widget.strings(
+                connectionEnabled ? "apply_server_changes" : "connect",
+              ),
+            ),
           ),
           TextButton(
             onPressed:
@@ -1673,6 +1725,14 @@ class _ServerSheetState extends State<ServerSheet> {
         "security_mode": securityMode,
         "device_name": "Android",
       });
+      if (mounted) {
+        setState(() {
+          connectionEnabled = true;
+          connectedURL = url.text.trim();
+          connectedProtocol = "https";
+          connectedSecurityMode = securityMode;
+        });
+      }
       await loadWorkspaces();
       if (mounted) Navigator.pop(context);
     } catch (failure) {
@@ -1873,10 +1933,9 @@ class _BackupSheetState extends State<BackupSheet> {
       widget.gateway.listBackups();
   String? error;
 
-  void reload() =>
-      setState(() {
-        backups = widget.gateway.listBackups();
-      });
+  void reload() => setState(() {
+    backups = widget.gateway.listBackups();
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2105,7 +2164,9 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void clearDefaultTitle() {
-    if (!clearDefaultTitleOnFocus || !titleLoaded || !titleFocusNode.hasFocus) return;
+    if (!clearDefaultTitleOnFocus || !titleLoaded || !titleFocusNode.hasFocus) {
+      return;
+    }
     // A newly created mobile note is initialized with the localized default
     // title for compatibility with the existing core boundary. Treat that
     // value as a placeholder in the title editor, without erasing a custom
@@ -2657,7 +2718,8 @@ class _RevisionSheetState extends State<RevisionSheet> {
 
   Future<void> _openDetail(int oldestFirstIndex) async {
     final all = revisions!;
-    final fromId = oldestFirstIndex > 0 ? all[oldestFirstIndex - 1]["id"] as String : "";
+    final fromId =
+        oldestFirstIndex > 0 ? all[oldestFirstIndex - 1]["id"] as String : "";
     final revision = all[oldestFirstIndex];
     await showModalBottomSheet<void>(
       context: context,
@@ -2829,7 +2891,8 @@ class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
                           children: [
                             for (final line in diffLines!)
                               TextSpan(
-                                text: "${_diffMarker(line["op"] as String)}${line["text"]}\n",
+                                text:
+                                    "${_diffMarker(line["op"] as String)}${line["text"]}\n",
                                 style: TextStyle(
                                   color: _diffColor(
                                     line["op"] as String,

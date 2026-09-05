@@ -15,9 +15,11 @@ import {
   revokeSyncDevice,
   setActiveWorkspace,
   shareWorkspace,
+  syncConnectionInfo,
   syncError,
   syncStatus,
   type QuarantineEntry,
+  type ServerConnectionInfo,
   type ServerDiagnostics,
   type SyncDevice,
   type SyncStatusValue,
@@ -54,7 +56,8 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
   const [invite, setInvite] = useState("");
   const [fingerprint, setFingerprint] = useState("");
   const [qr, setQr] = useState("");
-  const [trusted, setTrusted] = useState(false);
+  const [securityMode, setSecurityMode] = useState<"pinned" | "trusted">("pinned");
+  const [connection, setConnection] = useState<ServerConnectionInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [diagnostics, setDiagnostics] = useState<ServerDiagnostics | null>(null);
   const [devices, setDevices] = useState<SyncDevice[]>([]);
@@ -110,6 +113,17 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
       .catch((thrown: unknown) => setError(errorMessage(unwrapError(thrown))));
   }, [errorMessage, loadDetails]);
 
+  const loadConnection = useCallback(() => {
+    syncConnectionInfo()
+      .then((info) => {
+        setConnection(info);
+        setUrl(info.url ?? "");
+        setFingerprint(info.fingerprint ?? "");
+        setSecurityMode(info.security_mode === "trusted" ? "trusted" : "pinned");
+      })
+      .catch((thrown: unknown) => setError(errorMessage(unwrapError(thrown))));
+  }, [errorMessage]);
+
   useEffect(() => {
     EventsOn(EVENT_SYNC_STATUS, (next: unknown) => {
       if (isSyncStatus(next)) {
@@ -128,8 +142,9 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
       onWorkspaceChanged?.();
     });
     loadStatus();
+    loadConnection();
     return () => { EventsOff(EVENT_SYNC_STATUS); EventsOff(EVENT_SYNC_ERROR); EventsOff(EVENT_WORKSPACE_CHANGED); };
-  }, [errorMessage, loadDetails, loadStatus, onWorkspaceChanged]);
+  }, [errorMessage, loadConnection, loadDetails, loadStatus, onWorkspaceChanged]);
 
   async function handleShareWorkspace() {
     setSharingBusy(true);
@@ -194,7 +209,11 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
     setBusy(true);
     setError(null);
     try {
-      await connectServer({ url, invite_code: invite, fingerprint, security_mode: trusted ? "trusted" : "pinned", qr_code: qr, device_name: "Windows desktop" });
+      const info = await connectServer({ url, invite_code: invite, fingerprint, security_mode: securityMode, qr_code: qr, device_name: "Windows desktop" });
+      setConnection(info);
+      setUrl(info.url);
+      setFingerprint(info.fingerprint ?? "");
+      setSecurityMode(info.security_mode);
       setInvite("");
       setQr("");
       loadStatus();
@@ -207,6 +226,7 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
     setBusy(true);
     try {
       await disableServer();
+      setConnection((current) => current ? { ...current, enabled: false } : current);
       setStatus("disabled");
       await loadDetails("disabled");
     } catch (thrown) { setError(errorMessage(unwrapError(thrown))); }
@@ -233,23 +253,36 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
 
       <section aria-labelledby="sync-server-title">
         <h3 id="sync-server-title">{t("sync.server_title")}</h3>
-        {status === "disabled" || status === null ? (
-          <div className="sync-connect-form">
-            <label>{t("sync.qr_label")}<textarea value={qr} onChange={(event) => setQr(event.target.value)} /></label>
-            <label>{t("sync.url_label")}<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} /></label>
-            <label>{t("sync.invite_label")}<input type="password" value={invite} onChange={(event) => setInvite(event.target.value)} /></label>
+        {connection?.enabled && connection.url ? (
+          <dl className="sync-connection-summary">
+            <div><dt>{t("sync.current_server_label")}</dt><dd>{connection.url}</dd></div>
+            <div><dt>{t("sync.protocol_label")}</dt><dd>{connection.protocol === "https" ? t("sync.protocol_https") : connection.protocol}</dd></div>
+            <div><dt>{t("sync.verification_label")}</dt><dd>{t(`sync.verification_${connection.security_mode}`)}</dd></div>
+          </dl>
+        ) : null}
+        <div className="sync-connect-form">
+          <label>{t("sync.qr_label")}<textarea value={qr} onChange={(event) => setQr(event.target.value)} /></label>
+          <label>{t("sync.url_label")}<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} /></label>
+          <label>{t("sync.invite_label")}<input type="password" value={invite} onChange={(event) => setInvite(event.target.value)} /></label>
+          <label>{t("sync.verification_label")}
+            <select aria-label={t("sync.verification_label")} value={securityMode} onChange={(event) => setSecurityMode(event.target.value as "pinned" | "trusted")}>
+              <option value="pinned">{t("sync.verification_pinned")}</option>
+              <option value="trusted">{t("sync.verification_trusted")}</option>
+            </select>
+          </label>
+          {securityMode === "pinned" ? <>
             <label>{t("sync.server_fingerprint_label")}<input value={fingerprint} onChange={(event) => setFingerprint(event.target.value)} /></label>
-            <label className="sync-checkbox-label"><input type="checkbox" checked={trusted} onChange={(event) => setTrusted(event.target.checked)} />{t("sync.trusted_certificate_label")}</label>
             <p>{t("sync.server_fingerprint_warning")}</p>
-            <button type="button" disabled={busy || (!qr && !url)} onClick={() => void connect()}>{t("sync.connect_button")}</button>
-          </div>
-        ) : (
-          <div>
+          </> : null}
+          <button type="button" disabled={busy || (!qr && !url)} onClick={() => void connect()}>
+            {connection?.enabled ? t("sync.change_server_button") : t("sync.connect_button")}
+          </button>
+          {connection?.enabled ? <div className="sync-connection-actions">
             <button type="button" disabled={busy} onClick={() => void runDiagnostics()}>{t("sync.diagnose_button")}</button>
             <button type="button" disabled={busy} onClick={() => void disconnect()}>{t("sync.disconnect_button")}</button>
             {diagnostics && <p role="status">{diagnostics.authenticated ? t("sync.diagnostics_ok") : t("sync.diagnostics_failed")} ({diagnostics.latency_ms} ms)</p>}
-          </div>
-        )}
+          </div> : null}
+        </div>
       </section>
 
       <section aria-labelledby="sync-journal-title">

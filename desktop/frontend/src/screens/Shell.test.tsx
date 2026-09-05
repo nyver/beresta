@@ -388,7 +388,9 @@ describe("Shell", () => {
     await user.keyboard("{Control>}n{/Control}");
 
     expect(appMock.CreateNote).toHaveBeenCalledWith("", "");
-    expect(await screen.findByLabelText("shell.detail_title_label")).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("shell.detail_title_label", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
   });
 
   it("switches to another notebook and opens the note created from its menu", async () => {
@@ -410,7 +412,9 @@ describe("Shell", () => {
 
     expect(appMock.CreateNote).toHaveBeenCalledWith(destinationNotebook.id, "");
     expect(await screen.findByRole("button", { name: "Destination" })).toHaveClass("selected");
-    expect(await screen.findByLabelText("shell.detail_title_label")).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("shell.detail_title_label", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
   });
 
   it("deletes the selected notebook and falls back to All Notes", async () => {

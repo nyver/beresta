@@ -364,6 +364,19 @@ func TestSyncStatusReportsDisabledForLocalTransport(t *testing.T) {
 	}
 }
 
+func TestSyncConnectionInfoReportsSavedServerAndProtocol(t *testing.T) {
+	a := newTestApp(t)
+	a.settings.SyncEnabled = true
+	a.settings.SyncServerURL = "https://sync.example.com/base"
+	a.settings.SyncSecurityMode = "trusted"
+	a.settings.SyncFingerprint = "saved-fingerprint"
+
+	got := a.SyncConnectionInfo()
+	if !got.Enabled || got.URL != "https://sync.example.com/base" || got.Protocol != "https" || got.SecurityMode != "trusted" || got.Fingerprint != "saved-fingerprint" {
+		t.Fatalf("SyncConnectionInfo() = %+v", got)
+	}
+}
+
 func TestEmitIsNoOpBeforeStartup(t *testing.T) {
 	a := newTestApp(t)
 	// Must not panic or call log.Fatalf (see events.go's doc comment):

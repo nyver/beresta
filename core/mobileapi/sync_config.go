@@ -10,12 +10,14 @@ import (
 // syncConnectionConfig is the last server connection the user configured on
 // this device. It is persisted so the connect dialog can be prefilled after
 // it is closed and reopened, and so a previously enabled connection can be
-// reattached automatically the next time the account unlocks. InviteCode is
-// deliberately excluded: it is a single-use registration token, not part of
-// the ongoing connection.
+// reattached automatically the next time the account unlocks. Protocol is
+// derived from the validated URL instead of being stored separately.
+// InviteCode is deliberately excluded: it is a single-use registration token,
+// not part of the ongoing connection.
 type syncConnectionConfig struct {
 	Enabled      bool   `json:"enabled"`
 	URL          string `json:"url"`
+	Protocol     string `json:"protocol"`
 	SecurityMode string `json:"security_mode,omitempty"`
 	Fingerprint  string `json:"fingerprint,omitempty"`
 }
@@ -26,6 +28,9 @@ func loadSyncConnectionConfig(ctx context.Context, db *sql.DB) (syncConnectionCo
 		Scan(&cfg.Enabled, &cfg.URL, &cfg.SecurityMode, &cfg.Fingerprint)
 	if errors.Is(err, sql.ErrNoRows) {
 		return syncConnectionConfig{}, nil
+	}
+	if err == nil && cfg.URL != "" {
+		cfg.Protocol = "https"
 	}
 	return cfg, err
 }

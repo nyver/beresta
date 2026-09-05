@@ -67,6 +67,7 @@ import {
   ShareWorkspace,
   Status,
   SyncError,
+  SyncConnectionInfo,
   SyncNow,
   SyncStatus,
   UnlockAccount,
@@ -215,6 +216,15 @@ export interface ServerDiagnostics {
   error_class?: string;
 }
 
+export interface ServerConnectionInfo {
+  enabled: boolean;
+  url: string;
+  protocol: "https" | "";
+  security_mode: "pinned" | "trusted";
+  fingerprint?: string;
+  diagnostics?: ServerDiagnostics;
+}
+
 export interface SyncDevice {
   device_id: string;
   display_name: string;
@@ -229,8 +239,12 @@ export interface QuarantineEntry {
   received_unix_ms: number;
 }
 
-export async function connectServer(request: ConnectServerRequest): Promise<void> {
-  await ConnectServer(request);
+export async function connectServer(request: ConnectServerRequest): Promise<ServerConnectionInfo> {
+  return ConnectServer(request) as Promise<ServerConnectionInfo>;
+}
+
+export async function syncConnectionInfo(): Promise<ServerConnectionInfo> {
+  return SyncConnectionInfo() as Promise<ServerConnectionInfo>;
 }
 
 export async function disableServer(): Promise<void> {

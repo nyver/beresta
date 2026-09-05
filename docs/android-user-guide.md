@@ -32,7 +32,11 @@ The server URL, certificate fingerprint, and pinned/trusted choice are saved
 on the device (not the one-time invite code), so reopening the server sheet
 shows the same connection instead of a blank form, and a previously enabled
 connection reattaches automatically the next time the account unlocks. The
-cloud action's icon and the top of the server sheet reflect the live
+sheet identifies the active server and its HTTPS/TLS 1.3 verification policy
+and can apply a replacement URL or certificate policy without disabling the
+current connection first. A failed replacement leaves the working connection
+and its saved settings unchanged. The cloud action's icon and the top of the
+server sheet reflect the live
 synchronization status (not connected, offline and retrying, syncing, up to
 date, or a sync error).
 

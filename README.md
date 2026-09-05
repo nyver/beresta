@@ -247,6 +247,12 @@ recorded in [the phase-7 delivery report](docs/phase-7-report.md).
 The desktop and Android clients store complete local collections and can attach
 to the optional server without migrating data. Network failure changes only the
 visible synchronization state; local editing and queued operations remain available.
+Both clients show the configured server URL and HTTPS/TLS 1.3 certificate
+verification policy in their synchronization settings. The URL and policy can
+be replaced while synchronization is enabled; the client validates and starts
+the replacement before detaching the previous connection, so a failed change
+does not discard a working server configuration. Unencrypted HTTP is not a
+supported client protocol.
 
 ## Security Model
 

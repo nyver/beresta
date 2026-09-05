@@ -20,6 +20,7 @@ export const appMock = {
   LockAccount: vi.fn(),
   SyncStatus: vi.fn(),
   SyncError: vi.fn(),
+  SyncConnectionInfo: vi.fn(),
   SyncNow: vi.fn(),
   ConnectServer: vi.fn(),
   DiagnoseServer: vi.fn(),

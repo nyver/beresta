@@ -639,6 +639,7 @@ export namespace main {
 	export class ServerConnectionInfo {
 	    enabled: boolean;
 	    url: string;
+	    protocol: string;
 	    security_mode: string;
 	    fingerprint?: string;
 	    diagnostics: transport.Diagnostics;
@@ -651,6 +652,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
 	        this.url = source["url"];
+	        this.protocol = source["protocol"];
 	        this.security_mode = source["security_mode"];
 	        this.fingerprint = source["fingerprint"];
 	        this.diagnostics = this.convertValues(source["diagnostics"], transport.Diagnostics);

@@ -59,20 +59,15 @@ void main() {
   testWidgets(
     "revision history lists newest first with a checkpoint badge and shows a diff",
     (tester) async {
-      final gateway =
-          FakeGateway(unlocked: true)
-            ..revisionList = [
-              {
-                "id": "rev-1",
-                "checkpoint": true,
-                "created_unix_ms": 1710000000000,
-              },
-              {
-                "id": "rev-2",
-                "checkpoint": false,
-                "created_unix_ms": 1710000100000,
-              },
-            ];
+      final gateway = FakeGateway(unlocked: true)
+        ..revisionList = [
+          {"id": "rev-1", "checkpoint": true, "created_unix_ms": 1710000000000},
+          {
+            "id": "rev-2",
+            "checkpoint": false,
+            "created_unix_ms": 1710000100000,
+          },
+        ];
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
@@ -166,12 +161,11 @@ void main() {
   testWidgets(
     "typing a plain query matches titles by partial, case-insensitive substring without hitting the backend",
     (tester) async {
-      final gateway =
-          FakeGateway(unlocked: true)
-            ..listedNotes = [
-              {...FakeGateway.noteFixture, "id": "note-1", "title": "Running list"},
-              {...FakeGateway.noteFixture, "id": "note-2", "title": "Grocery list"},
-            ];
+      final gateway = FakeGateway(unlocked: true)
+        ..listedNotes = [
+          {...FakeGateway.noteFixture, "id": "note-1", "title": "Running list"},
+          {...FakeGateway.noteFixture, "id": "note-2", "title": "Grocery list"},
+        ];
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
@@ -210,9 +204,7 @@ void main() {
     expect(find.byType(QuillEditor), findsOneWidget);
   });
 
-  testWidgets("a notebook can be renamed from a popup dialog", (
-    tester,
-  ) async {
+  testWidgets("a notebook can be renamed from a popup dialog", (tester) async {
     final gateway = FakeGateway(unlocked: true)
       ..notebooksList = [
         {"id": "notebook-1", "parent_id": "", "name": "Old name"},
@@ -309,6 +301,7 @@ void main() {
           ..connectionInfo = {
             "enabled": true,
             "url": "https://sync.example.com",
+            "protocol": "https",
             "security_mode": "pinned",
             "fingerprint": "ab12",
           };
@@ -325,10 +318,32 @@ void main() {
 
     expect(find.text("Sync status: Up to date"), findsOneWidget);
     expect(find.widgetWithText(TextField, "HTTPS server URL"), findsOneWidget);
-    final urlField = tester.widget<TextField>(
-      find.widgetWithText(TextField, "HTTPS server URL"),
-    );
+    final urlFinder = find.widgetWithText(TextField, "HTTPS server URL");
+    final urlField = tester.widget<TextField>(urlFinder);
     expect(urlField.controller!.text, "https://sync.example.com");
+    expect(find.text("Connection protocol"), findsOneWidget);
+    expect(find.text("HTTPS / TLS 1.3"), findsOneWidget);
+    expect(find.text("Certificate verification"), findsNWidgets(2));
+    expect(find.text("Pinned certificate"), findsNWidgets(2));
+    expect(
+      find.widgetWithText(FilledButton, "Apply server changes"),
+      findsOneWidget,
+    );
+
+    await tester.enterText(urlFinder, "https://new.example.com");
+    final trustedPolicy = find.text("System-trusted certificate");
+    await tester.ensureVisible(trustedPolicy.last);
+    await tester.tap(trustedPolicy.last);
+    final applyButton = find.widgetWithText(
+      FilledButton,
+      "Apply server changes",
+    );
+    await tester.ensureVisible(applyButton);
+    await tester.tap(applyButton);
+    await tester.pumpAndSettle();
+
+    expect(gateway.connectedConfig?["url"], "https://new.example.com");
+    expect(gateway.connectedConfig?["security_mode"], "trusted");
   });
 
   testWidgets("refreshes notes after the selected workspace finishes syncing", (
@@ -479,6 +494,7 @@ class FakeGateway implements CoreGateway {
     searchCalls++;
     return [note];
   }
+
   @override
   Future<Map<String, dynamic>> createNotebook(
     String name, {
@@ -544,8 +560,12 @@ class FakeGateway implements CoreGateway {
       restoredRevisionId = revisionId;
   @override
   Future<void> syncNow() async => syncNowCalls++;
+  Map<String, dynamic>? connectedConfig;
   @override
-  Future<void> connectServer(Map<String, dynamic> config) async {}
+  Future<void> connectServer(Map<String, dynamic> config) async {
+    connectedConfig = config;
+  }
+
   @override
   Future<void> disconnectServer() async {}
   @override

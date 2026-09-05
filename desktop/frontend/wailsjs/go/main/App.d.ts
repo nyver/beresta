@@ -145,6 +145,8 @@ export function ShareWorkspace(arg1:string):Promise<string>;
 
 export function Status():Promise<main.AccountStatus>;
 
+export function SyncConnectionInfo():Promise<main.ServerConnectionInfo>;
+
 export function SyncError():Promise<string>;
 
 export function SyncNow():Promise<void>;

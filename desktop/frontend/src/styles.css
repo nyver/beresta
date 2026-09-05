@@ -1287,27 +1287,19 @@ li:hover > .tree-row-delete,
 }
 
 .sync-connect-form input,
-.sync-connect-form textarea {
+.sync-connect-form textarea,
+.sync-connect-form select {
   font: inherit;
   padding: 0.5rem;
   border: 1px solid #d8d1c4;
   border-radius: 0.35rem;
   color: #2b2620;
+  background: #fff;
 }
 
 .sync-connect-form textarea {
   min-height: 4rem;
   resize: vertical;
-}
-
-.sync-connect-form .sync-checkbox-label {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.sync-connect-form .sync-checkbox-label input {
-  width: auto;
 }
 
 .sync-connect-form > p {
@@ -1432,6 +1424,43 @@ li:hover > .tree-row-delete,
   border: 1px solid #d8d1c4;
   border-radius: 0.4rem;
   box-shadow: 0 0.25rem 0.75rem rgba(30, 27, 24, 0.2);
+}
+
+.sync-connection-summary {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid #d8d1c4;
+  border-radius: 0.35rem;
+  background: #fff;
+}
+
+.sync-connection-summary > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.sync-connection-summary dt {
+  font-size: 0.75rem;
+  color: #5a5148;
+}
+
+.sync-connection-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sync-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.sync-connection-actions p {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 /* The notebook-row trigger occupies the sidebar's final inline slot. Leave

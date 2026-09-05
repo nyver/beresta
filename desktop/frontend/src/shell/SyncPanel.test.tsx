@@ -28,6 +28,48 @@ describe("SyncPanel", () => {
     },
   );
 
+  it("shows the connected endpoint and applies a replacement server and certificate policy", async () => {
+    mockLocaleCatalog();
+    mockSyncStatus("current");
+    appMock.SyncConnectionInfo.mockResolvedValue({
+      enabled: true,
+      url: "https://old.example.com",
+      protocol: "https",
+      security_mode: "trusted",
+      fingerprint: "",
+    });
+    appMock.ConnectServer.mockResolvedValue({
+      enabled: true,
+      url: "https://new.example.com",
+      protocol: "https",
+      security_mode: "pinned",
+      fingerprint: "ab12",
+    });
+    render(
+      <I18nProvider>
+        <SyncPanel deviceId="device-123" />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("https://old.example.com")).toBeInTheDocument();
+    expect(screen.getByText("sync.protocol_https")).toBeInTheDocument();
+    expect(screen.getAllByText("sync.verification_trusted")).toHaveLength(2);
+    const urlField = screen.getByLabelText("sync.url_label");
+    await user.clear(urlField);
+    await user.type(urlField, "https://new.example.com");
+    await user.selectOptions(screen.getByLabelText("sync.verification_label"), "pinned");
+    await user.type(screen.getByLabelText("sync.server_fingerprint_label"), "ab12");
+    await user.click(screen.getByRole("button", { name: "sync.change_server_button" }));
+
+    expect(appMock.ConnectServer).toHaveBeenCalledWith(expect.objectContaining({
+      url: "https://new.example.com",
+      security_mode: "pinned",
+      fingerprint: "ab12",
+    }));
+    expect(await screen.findByText("https://new.example.com")).toBeInTheDocument();
+  });
+
   it("updates from the shared synchronization event", async () => {
     renderPanel();
     await screen.findByText("sync.status_disabled");

@@ -75,8 +75,9 @@ func TestListNotesOrdersByLastModified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
+	dbPath := filepath.Join(retryTempDir(t), "beresta.db")
 	t.Cleanup(service.Close)
-	if _, err := service.CreateAccount("create-account", filepath.Join(t.TempDir(), "beresta.db"), "correct horse battery staple"); err != nil {
+	if _, err := service.CreateAccount("create-account", dbPath, "correct horse battery staple"); err != nil {
 		t.Fatalf("CreateAccount: %v", err)
 	}
 	firstJSON, err := service.CreateNote("create-first", "", "first")

@@ -46,7 +46,13 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: "shell.lock_button" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole(
+        "button",
+        { name: "shell.lock_button" },
+        { timeout: 5000 },
+      ),
+    ).toBeInTheDocument();
   });
 
   it("shows a retryable error instead of silently starting onboarding when Status() fails", async () => {

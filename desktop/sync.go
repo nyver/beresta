@@ -26,6 +26,7 @@ type ConnectServerRequest struct {
 type ServerConnectionInfo struct {
 	Enabled      bool                  `json:"enabled"`
 	URL          string                `json:"url"`
+	Protocol     string                `json:"protocol"`
 	SecurityMode string                `json:"security_mode"`
 	Fingerprint  string                `json:"fingerprint,omitempty"`
 	Diagnostics  transport.Diagnostics `json:"diagnostics"`
@@ -104,13 +105,17 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	if err := next.validate(); err != nil {
 		return ServerConnectionInfo{}, err
 	}
-	if err := saveSettings(next); err != nil {
-		return ServerConnectionInfo{}, mapError(err)
-	}
 
 	coordinator := coresync.NewCoordinator(a.requestContext())
 	httpTransport.BeginSync()
 	if err := coordinator.Attach(worker); err != nil {
+		return ServerConnectionInfo{}, mapError(err)
+	}
+	// Keep the currently working connection and its persisted settings intact
+	// unless both the replacement worker and the new settings are ready. This
+	// makes changing servers atomic from the user's perspective.
+	if err := saveSettings(next); err != nil {
+		coordinator.Detach()
 		return ServerConnectionInfo{}, mapError(err)
 	}
 	a.mu.Lock()
@@ -120,7 +125,28 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	if previous != nil {
 		previous.Detach()
 	}
-	return ServerConnectionInfo{Enabled: true, URL: request.URL, SecurityMode: request.SecurityMode, Fingerprint: request.Fingerprint, Diagnostics: diagnostics}, nil
+	return ServerConnectionInfo{Enabled: true, URL: request.URL, Protocol: "https", SecurityMode: request.SecurityMode, Fingerprint: request.Fingerprint, Diagnostics: diagnostics}, nil
+}
+
+// SyncConnectionInfo returns the saved server endpoint and HTTPS verification
+// policy. It performs no network request, so settings remain visible while the
+// configured server is offline and can be replaced without disconnecting it
+// first. Invite codes are intentionally never persisted or returned.
+func (a *App) SyncConnectionInfo() ServerConnectionInfo {
+	a.mu.Lock()
+	settings := a.settings
+	a.mu.Unlock()
+	protocol := ""
+	if settings.SyncServerURL != "" {
+		protocol = "https"
+	}
+	return ServerConnectionInfo{
+		Enabled:      settings.SyncEnabled,
+		URL:          settings.SyncServerURL,
+		Protocol:     protocol,
+		SecurityMode: settings.SyncSecurityMode,
+		Fingerprint:  settings.SyncFingerprint,
+	}
 }
 
 // buildWorkspaceWorker constructs (without attaching) the sync worker for

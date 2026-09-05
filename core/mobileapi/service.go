@@ -1371,7 +1371,7 @@ func (s *Service) SyncError() string {
 
 // SyncConnectionInfo returns the last server connection configured on this
 // device, so the connect dialog can prefill its fields after being reopened.
-// Enabled is false once the user disconnects, but URL/SecurityMode/
+// Enabled is false once the user disconnects, but URL/Protocol/SecurityMode/
 // Fingerprint remain so reconnecting does not require retyping them.
 func (s *Service) SyncConnectionInfo(requestID string) (string, error) {
 	ctx, done, err := s.begin(requestID)

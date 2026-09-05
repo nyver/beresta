@@ -85,6 +85,44 @@ func TestExportNotesWritesMarkdownNotebookTreeAndManifest(t *testing.T) {
 	}
 }
 
+func TestExportNotesSkipsDeletedNotes(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+
+	kept, err := created.CreateNote(ctx, workspaceID, model.Nil, "Kept note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := created.CreateNote(ctx, workspaceID, model.Nil, "Deleted note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := created.DeleteNote(ctx, workspaceID, deleted.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	destDir := filepath.Join(t.TempDir(), "export-out")
+	manifest, err := created.ExportNotes(ctx, workspaceID, destDir, nil, time.Now())
+	if err != nil {
+		t.Fatalf("ExportNotes: %v", err)
+	}
+	if len(manifest.Notes) != 1 || manifest.Notes[0].NoteID != kept.ID {
+		t.Fatalf("manifest notes = %+v, want only the kept note", manifest.Notes)
+	}
+
+	// The same exclusion must hold when the deleted note is requested
+	// explicitly, not just for the "export everything" path.
+	destDir2 := filepath.Join(t.TempDir(), "export-explicit")
+	manifest2, err := created.ExportNotes(ctx, workspaceID, destDir2, []model.ID{kept.ID, deleted.ID}, time.Now())
+	if err != nil {
+		t.Fatalf("ExportNotes: %v", err)
+	}
+	if len(manifest2.Notes) != 1 || manifest2.Notes[0].NoteID != kept.ID {
+		t.Fatalf("manifest notes = %+v, want only the kept note", manifest2.Notes)
+	}
+}
+
 func TestExportNotesRejectsExistingDestination(t *testing.T) {
 	ctx := context.Background()
 	created := createTestAccount(t)

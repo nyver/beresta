@@ -43,7 +43,10 @@ const exportManifestFile = "manifest.json"
 // ExportNotes writes noteIDs (or every note in workspaceID, when noteIDs is
 // empty) as plaintext Markdown files mirroring their notebook tree, their
 // attachments alongside each note, and a manifest.json describing the
-// whole export, to destDir. destDir must not already exist: ExportNotes
+// whole export, to destDir. Notes that are soft-deleted (tombstoned) are
+// skipped, since they are gone from the user's perspective even though the
+// sync engine still tracks them internally. destDir must not already
+// exist: ExportNotes
 // stages the complete tree in a temporary sibling directory and renames it
 // into place only once everything has been written successfully, so a
 // failure partway through never leaves a partial export at destDir (it is
@@ -105,6 +108,9 @@ func (a *Account) ExportNotes(ctx context.Context, workspaceID model.ID, destDir
 	manifest := ExportManifest{Version: ExportManifestVersion, ExportedUnixMS: now.UnixMilli(), Notes: make([]ExportedNote, 0, len(notes))}
 
 	for _, note := range notes {
+		if note.Deleted.Value {
+			continue
+		}
 		notebookPath := notebookPathSegments(note.NotebookID.Value, notebooksByID)
 		noteDir := filepath.Join(stagingDir, filepath.Join(sanitizedSegments(notebookPath)...))
 		if err := os.MkdirAll(noteDir, 0o700); err != nil {

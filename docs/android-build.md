@@ -37,6 +37,11 @@ Gradle fails the release build closed (see
 `mobile/android/app/build.gradle.kts`) rather than falling back to a
 debug-signed artifact if any of these are unset.
 
+The AAB task also verifies that Gradle extracted debug symbols for Flutter and
+application native libraries. This check reads the signed AAB directly, so it
+remains reliable with current Android command-line tools whose `apkanalyzer`
+no longer supports Flutter's legacy tool-directory lookup.
+
 `build-mobile-release.bat`, at the repository root, wraps
 `build.cmd mobile-package-android` for local release builds. It is excluded
 from version control (see `.gitignore`) because it sets the four

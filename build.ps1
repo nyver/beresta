@@ -227,6 +227,32 @@ function Invoke-MobileBuildAndroid {
     Invoke-FlutterChecked -FilePath (Get-FlutterExecutable) -Arguments @("build", "apk", "--debug") -WorkingDirectory (Join-Path $projectRoot "mobile")
 }
 
+function Assert-AndroidAppBundleDebugSymbols {
+    param(
+        [Parameter(Mandatory)]
+        [string]$BundlePath
+    )
+
+    if (-not (Test-Path -LiteralPath $BundlePath -PathType Leaf)) {
+        throw "Android App Bundle was not produced at $BundlePath."
+    }
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($BundlePath)
+    try {
+        $entries = @($archive.Entries | ForEach-Object { $_.FullName })
+        foreach ($library in @("libflutter.so", "libapp.so")) {
+            $symbolPattern = "(^|/)$([regex]::Escape($library))\.(sym|dbg)$"
+            if (-not @($entries | Where-Object { $_ -match $symbolPattern })) {
+                throw "Android App Bundle does not contain extracted debug symbols for $library."
+            }
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 function Invoke-MobilePackageAndroid {
     # Produces a signed release APK and AAB. The Gradle build itself fails
     # closed (see mobile/android/app/build.gradle.kts) if the
@@ -235,7 +261,14 @@ function Invoke-MobilePackageAndroid {
     Invoke-MobileBind
     $mobileDirectory = Join-Path $projectRoot "mobile"
     Invoke-FlutterChecked -FilePath (Get-FlutterExecutable) -Arguments @("build", "apk", "--release") -WorkingDirectory $mobileDirectory
-    Invoke-FlutterChecked -FilePath (Get-FlutterExecutable) -Arguments @("build", "appbundle", "--release") -WorkingDirectory $mobileDirectory
+    # Flutter 3.47 invokes cmdline-tools/apkanalyzer after Gradle succeeds.
+    # Recent Android SDK layouts no longer provide the legacy tools directory
+    # apkanalyzer expects, so build the equivalent Gradle bundle task and
+    # verify the required extracted symbol entries directly in the ZIP.
+    $androidDirectory = Join-Path $mobileDirectory "android"
+    Invoke-FlutterChecked -FilePath (Join-Path $androidDirectory "gradlew.bat") -Arguments @("bundleRelease") -WorkingDirectory $androidDirectory
+    $bundlePath = Join-Path $mobileDirectory "build\app\outputs\bundle\release\app-release.aab"
+    Assert-AndroidAppBundleDebugSymbols -BundlePath $bundlePath
 
     $outputDirectory = Join-Path $projectRoot "build\output"
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null

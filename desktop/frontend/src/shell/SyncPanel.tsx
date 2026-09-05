@@ -274,7 +274,12 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
             <label>{t("sync.server_fingerprint_label")}<input value={fingerprint} onChange={(event) => setFingerprint(event.target.value)} /></label>
             <p>{t("sync.server_fingerprint_warning")}</p>
           </> : null}
-          <button type="button" disabled={busy || (!qr && !url)} onClick={() => void connect()}>
+          <button
+            className={connection?.enabled ? "sync-connection-primary-action" : undefined}
+            type="button"
+            disabled={busy || (!qr && !url)}
+            onClick={() => void connect()}
+          >
             {connection?.enabled ? t("sync.change_server_button") : t("sync.connect_button")}
           </button>
           {connection?.enabled ? <div className="sync-connection-actions">

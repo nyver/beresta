@@ -1451,16 +1451,29 @@ li:hover > .tree-row-delete,
   overflow-wrap: anywhere;
 }
 
+.sync-connection-primary-action {
+  width: 100%;
+}
+
 .sync-connection-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
-  align-items: center;
+}
+
+.sync-connection-actions button {
+  width: 100%;
 }
 
 .sync-connection-actions p {
-  flex-basis: 100%;
+  grid-column: 1 / -1;
   margin: 0;
+}
+
+@media (max-width: 32rem) {
+  .sync-connection-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* The notebook-row trigger occupies the sidebar's final inline slot. Leave

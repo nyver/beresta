@@ -40,7 +40,10 @@ debug-signed artifact if any of these are unset.
 The AAB task also verifies that Gradle extracted debug symbols for Flutter and
 application native libraries. This check reads the signed AAB directly, so it
 remains reliable with current Android command-line tools whose `apkanalyzer`
-no longer supports Flutter's legacy tool-directory lookup.
+no longer supports Flutter's legacy tool-directory lookup. Symbol extraction
+itself is enabled by `android.buildTypes.release.ndk.debugSymbolLevel = "FULL"`
+in `mobile/android/app/build.gradle.kts`; AGP defaults this to `NONE`, which
+silently drops native debug info instead of embedding it in the bundle.
 
 `build-mobile-release.bat`, at the repository root, wraps
 `build.cmd mobile-package-android` for local release builds. It is excluded

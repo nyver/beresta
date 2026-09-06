@@ -80,6 +80,17 @@ android {
             }
             isMinifyEnabled = false
             isShrinkResources = false
+            // Embeds native debug symbols (BUNDLE-METADATA/.../*.so.dbg) in the
+            // release App Bundle so Play Console can symbolicate native
+            // crashes, and so build.ps1's Assert-AndroidAppBundleDebugSymbols
+            // check has something to find. Without this, AGP defaults to
+            // ndk.debugSymbolLevel = NONE and strips native debug info with
+            // no extracted copy anywhere. This side-channel copy never ships
+            // to end users: the app's own libraries are still stripped by
+            // the existing stripReleaseDebugSymbols task.
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
         }
     }
 }

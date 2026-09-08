@@ -63,7 +63,9 @@ The repository includes:
 - `build/server/install-scheduled-task.ps1` for an optional Windows
   LocalSystem startup task, for hosts that should start the server
   automatically without a signed-in user;
-- `build/server/Dockerfile` for an optional scratch container.
+- `build/server/Dockerfile` for an optional scratch container;
+- `build/server/docker-compose.yml` for the same container under Compose
+  lifecycle management, for example on a VPS.
 
 Review paths, firewall policy, and the service account before installation.
 Direct binary execution remains the recommended deployment. Build all static
@@ -73,6 +75,12 @@ targets with `build.cmd server-cross-build`; run the host smoke with
 ```text
 docker build -f build/server/Dockerfile -t beresta-server .
 docker run -d --rm -p 8446:8446 -v beresta-data:/data beresta-server
+```
+
+Or with Compose, from the repository root:
+
+```text
+docker compose -f build/server/docker-compose.yml up -d --build
 ```
 
 The container configuration binds inside its network namespace; preserve the

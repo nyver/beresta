@@ -1,0 +1,33 @@
+# Optional Compose deployment for a VPS. Builds the same scratch image as
+# `docker build -f build/server/Dockerfile .` (see docs/server-operations.md)
+# and publishes the container's fixed 8446 listener. Direct binary execution
+# remains the recommended deployment; this is for hosts that prefer Compose
+# lifecycle management.
+#
+# Usage (run from the repository root):
+#   docker compose -f build/server/docker-compose.yml up -d --build
+#
+# To use custom TLS certificates or other settings instead of the baked-in
+# self-signed container-config.yaml, bind-mount a replacement config over
+# /etc/beresta/config.yaml.
+
+services:
+  beresta-server:
+    build:
+      context: ../..
+      dockerfile: build/server/Dockerfile
+    image: beresta-server:latest
+    container_name: beresta-server
+    restart: unless-stopped
+    ports:
+      - "8446:8446"
+    volumes:
+      - beresta-data:/data
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  beresta-data:

@@ -12,6 +12,7 @@ build/output
 build/tools
 build/.go
 build/.go-cache
+build/.go-tmp
 build/.flutter
 build/.gradle
 build/.pub-cache

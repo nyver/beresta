@@ -432,7 +432,8 @@ go run ./cmd/beresta-server --data ./data --init-only
 Remove `--init-only` to listen on the configured HTTPS address. See the
 [server API](docs/server-api.md) and [operations guide](docs/server-operations.md)
 for enrollment, administration, backup/restore, service, container, and
-Raspberry Pi commands.
+Raspberry Pi commands, including a Docker Compose deployment for VPS hosts on
+port 8446.
 
 Publish a signed desktop update manifest, or a detached signature over any
 other release file (see [desktop update operations](docs/desktop-updates.md)):

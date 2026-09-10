@@ -193,6 +193,9 @@ function Invoke-FormatCheck {
 
 function Invoke-Lint {
     Invoke-LocaleCheck
+    # desktop/main.go embeds frontend/dist (`//go:embed all:frontend/dist`),
+    # so go vet/build fail on a fresh checkout without a built frontend.
+    Invoke-Checked -FilePath (Resolve-Executable -Name "npm.cmd") -Arguments @("run", "build") -WorkingDirectory (Join-Path $projectRoot "desktop\frontend")
     Invoke-Checked -FilePath (Get-GoExecutable) -Arguments @("vet", "./...")
     Invoke-MobileCompileCheck
     Invoke-Checked -FilePath (Resolve-Executable -Name "npm.cmd") -Arguments @("run", "typecheck") -WorkingDirectory (Join-Path $projectRoot "desktop\frontend")

@@ -1,0 +1,9 @@
+# Force LF for source files gofmt/dart format enforce, regardless of the
+# checkout platform's core.autocrlf. Without this, a Windows checkout
+# (including windows-2025 GitHub Actions runners) converts these files to
+# CRLF, which gofmt/dart format then flag as unformatted even though the
+# committed content is already correctly formatted.
+* text=auto
+
+*.go text eol=lf
+*.dart text eol=lf

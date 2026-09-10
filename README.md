@@ -2,6 +2,8 @@
 
 Beresta is an offline-first encrypted notes application for Windows and Android with an optional single-binary home synchronization server. Clients are complete local applications: the server is transport, not the authority for user data.
 
+![Beresta Windows desktop client](overview.png)
+
 ## Project Status
 
 Beresta has completed the Windows desktop, home-server, HTTP synchronization,

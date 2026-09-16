@@ -254,5 +254,60 @@
   "errors.already_exists": "Это устройство уже хранит другой ключ для этого пространства.",
   "errors.workspace_not_held": "Это пространство недоступно для данного аккаунта.",
   "errors.share_not_found": "Общий доступ к этому пространству не найден или уже отозван.",
-  "errors.internal": "Что-то пошло не так. Попробуйте ещё раз."
+  "errors.internal": "Что-то пошло не так. Попробуйте ещё раз.",
+
+  "savestate.saving": "Сохранение…",
+  "savestate.saved": "Сохранено",
+  "savestate.could_not_save": "Не удалось сохранить",
+
+  "sync.status_local_only": "Только локально",
+  "sync.status_local_only_description": "Аккаунт работает только локально. Изменения безопасно остаются на этом компьютере.",
+  "sync.status_pending": "Ожидает синхронизации",
+  "sync.status_pending_description": "Локальные изменения сохранены и ждут отправки на настроенный сервер.",
+  "sync.status_retrying": "Повтор",
+  "sync.status_retrying_description": "Предыдущая попытка не удалась. Beresta повторит её автоматически.",
+  "sync.status_action_required": "Требуется действие",
+  "sync.status_action_required_description": "Синхронизации нужно ваше внимание. Локальное редактирование продолжает работать.",
+
+  "errors.no_network": "Нет подключения к сети",
+  "errors.server_unavailable": "Сервер недоступен",
+  "errors.trust_or_configuration": "Требуется проверить подключение",
+  "errors.device_revoked": "Доступ этого устройства отозван",
+  "errors.unsafe_incoming_change": "Небезопасное входящее изменение",
+
+  "recovery.retry_now": "Повторить сейчас",
+  "recovery.review_connection": "Проверить подключение",
+  "recovery.reconnect_device": "Переподключить устройство",
+  "recovery.review_unsafe_change": "Просмотреть изменение",
+
+  "settings.group_general": "Общие",
+  "settings.group_security": "Безопасность",
+  "settings.group_synchronization": "Синхронизация",
+  "settings.group_data": "Данные",
+  "settings.group_advanced": "Дополнительно",
+  "settings.group_about": "О программе",
+
+  "emptystate.notes_title": "Пока нет заметок",
+  "emptystate.notes_description": "Заметки сохраняются на этом устройстве сразу же.",
+  "emptystate.notes_action": "Создать заметку",
+  "emptystate.retry_action": "Повторить",
+
+  "a11y.lock_icon": "Заблокировать",
+  "a11y.settings_icon": "Настройки",
+  "a11y.search_icon": "Поиск",
+  "a11y.new_note_icon": "Новая заметка",
+  "a11y.close_icon": "Закрыть",
+  "a11y.more_actions_icon": "Другие действия",
+  "a11y.sync_status_icon": "Состояние синхронизации",
+
+  "backups.health_healthy": "В порядке",
+  "backups.health_warning": "Требует внимания",
+  "backups.health_corrupt": "Повреждена",
+  "backups.health_unknown": "Ещё не проверена",
+  "backups.last_verified_label": "Последняя проверка",
+  "backups.location_label": "Расположение",
+
+  "import.summary_notes_imported": "Импортировано заметок",
+  "import.summary_formatting_simplified": "Упрощено форматирование",
+  "import.summary_files_skipped": "Пропущено файлов"
 }

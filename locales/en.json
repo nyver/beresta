@@ -254,5 +254,60 @@
   "errors.already_exists": "This device already holds a different key for this workspace.",
   "errors.workspace_not_held": "That workspace is not one this account holds.",
   "errors.share_not_found": "This workspace share was not found, or has already been revoked.",
-  "errors.internal": "Something went wrong. Please try again."
+  "errors.internal": "Something went wrong. Please try again.",
+
+  "savestate.saving": "Saving…",
+  "savestate.saved": "Saved",
+  "savestate.could_not_save": "Could not save",
+
+  "sync.status_local_only": "Local only",
+  "sync.status_local_only_description": "This account is local-only. Changes stay safely on this computer.",
+  "sync.status_pending": "Waiting to sync",
+  "sync.status_pending_description": "Local changes are saved and queued to send to your configured server.",
+  "sync.status_retrying": "Retrying",
+  "sync.status_retrying_description": "A previous attempt failed. Beresta will try again automatically.",
+  "sync.status_action_required": "Action needed",
+  "sync.status_action_required_description": "Synchronization needs your attention. Local editing remains available.",
+
+  "errors.no_network": "No network connection",
+  "errors.server_unavailable": "Server unavailable",
+  "errors.trust_or_configuration": "Connection needs attention",
+  "errors.device_revoked": "This device's access was revoked",
+  "errors.unsafe_incoming_change": "Unsafe incoming change",
+
+  "recovery.retry_now": "Retry now",
+  "recovery.review_connection": "Review connection",
+  "recovery.reconnect_device": "Reconnect device",
+  "recovery.review_unsafe_change": "Review change",
+
+  "settings.group_general": "General",
+  "settings.group_security": "Security",
+  "settings.group_synchronization": "Synchronization",
+  "settings.group_data": "Data",
+  "settings.group_advanced": "Advanced",
+  "settings.group_about": "About",
+
+  "emptystate.notes_title": "No notes yet",
+  "emptystate.notes_description": "Notes are stored immediately on this device.",
+  "emptystate.notes_action": "Create note",
+  "emptystate.retry_action": "Try again",
+
+  "a11y.lock_icon": "Lock",
+  "a11y.settings_icon": "Settings",
+  "a11y.search_icon": "Search",
+  "a11y.new_note_icon": "New note",
+  "a11y.close_icon": "Close",
+  "a11y.more_actions_icon": "More actions",
+  "a11y.sync_status_icon": "Synchronization status",
+
+  "backups.health_healthy": "Healthy",
+  "backups.health_warning": "Needs attention",
+  "backups.health_corrupt": "Corrupt",
+  "backups.health_unknown": "Not yet checked",
+  "backups.last_verified_label": "Last verified",
+  "backups.location_label": "Location",
+
+  "import.summary_notes_imported": "Notes imported",
+  "import.summary_formatting_simplified": "Formatting simplified",
+  "import.summary_files_skipped": "Files skipped"
 }

@@ -119,42 +119,132 @@ void main() {
     expect(find.text("Offline note"), findsOneWidget);
   });
 
-  testWidgets("new and untitled notes use the desktop title", (tester) async {
-    final gateway = FakeGateway(unlocked: true)
-      ..listedNotes = [
-        {...FakeGateway.noteFixture, "title": ""},
-      ];
-    await tester.pumpWidget(BerestaApp(gateway: gateway));
-    await tester.pumpAndSettle();
+  testWidgets(
+    "an existing empty-titled note displays as Untitled in the list",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)
+        ..listedNotes = [
+          {...FakeGateway.noteFixture, "title": ""},
+        ];
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
 
-    expect(find.text("Untitled"), findsOneWidget);
+      expect(find.text("Untitled"), findsOneWidget);
+    },
+  );
 
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pumpAndSettle();
-    expect(gateway.createdNoteTitle, "Untitled");
-  });
+  testWidgets(
+    "a newly created note's title is never stored or synced as the literal placeholder",
+    (tester) async {
+      // Placeholder titles SHALL not become stored titles unless edited
+      // (specs/notes-management): unlike desktop's own "" convention this
+      // guards the same claim on mobile, where createNote used to persist
+      // the literal localized "Untitled" immediately - a real note (and
+      // sync traffic) even for a draft nobody has touched yet.
+      final gateway = FakeGateway(unlocked: true);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
 
-  testWidgets("focusing a new note title clears its default placeholder", (
-    tester,
-  ) async {
-    final gateway = FakeGateway(unlocked: true)..note["title"] = "Untitled";
-    await tester.pumpWidget(BerestaApp(gateway: gateway));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pumpAndSettle();
+      expect(gateway.createdNoteTitle, isEmpty);
+    },
+  );
 
-    final titleField = find.descendant(
-      of: find.byType(AppBar),
-      matching: find.byType(TextField),
-    );
-    expect(tester.widget<TextField>(titleField).controller!.text, "Untitled");
+  testWidgets(
+    "a newly created note's title field starts empty and focused, with no modal",
+    (tester) async {
+      // FakeGateway.createNote (unlike the real gateway) always returns its
+      // one static note fixture rather than a fresh note honoring the
+      // title it was called with, so this mirrors what a real createNote(
+      // "") call would hand back: an empty stored title.
+      final gateway = FakeGateway(unlocked: true)..note["title"] = "";
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
 
-    await tester.tap(titleField);
-    await tester.pump();
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
 
-    expect(tester.widget<TextField>(titleField).controller!.text, isEmpty);
-  });
+      final titleField = find.descendant(
+        of: find.byType(AppBar),
+        matching: find.byType(TextField),
+      );
+      final widget = tester.widget<TextField>(titleField);
+      expect(widget.controller!.text, isEmpty);
+      expect(widget.focusNode!.hasFocus, isTrue);
+    },
+  );
+
+  testWidgets(
+    "removes an untouched empty draft when the user backs out without editing it",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)..note["title"] = "";
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      // A real gateway.deleteNote(widget.noteId, true) call, matching the
+      // manual-delete path's own assertion style (see "a note can be
+      // deleted from the editor" above).
+      expect(gateway.note["deleted"], true);
+    },
+  );
+
+  testWidgets(
+    "keeps a newly created note the user has started typing in when backing out",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)..note["title"] = "";
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+
+      final controller =
+          tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
+      controller.replaceText(
+        0,
+        0,
+        "An actual idea",
+        const TextSelection.collapsed(offset: 15),
+      );
+      await tester.pump();
+
+      await tester.pageBack();
+      // The pending edit still needs to flush (PopScope blocks the pop
+      // while dirty) before the route actually closes.
+      await tester.pumpAndSettle();
+
+      expect(gateway.note["deleted"], isNot(true));
+      expect(gateway.savedBody, "An actual idea");
+    },
+  );
+
+  testWidgets(
+    "does not delete a pre-existing empty note when merely opening and leaving it",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)..note["title"] = "";
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      // Opened by tapping an existing list entry, not the "+" create
+      // action - autoFocusTitle (and so untouched-draft cleanup) must
+      // never apply here, however empty this note already was.
+      await tester.tap(find.text("Untitled"));
+      await tester.pumpAndSettle();
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      expect(gateway.note["deleted"], isNot(true));
+    },
+  );
 
   testWidgets(
     "typing a plain query matches titles by partial, case-insensitive substring without hitting the backend",

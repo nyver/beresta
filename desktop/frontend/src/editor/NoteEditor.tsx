@@ -31,6 +31,11 @@ export interface NoteEditorProps {
    * status line (owned by NoteEditorPane, not this component) can render
    * it alongside the workspace's synchronization status. */
   onSaveStateChange?: (state: NoteSaveState) => void;
+  /** Called once, the first time the body is edited this note session -
+   * see NoteEditorPane's onDraftTouched, which an untouched fresh draft
+   * needs to distinguish from a note the user has actually started
+   * writing in. */
+  onBodyTouched?: () => void;
 }
 
 // The Yjs root name for a note's body, matching core/account's
@@ -64,11 +69,11 @@ const TOOLBAR_FORMATS = [
  * extra wiring).
  */
 export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function NoteEditor(
-  { noteId, onAttachFiles, onSaveStateChange },
+  { noteId, onAttachFiles, onSaveStateChange, onBodyTouched },
   ref,
 ) {
   const { t, errorMessage } = useI18n();
-  const { ydoc, ready, error, flush, saveState } = useNoteDocument(noteId);
+  const { ydoc, ready, error, flush, saveState, everEdited } = useNoteDocument(noteId);
   const containerRef = useRef<HTMLDivElement>(null);
   const onAttachFilesRef = useRef(onAttachFiles);
   onAttachFilesRef.current = onAttachFiles;
@@ -80,6 +85,12 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function
   useEffect(() => {
     onSaveStateChangeRef.current?.({ state: saveState });
   }, [saveState]);
+
+  const onBodyTouchedRef = useRef(onBodyTouched);
+  onBodyTouchedRef.current = onBodyTouched;
+  useEffect(() => {
+    if (everEdited) onBodyTouchedRef.current?.();
+  }, [everEdited]);
 
   useEffect(() => {
     if (!ready || !ydoc || !containerRef.current) return;

@@ -35,6 +35,19 @@ export interface NoteEditorPaneProps {
   onToggleTag: (noteId: string, tagId: string, present: boolean) => Promise<void>;
   /** Creates a new workspace tag and assigns it to the open note. */
   onCreateTag: (noteId: string, name: string) => Promise<void>;
+  /** The id of a note that was just created and should receive focus once
+   * (see onAutoFocusConsumed), or "" for any note opened by ordinary
+   * selection. */
+  autoFocusNoteId?: string;
+  /** Called immediately after autoFocusNoteId has been acted on, so the
+   * caller can clear it back to "" - autofocus must fire only once per
+   * created note, not again if the user navigates away and back to it. */
+  onAutoFocusConsumed?: () => void;
+  /** Called the first time the open note's title, body, tags, or
+   * attachments are edited - only meaningful while the open note is the
+   * caller's tracked untouched draft (see Shell's draftNoteIdRef); a
+   * no-op call for any other note is harmless. */
+  onDraftTouched?: () => void;
   /** Current workspace-wide synchronization status (see Shell's own
    * "sync:status" subscription), rendered alongside the open note's local
    * save state in the footer status line below. Null before the first
@@ -66,6 +79,9 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
       onDeleted,
       onToggleTag,
       onCreateTag,
+      autoFocusNoteId = "",
+      onAutoFocusConsumed,
+      onDraftTouched,
       syncStatus = null,
       syncedAt = null,
       onOpenSync = () => {},
@@ -75,6 +91,7 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     const { t, errorMessage } = useI18n();
     const editorRef = useRef<NoteEditorHandle>(null);
     const attachmentPanelRef = useRef<AttachmentPanelHandle>(null);
+    const titleInputRef = useRef<HTMLInputElement>(null);
     const [title, setTitle] = useState(note?.title ?? "");
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -108,6 +125,18 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
       setHistoryOpen(false);
       setAttachmentsOpen(false);
     }, [note?.id, note?.title]);
+
+    // Instant creation and durable automatic save (specs/notes-management):
+    // a newly created note SHALL be focused without a modal. Only fires for
+    // the specific note Shell just created (autoFocusNoteId), never when
+    // the user merely selects an existing note from the list.
+    useEffect(() => {
+      if (note?.id && note.id === autoFocusNoteId) {
+        titleInputRef.current?.focus();
+        onAutoFocusConsumed?.();
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [note?.id, autoFocusNoteId]);
 
     async function handleDelete() {
       if (!note) return;
@@ -154,9 +183,13 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
       <div className="note-detail">
         <div className="note-detail-header">
           <input
+            ref={titleInputRef}
             className="note-title-input"
             value={title}
-            onChange={(event) => setTitle(event.target.value)}
+            onChange={(event) => {
+              setTitle(event.target.value);
+              onDraftTouched?.();
+            }}
             onBlur={() => void commitTitleIfChanged()}
             aria-label={t("shell.detail_title_label")}
             placeholder={t("shell.untitled_note")}
@@ -194,15 +227,25 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
         <NoteTagsEditor
           tags={tags}
           assignedTagIds={assignedTagIds}
-          onToggle={(tagId, present) => onToggleTag(note.id, tagId, present)}
-          onCreateAndAssign={(name) => onCreateTag(note.id, name)}
+          onToggle={(tagId, present) => {
+            onDraftTouched?.();
+            return onToggleTag(note.id, tagId, present);
+          }}
+          onCreateAndAssign={(name) => {
+            onDraftTouched?.();
+            return onCreateTag(note.id, name);
+          }}
         />
         <NoteEditor
           key={`${note.id}-${restoreVersion}`}
           ref={editorRef}
           noteId={note.id}
-          onAttachFiles={(files) => attachmentPanelRef.current?.attachFiles(files)}
+          onAttachFiles={(files) => {
+            onDraftTouched?.();
+            attachmentPanelRef.current?.attachFiles(files);
+          }}
           onSaveStateChange={handleSaveStateChange}
+          onBodyTouched={onDraftTouched}
         />
         <div className="note-detail-footer">
           <AttachmentPanel

@@ -22,6 +22,13 @@ export interface NoteDocumentState {
    * pending or at risk yet. A commit completion updates this only when
    * CommitTracker confirms it is not stale - see commitTracker.ts. */
   saveState: LocalSaveState | null;
+  /** True from the first local edit this note session (title or body
+   * alike drive the tracker's generation - see the doc.on("update")
+   * listener below), even before the debounce has committed it. Reset to
+   * false whenever noteId changes. Used to tell an untouched fresh draft
+   * apart from a note the user has actually started editing - see
+   * NoteEditorPane's onDraftTouched. */
+  everEdited: boolean;
   /**
    * flush commits any pending body edits (merged into one update) right
    * now, bypassing the debounce, optionally renaming the note in the same
@@ -45,6 +52,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [saveState, setSaveState] = useState<LocalSaveState | null>(null);
+  const [everEdited, setEverEdited] = useState(false);
 
   const pendingRef = useRef<Uint8Array[]>([]);
   const timerRef = useRef<number | undefined>(undefined);
@@ -131,6 +139,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
     setReady(false);
     setError(null);
     setSaveState(null);
+    setEverEdited(false);
     pendingRef.current = [];
     trackerRef.current = new CommitTracker();
     window.clearTimeout(timerRef.current);
@@ -150,6 +159,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
         doc.on("update", (update: Uint8Array) => {
           pendingRef.current.push(update);
           trackerRef.current.dirty();
+          setEverEdited(true);
           window.clearTimeout(timerRef.current);
           timerRef.current = window.setTimeout(() => {
             void flush();
@@ -174,5 +184,5 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteId]);
 
-  return { ydoc, ready, error, flush, saveState };
+  return { ydoc, ready, error, flush, saveState, everEdited };
 }

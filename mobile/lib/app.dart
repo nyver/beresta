@@ -976,14 +976,20 @@ class _NotesShellState extends State<NotesShell> {
     bool closeDrawer = false,
   }) async {
     try {
+      // Placeholder titles SHALL not become stored titles unless edited
+      // (specs/notes-management): unlike a note the user has actually
+      // named, an untouched draft's title is never persisted or synced as
+      // the literal localized "Untitled" - the note list and editor both
+      // already render an empty title as that string for display only
+      // (see the "untitled" lookups elsewhere in this file).
       final created = await widget.gateway.createNote(
-        widget.strings("untitled"),
+        "",
         notebookId: notebookId,
       );
       requestCurrentWorkspaceSync(widget.gateway);
       if (!mounted) return;
       if (closeDrawer) Navigator.pop(context);
-      await openEditor(created["id"] as String, clearDefaultTitleOnFocus: true);
+      await openEditor(created["id"] as String, autoFocusTitle: true);
     } catch (failure) {
       if (mounted) {
         setState(() => error = describeFailure(widget.strings, failure));
@@ -991,10 +997,7 @@ class _NotesShellState extends State<NotesShell> {
     }
   }
 
-  Future<void> openEditor(
-    String noteId, {
-    bool clearDefaultTitleOnFocus = false,
-  }) async {
+  Future<void> openEditor(String noteId, {bool autoFocusTitle = false}) async {
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -1003,7 +1006,7 @@ class _NotesShellState extends State<NotesShell> {
               gateway: widget.gateway,
               strings: widget.strings,
               noteId: noteId,
-              clearDefaultTitleOnFocus: clearDefaultTitleOnFocus,
+              autoFocusTitle: autoFocusTitle,
             ),
       ),
     );
@@ -2136,17 +2139,20 @@ class EditorScreen extends StatefulWidget {
     required this.gateway,
     required this.strings,
     required this.noteId,
-    this.clearDefaultTitleOnFocus = false,
+    this.autoFocusTitle = false,
     super.key,
   });
 
   final CoreGateway gateway;
   final Strings strings;
   final String noteId;
-  // True only for a note created from this mobile session. Existing notes
-  // titled "Untitled" deliberately remain unchanged: that can be a title
-  // the user chose themselves.
-  final bool clearDefaultTitleOnFocus;
+  // True only for a note created from this mobile session: it should
+  // receive focus immediately (specs/notes-management's "Creating a note
+  // SHALL expose an editable note immediately ... and SHALL focus its
+  // title or body"), and is still an untouched empty draft eligible for
+  // silent removal if the user leaves without editing it - see
+  // _EditorScreenState's PopScope handler and _touched.
+  final bool autoFocusTitle;
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -2172,8 +2178,15 @@ class _EditorScreenState extends State<EditorScreen> {
   bool capturingPhoto = false;
   List<Map<String, dynamic>> allTags = [];
   List<String> noteTagIds = [];
-  bool titleLoaded = false;
-  bool clearDefaultTitleOnFocus = false;
+  // True once the title, body, a tag, or an attachment has actually been
+  // edited this session - only meaningful while widget.autoFocusTitle
+  // marks this as a freshly created draft (see the PopScope handler
+  // below): "Creating a note ... SHALL expose an editable note
+  // immediately" but "Placeholder titles SHALL not become stored titles
+  // unless edited", and an abandoned untouched draft "may [be removed]
+  // without creating a visible note or synchronization error"
+  // (specs/notes-management).
+  bool _touched = false;
 
   // How long an edit waits, with no further edits, before it is committed
   // to the Go core - matching desktop/frontend's useNoteDocument. Chosen
@@ -2200,13 +2213,18 @@ class _EditorScreenState extends State<EditorScreen> {
   void initState() {
     super.initState();
     ActiveEditorFlush.register(commit);
-    clearDefaultTitleOnFocus = widget.clearDefaultTitleOnFocus;
-    titleFocusNode.addListener(clearDefaultTitle);
+    // Instant creation and durable automatic save (specs/notes-management):
+    // "Creating a note SHALL expose an editable note immediately without a
+    // modal and SHALL focus its title or body." Requesting focus here,
+    // before the first frame even builds, is safe: FocusNode queues the
+    // request until the Focus widget it is attached to (the title
+    // TextField in build(), always present regardless of `loading`) is
+    // actually in the tree.
+    if (widget.autoFocusTitle) titleFocusNode.requestFocus();
     widget.gateway.getNote(widget.noteId).then((value) {
       if (!mounted) return;
       final note = value["note"] as Map<String, dynamic>;
       title.text = note["title"] as String;
-      titleLoaded = true;
       final quillBody = QuillController(
         document: Document.fromDelta(markdownToDelta(value["body"] as String)),
         selection: const TextSelection.collapsed(offset: 0),
@@ -2217,7 +2235,6 @@ class _EditorScreenState extends State<EditorScreen> {
         loading = false;
       });
       title.addListener(markDirty);
-      clearDefaultTitle();
     });
     refreshAttachments();
     refreshTags();
@@ -2225,7 +2242,14 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void markDirty() {
     if (!mounted) return;
-    dirty = true;
+    // dirty must go through setState: PopScope's build() reads it via
+    // canPop: !dirty, so a plain field mutation here would leave that
+    // stale (still allowing an unflushed pop) until some unrelated
+    // rebuild happened to occur first - a real regression found by
+    // testing a pop attempted immediately after typing, before the
+    // 800ms debounce's own eventual setState.
+    if (!dirty) setState(() => dirty = true);
+    _touched = true;
     _tracker.dirty();
     _commitTimer?.cancel();
     _commitTimer = Timer(_commitDebounce, () => unawaited(commit()));
@@ -2288,18 +2312,6 @@ class _EditorScreenState extends State<EditorScreen> {
     LocalSaveState.saved || null => widget.strings("save_state_saved"),
   };
 
-  void clearDefaultTitle() {
-    if (!clearDefaultTitleOnFocus || !titleLoaded || !titleFocusNode.hasFocus) {
-      return;
-    }
-    // A newly created mobile note is initialized with the localized default
-    // title for compatibility with the existing core boundary. Treat that
-    // value as a placeholder in the title editor, without erasing a custom
-    // title if the backend returned one instead.
-    clearDefaultTitleOnFocus = false;
-    if (title.text == widget.strings("untitled")) title.clear();
-  }
-
   Future<void> refreshAttachments() async {
     try {
       final result = await widget.gateway.listNoteAttachments(widget.noteId);
@@ -2327,6 +2339,7 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> toggleTag(String tagId, bool present) async {
+    _touched = true;
     try {
       await widget.gateway.setNoteTag(widget.noteId, tagId, present);
       requestCurrentWorkspaceSync(widget.gateway);
@@ -2442,6 +2455,7 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> capturePhoto() async {
+    _touched = true;
     setState(() => capturingPhoto = true);
     try {
       await widget.gateway.capturePhoto(widget.noteId);
@@ -2514,6 +2528,20 @@ class _EditorScreenState extends State<EditorScreen> {
         if (!didPop && dirty) {
           await commit();
           if (context.mounted) Navigator.pop(context);
+          return;
+        }
+        if (didPop && widget.autoFocusTitle && !_touched) {
+          // Empty draft is abandoned (specs/notes-management): the client
+          // "may remove the empty draft without creating a visible note
+          // or synchronization error" - a best-effort local cleanup, not
+          // surfaced if it fails, matching every other flush/commit
+          // barrier's "never block or alarm the user" behavior.
+          unawaited(
+            widget.gateway
+                .deleteNote(widget.noteId, true)
+                .then((_) => requestCurrentWorkspaceSync(widget.gateway))
+                .catchError((_) {}),
+          );
         }
       },
       child: Scaffold(

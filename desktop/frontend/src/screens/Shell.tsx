@@ -89,6 +89,18 @@ export function Shell({ account, onLocked }: ShellProps) {
 
   const [selection, setSelection] = useState<Selection>({ kind: "all" });
   const [selectedNoteId, setSelectedNoteId] = useState("");
+  // The id of a note created this session that the user has not yet
+  // edited (title, body, tags, or attachments) - eligible for silent
+  // removal if abandoned by navigating away without touching it (see the
+  // effect below and handleCreateNote). "" means no such draft exists.
+  // A ref, not state: it must never itself trigger a render, and the
+  // navigate-away effect needs its value at the instant selection
+  // changes, not a stale render-time snapshot.
+  const draftNoteIdRef = useRef("");
+  const [autoFocusNoteId, setAutoFocusNoteId] = useState("");
+  const markDraftTouched = useCallback(() => {
+    draftNoteIdRef.current = "";
+  }, []);
   const [tagNotes, setTagNotes] = useState<main.NoteDTO[]>([]);
   const [tagLoading, setTagLoading] = useState(false);
   // null means no search is active, so the sidebar's notebook/tag/all
@@ -350,6 +362,8 @@ export function Shell({ account, onLocked }: ShellProps) {
         preserveCreatedNoteSelectionRef.current = true;
         setSelection(targetSelection);
       }
+      draftNoteIdRef.current = created.id;
+      setAutoFocusNoteId(created.id);
       setSelectedNoteId(created.id);
     } catch (thrown: unknown) {
       setNoteCreateError(errorMessage(unwrapError(thrown)));
@@ -357,6 +371,30 @@ export function Shell({ account, onLocked }: ShellProps) {
       setCreatingNote(false);
     }
   }
+
+  // Instant creation and durable automatic save (specs/notes-management):
+  // "the client may remove [a newly created note with no edited title,
+  // body, attachments, or tags] without creating a visible note or
+  // synchronization error" once the user leaves it. Runs whenever the
+  // selection moves away from the tracked draft; a best-effort local
+  // cleanup, never surfaced as an error if it fails (the note simply
+  // remains, exactly like today without this behavior).
+  useEffect(() => {
+    const abandoned = draftNoteIdRef.current;
+    if (abandoned && abandoned !== selectedNoteId) {
+      draftNoteIdRef.current = "";
+      void deleteNote(abandoned)
+        .then(() => {
+          const dropStray = (note: main.NoteDTO) => note.id !== abandoned;
+          setNotes((current) => current.filter(dropStray));
+          setTagNotes((current) => current.filter(dropStray));
+        })
+        .catch(() => {
+          // Best-effort: an untouched draft that fails to clean up just
+          // stays visible, same as before this behavior existed.
+        });
+    }
+  }, [selectedNoteId]);
 
   async function handleDeleteNote(noteId: string) {
     await deleteNote(noteId);
@@ -749,6 +787,9 @@ export function Shell({ account, onLocked }: ShellProps) {
               onDeleted={handleDeleteNote}
               onToggleTag={handleToggleNoteTag}
               onCreateTag={handleCreateAndAssignTag}
+              autoFocusNoteId={autoFocusNoteId}
+              onAutoFocusConsumed={() => setAutoFocusNoteId("")}
+              onDraftTouched={markDraftTouched}
               syncStatus={syncStatusValue}
               syncedAt={syncedAt}
               onOpenSync={() => setSyncModalOpen(true)}

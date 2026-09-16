@@ -393,6 +393,87 @@ describe("Shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("focuses the newly created note's title field without a modal", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(fakeNote({ id: "new-note", title: "" }));
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.keyboard("{Control>}n{/Control}");
+
+    const titleInput = await screen.findByLabelText(
+      "shell.detail_title_label",
+      {},
+      { timeout: 5000 },
+    );
+    await waitFor(() => expect(titleInput).toHaveFocus());
+  });
+
+  it("removes an untouched empty draft when the user opens a different note instead", async () => {
+    const existing = fakeNote({ id: "existing-note", title: "Existing note" });
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([existing]);
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(fakeNote({ id: "new-note", title: "" }));
+    appMock.DeleteNote.mockResolvedValue(undefined);
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.keyboard("{Control>}n{/Control}");
+    await screen.findByLabelText("shell.detail_title_label", {}, { timeout: 5000 });
+
+    await user.click(await screen.findByText("Existing note"));
+
+    await waitFor(() => expect(appMock.DeleteNote).toHaveBeenCalledWith("new-note"));
+  });
+
+  it("keeps a newly created note the user has started editing when navigating away", async () => {
+    const existing = fakeNote({ id: "existing-note", title: "Existing note" });
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([existing]);
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(fakeNote({ id: "new-note", title: "" }));
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.keyboard("{Control>}n{/Control}");
+    const titleInput = await screen.findByLabelText(
+      "shell.detail_title_label",
+      {},
+      { timeout: 5000 },
+    );
+    await user.type(titleInput, "My idea");
+
+    await user.click(await screen.findByText("Existing note"));
+    await waitFor(() =>
+      expect(screen.getByLabelText("shell.detail_title_label")).toHaveValue("Existing note"),
+    );
+
+    expect(appMock.DeleteNote).not.toHaveBeenCalledWith("new-note");
+  });
+
+  it("does not delete a pre-existing empty-titled note when merely visiting and leaving it", async () => {
+    const untitledExisting = fakeNote({ id: "old-empty", title: "" });
+    const other = fakeNote({ id: "other-note", title: "Other note" });
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([untitledExisting, other]);
+    mockEmptyNoteDocument();
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText("shell.untitled_note"));
+    await screen.findByLabelText("shell.detail_title_label");
+    await user.click(await screen.findByText("Other note"));
+
+    expect(appMock.DeleteNote).not.toHaveBeenCalled();
+  });
+
   it("switches to another notebook and opens the note created from its menu", async () => {
     const currentNotebook = fakeNotebook({ name: "Current" });
     const destinationNotebook = fakeNotebook({ name: "Destination" });

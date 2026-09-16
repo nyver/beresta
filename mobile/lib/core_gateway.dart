@@ -11,7 +11,27 @@ abstract interface class CoreGateway {
   Future<List<Map<String, dynamic>>> listNotes();
   Future<Map<String, dynamic>> createNote(String title, {String notebookId});
   Future<Map<String, dynamic>> getNote(String id);
-  Future<void> saveNote(String id, String title, String body);
+
+  /// Commits a note body update identified by [requestId], matching
+  /// core/mobileapi.Service's begin/Cancel request-tracking contract. A
+  /// caller that starts a newer commit before this one resolves should
+  /// cancel this one first via [cancelRequest]: SaveNote replaces the
+  /// note's entire body from a fresh read of its current state, so two
+  /// overlapping calls racing against the same base state can otherwise
+  /// silently lose one of the two edits to CRDT merge order, not just
+  /// misreport which one is "saved".
+  Future<void> saveNoteCancelable(
+    String requestId,
+    String id,
+    String title,
+    String body,
+  );
+
+  /// Cancels an in-flight request started by [saveNoteCancelable] (or any
+  /// other cancelable gateway call), matching
+  /// core/mobileapi.Service.Cancel. A no-op if requestId is unknown or
+  /// already finished.
+  Future<void> cancelRequest(String requestId);
   Future<void> deleteNote(String id, bool deleted);
   Future<void> moveNote(String id, String notebookId);
   Future<List<Map<String, dynamic>>> search(String query);
@@ -113,8 +133,21 @@ class MethodChannelCore implements CoreGateway {
       _object(await _invoke("getNote", {"noteId": id}));
 
   @override
-  Future<void> saveNote(String id, String title, String body) =>
-      _invoke("saveNote", {"noteId": id, "title": title, "body": body});
+  Future<void> saveNoteCancelable(
+    String requestId,
+    String id,
+    String title,
+    String body,
+  ) => _channel.invokeMethod<dynamic>("saveNote", {
+    "requestId": requestId,
+    "noteId": id,
+    "title": title,
+    "body": body,
+  });
+
+  @override
+  Future<void> cancelRequest(String requestId) =>
+      _channel.invokeMethod<dynamic>("cancel", {"requestId": requestId});
 
   @override
   Future<void> deleteNote(String id, bool deleted) =>

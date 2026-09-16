@@ -1,3 +1,4 @@
+import "dart:async";
 import "dart:typed_data";
 
 import "package:beresta/main.dart";
@@ -44,14 +45,11 @@ void main() {
       enteredText,
       const TextSelection.collapsed(offset: enteredText.length),
     );
-    // The save button only enables once the body controller's listener
-    // marks the editor dirty (see _EditorScreenState.markDirty), which
-    // takes effect on the next frame rather than synchronously with
-    // replaceText; without this pump the tap below hits a still-disabled
-    // button and silently does nothing.
-    await tester.pump();
-    await tester.tap(find.byIcon(Icons.save_outlined));
-    await tester.pumpAndSettle();
+    // The body controller's listener debounces a commit 800ms after the
+    // last edit (see _EditorScreenState.markDirty/commit); advancing past
+    // that fires it without a manual save action, matching the "durable
+    // automatic save" product requirement (no save button exists).
+    await tester.pump(const Duration(milliseconds: 900));
 
     expect(gateway.savedBody, enteredText);
   });
@@ -479,9 +477,44 @@ class FakeGateway implements CoreGateway {
     "note": note,
     "body": savedBody,
   };
+  // requestIds saveNoteCancelable has been called with, in call order -
+  // lets a test assert on commit/cancellation ordering.
+  final List<String> saveRequestIds = [];
+  final Set<String> canceledRequestIds = {};
+  // When non-null, saveNoteCancelable awaits this before resolving,
+  // letting a test hold a commit "in flight" to exercise cancellation and
+  // out-of-order completion, matching core/mobileapi's real behavior of
+  // not completing a request until its context is done or the work
+  // finishes.
+  Completer<void>? holdSaveNote;
+  Object? nextSaveNoteFailure;
+
   @override
-  Future<void> saveNote(String id, String title, String body) async =>
-      savedBody = body;
+  Future<void> saveNoteCancelable(
+    String requestId,
+    String id,
+    String title,
+    String body,
+  ) async {
+    saveRequestIds.add(requestId);
+    final hold = holdSaveNote;
+    if (hold != null) await hold.future;
+    if (canceledRequestIds.contains(requestId)) {
+      throw StateError("canceled: $requestId");
+    }
+    final failure = nextSaveNoteFailure;
+    if (failure != null) {
+      nextSaveNoteFailure = null;
+      throw failure;
+    }
+    savedBody = body;
+  }
+
+  @override
+  Future<void> cancelRequest(String requestId) async {
+    canceledRequestIds.add(requestId);
+  }
+
   @override
   Future<void> deleteNote(String id, bool deleted) async =>
       note["deleted"] = deleted;

@@ -231,6 +231,23 @@ class MainActivity : FlutterFragmentActivity() {
             }
             return
         }
+        if (call.method == "cancel") {
+            // Dispatched directly, not through `executor`: that queue runs
+            // core calls strictly one at a time, so routing cancellation
+            // through it would always arrive only after the call it is
+            // meant to interrupt has already finished running. Cancel
+            // itself is a fast, non-blocking map lookup plus a context
+            // cancel func call (see core/mobileapi.Service.Cancel), safe to
+            // run on the platform channel's own thread.
+            val requestId = call.argument<String>("requestId")
+            if (requestId == null) {
+                result.error("invalid_request", null, null)
+                return
+            }
+            runCatching { NativeCore.awaitService().cancel(requestId) }
+            result.success(null)
+            return
+        }
         executor.execute {
             runCatching { invokeCore(call) }.fold(
                 // Void-returning core calls (lock, saveNote, ...) surface here

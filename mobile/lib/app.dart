@@ -8,6 +8,7 @@ import "package:flutter/services.dart"
 import "package:flutter_localizations/flutter_localizations.dart";
 import "package:flutter_quill/flutter_quill.dart";
 
+import "commit_tracker.dart";
 import "core_gateway.dart";
 import "markdown_delta.dart";
 import "strings.dart";
@@ -2125,6 +2126,10 @@ class _EditorScreenState extends State<EditorScreen> {
   final bodyFocusNode = FocusNode();
   final bodyScrollController = ScrollController();
   bool loading = true;
+  // True once an edit exists that no accepted commit has covered yet.
+  // Distinct from saveState below: dirty gates whether a pop or dispose
+  // must still attempt a commit, and survives a discarded (stale) commit
+  // completion that a newer edit has already superseded.
   bool dirty = false;
   List<Map<String, dynamic>> attachments = [];
   bool capturingPhoto = false;
@@ -2132,6 +2137,27 @@ class _EditorScreenState extends State<EditorScreen> {
   List<String> noteTagIds = [];
   bool titleLoaded = false;
   bool clearDefaultTitleOnFocus = false;
+
+  // How long an edit waits, with no further edits, before it is committed
+  // to the Go core - matching desktop/frontend's useNoteDocument. Chosen
+  // to keep keystrokes from each individually round-tripping through the
+  // platform channel while still saving promptly once the user pauses.
+  static const _commitDebounce = Duration(milliseconds: 800);
+  final _tracker = CommitTracker();
+  Timer? _commitTimer;
+  // The requestId of the commit currently awaiting its gateway response,
+  // if any - used to cancel it when a newer edit needs to commit first
+  // (see commit()) and to recognize its own completion as self-canceled
+  // rather than a real failure.
+  String? _inFlightRequestId;
+  final Set<String> _selfCanceledRequestIds = {};
+  int _requestCounter = 0;
+
+  /// The closed local-save state for the status text in the app bar (see
+  /// build()), or null before this note session's first commit attempt -
+  /// the UI treats that the same as "saved", since there is nothing
+  /// pending or at risk yet.
+  LocalSaveState? saveState;
 
   @override
   void initState() {
@@ -2160,8 +2186,69 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void markDirty() {
-    if (!dirty && mounted) setState(() => dirty = true);
+    if (!mounted) return;
+    dirty = true;
+    _tracker.dirty();
+    _commitTimer?.cancel();
+    _commitTimer = Timer(_commitDebounce, () => unawaited(commit()));
   }
+
+  String _newCommitRequestId() =>
+      "editor-${widget.noteId}-${DateTime.now().microsecondsSinceEpoch}-${++_requestCounter}";
+
+  /// Commits the current title and body right now, bypassing the
+  /// debounce. Safe to call with nothing dirty: it is then a no-op. Never
+  /// throws: a failed commit is reported through saveState (and dirty
+  /// stays true so the next commit - the next debounce, or an explicit
+  /// flush like this one - resends the current content) instead of
+  /// propagating to the caller.
+  Future<void> commit() async {
+    _commitTimer?.cancel();
+    if (!dirty || body == null) return;
+
+    final previous = _inFlightRequestId;
+    if (previous != null) {
+      // Cancel rather than let a superseded commit race a fresh read of
+      // the note's current state - see saveNoteCancelable's doc comment
+      // on why an overlapping commit is not just a stale-status risk here
+      // but a real data-loss one.
+      _selfCanceledRequestIds.add(previous);
+      unawaited(widget.gateway.cancelRequest(previous).catchError((_) {}));
+    }
+
+    final generation = _tracker.current();
+    final requestId = _newCommitRequestId();
+    _inFlightRequestId = requestId;
+    dirty = false;
+    if (mounted) setState(() => saveState = LocalSaveState.saving);
+
+    final markdown = deltaToMarkdown(body!.document.toDelta());
+    try {
+      await widget.gateway.saveNoteCancelable(
+        requestId,
+        widget.noteId,
+        title.text,
+        markdown,
+      );
+      if (_inFlightRequestId == requestId) _inFlightRequestId = null;
+      if (_selfCanceledRequestIds.remove(requestId)) return;
+      requestCurrentWorkspaceSync(widget.gateway);
+      final accepted = _tracker.accept(generation, true);
+      if (accepted != null && mounted) setState(() => saveState = accepted);
+    } catch (_) {
+      if (_inFlightRequestId == requestId) _inFlightRequestId = null;
+      if (_selfCanceledRequestIds.remove(requestId)) return;
+      dirty = true;
+      final accepted = _tracker.accept(generation, false);
+      if (accepted != null && mounted) setState(() => saveState = accepted);
+    }
+  }
+
+  String saveStateLabel() => switch (saveState) {
+    LocalSaveState.saving => widget.strings("save_state_saving"),
+    LocalSaveState.couldNotSave => widget.strings("save_state_could_not_save"),
+    LocalSaveState.saved || null => widget.strings("save_state_saved"),
+  };
 
   void clearDefaultTitle() {
     if (!clearDefaultTitleOnFocus || !titleLoaded || !titleFocusNode.hasFocus) {
@@ -2333,16 +2420,6 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  Future<void> save() async {
-    // dirty only ever becomes true via body's own listener (see initState),
-    // so by the time save can be invoked (the save button, or a dirty pop)
-    // body is guaranteed to be loaded.
-    final markdown = deltaToMarkdown(body!.document.toDelta());
-    await widget.gateway.saveNote(widget.noteId, title.text, markdown);
-    requestCurrentWorkspaceSync(widget.gateway);
-    if (mounted) setState(() => dirty = false);
-  }
-
   Future<void> deleteNote() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -2380,6 +2457,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   void dispose() {
+    _commitTimer?.cancel();
     title.dispose();
     titleFocusNode.dispose();
     body?.dispose();
@@ -2395,26 +2473,32 @@ class _EditorScreenState extends State<EditorScreen> {
       canPop: !dirty,
       onPopInvokedWithResult: (didPop, _) async {
         if (!didPop && dirty) {
-          await save();
+          await commit();
           if (context.mounted) Navigator.pop(context);
         }
       },
       child: Scaffold(
         appBar: AppBar(
-          title: TextField(
-            controller: title,
-            focusNode: titleFocusNode,
-            decoration: InputDecoration(
-              hintText: widget.strings("title"),
-              border: InputBorder.none,
-            ),
+          title: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: title,
+                focusNode: titleFocusNode,
+                decoration: InputDecoration(
+                  hintText: widget.strings("title"),
+                  border: InputBorder.none,
+                  isDense: true,
+                ),
+              ),
+              Text(
+                saveStateLabel(),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ),
           actions: [
-            IconButton(
-              tooltip: widget.strings("save"),
-              onPressed: dirty ? save : null,
-              icon: const Icon(Icons.save_outlined),
-            ),
             IconButton(
               tooltip: widget.strings("delete"),
               onPressed: deleteNote,

@@ -739,10 +739,16 @@ class FakeGateway implements CoreGateway {
     "role": "member",
     "active": true,
   };
+  List<Map<String, dynamic>> workspacesToReturn = [];
+  void Function(String workspaceId)? onSetActiveWorkspace;
   @override
-  Future<List<Map<String, dynamic>>> listWorkspaces() async => [];
+  Future<List<Map<String, dynamic>>> listWorkspaces() async =>
+      workspacesToReturn;
   @override
-  Future<void> setActiveWorkspace(String workspaceId) async {}
+  Future<void> setActiveWorkspace(String workspaceId) async {
+    onSetActiveWorkspace?.call(workspaceId);
+  }
+
   @override
   Future<void> capturePhoto(String noteId) async {}
   @override

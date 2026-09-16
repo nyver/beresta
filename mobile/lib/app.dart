@@ -1736,6 +1736,12 @@ class _ServerSheetState extends State<ServerSheet> {
       error = null;
     });
     try {
+      // The open editor, if any, belongs to the workspace being switched
+      // away from - flush it first so a still-pending edit commits before
+      // that workspace's notes become unreachable, matching the same
+      // flush-before-navigate barrier used elsewhere (background, lock,
+      // revision restore).
+      await ActiveEditorFlush.flushIfAny();
       await widget.gateway.setActiveWorkspace(workspaceID);
       final synchronized = await waitForInitialWorkspaceSync();
       await loadWorkspaces();

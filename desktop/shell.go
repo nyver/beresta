@@ -31,6 +31,21 @@ func (a *App) showWindow() {
 	}
 	runtime.WindowShow(ctx)
 	runtime.WindowUnminimise(ctx)
+	a.requestForegroundSync()
+}
+
+// requestForegroundSync nudges an already-attached sync worker to run an
+// extra cycle when the window comes to the foreground (tray restore, quick
+// note), mirroring the mobile client's app-resumed sync trigger. Like every
+// other trigger source, it only shares Coordinator's coalescing path: with
+// no server configured, or a cycle already running, this is a silent no-op.
+func (a *App) requestForegroundSync() {
+	a.mu.Lock()
+	coordinator := a.syncCoordinator
+	a.mu.Unlock()
+	if coordinator != nil {
+		coordinator.Trigger()
+	}
 }
 
 // handleQuickNoteTrigger is traymenu.Handlers.OnQuickNote: it satisfies

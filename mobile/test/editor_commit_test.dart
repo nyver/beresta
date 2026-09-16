@@ -35,6 +35,43 @@ Widget hostEditor(FakeGateway gateway, String noteId) => MaterialApp(
   ),
 );
 
+/// Opens [ServerSheet] as a modal bottom sheet, mirroring how
+/// [showServer] in app.dart presents it in production - unlike hosting it
+/// directly as a route's `home`, this gives it a route to pop back to, so
+/// [ServerSheet]'s own `Navigator.pop(context)` after a successful
+/// workspace switch behaves exactly as it does in the real app instead of
+/// popping the test host's only route.
+Widget hostServerSheet(FakeGateway gateway) => MaterialApp(
+  locale: const Locale("en"),
+  supportedLocales: const [Locale("en"), Locale("ru")],
+  localizationsDelegates: const [
+    GlobalMaterialLocalizations.delegate,
+    GlobalWidgetsLocalizations.delegate,
+    GlobalCupertinoLocalizations.delegate,
+  ],
+  home: Builder(
+    builder:
+        (context) => Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              onPressed:
+                  () => showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    showDragHandle: true,
+                    builder:
+                        (_) => ServerSheet(
+                          gateway: gateway,
+                          strings: Strings("en"),
+                        ),
+                  ),
+              child: const Text("open"),
+            ),
+          ),
+        ),
+  ),
+);
+
 void main() {
   group("ActiveEditorFlush", () {
     test("flushIfAny is a no-op with nothing registered", () async {
@@ -298,6 +335,46 @@ void main() {
 
       expect(gateway.savedBody, "Before kill after restart");
       expect(find.text("Saved"), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    "flushes the active editor's flush barrier before switching the active workspace",
+    (tester) async {
+      final events = <String>[];
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..syncStatusValue = "current"
+            ..workspacesToReturn = [
+              {
+                "workspace_id": "ws-2",
+                "role": "member",
+                "member_count": 2,
+                "active": false,
+              },
+            ];
+      gateway.onSetActiveWorkspace = (id) => events.add("switch:$id");
+
+      Future<void> flush() async => events.add("flush");
+      ActiveEditorFlush.register(flush);
+      addTearDown(() => ActiveEditorFlush.unregister(flush));
+
+      await tester.pumpWidget(hostServerSheet(gateway));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("open"));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text("Switch"));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Switch"));
+      await tester.pumpAndSettle();
+
+      expect(
+        events,
+        ["flush", "switch:ws-2"],
+        reason:
+            "the registered editor flush must run before the workspace switch reaches the gateway",
+      );
     },
   );
 }

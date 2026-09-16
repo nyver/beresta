@@ -21,15 +21,16 @@ export interface SaveStatusLineProps {
 export function SaveStatusLine({ saveState, syncStatus, syncedAt, onOpenSync }: SaveStatusLineProps) {
   const { t } = useI18n();
 
-  // "Not saved" is reserved for a genuine failed-commit retry loop
-  // (hasError) - a freshly created, never-yet-edited note has savedAt still
-  // null too, but there is nothing pending or at risk in that state, so it
-  // reads as "Saved locally" like any other clean state.
-  const localLabel = saveState.saving
-    ? t("status.saving")
-    : saveState.hasError
-      ? t("status.not_saved")
-      : t("status.saved_locally");
+  // "Could not save" is reserved for a genuine failed-commit retry loop -
+  // a freshly created, never-yet-edited note has state still null too, but
+  // there is nothing pending or at risk in that state, so it reads as
+  // "Saved" like any other clean or successfully-committed state.
+  const localLabel =
+    saveState.state === "saving"
+      ? t("savestate.saving")
+      : saveState.state === "could_not_save"
+        ? t("savestate.could_not_save")
+        : t("savestate.saved");
 
   // "disabled" (local-only account) and null (not loaded yet) render no
   // sync fragment at all: there is nothing synchronization-related to

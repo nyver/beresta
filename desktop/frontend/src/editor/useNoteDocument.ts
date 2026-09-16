@@ -3,6 +3,7 @@ import * as Y from "yjs";
 
 import { commitNoteBody, getNoteDocument, unwrapError, type ApiError } from "../api";
 import { base64ToBytes, bytesToBase64 } from "./base64";
+import { CommitTracker, type LocalSaveState } from "./commitTracker";
 
 /** How long an edit waits, with no further edits, before it is committed to
  * the Go core. Chosen to keep keystrokes from each individually round-
@@ -13,18 +14,14 @@ export interface NoteDocumentState {
   ydoc: Y.Doc | null;
   ready: boolean;
   error: ApiError | null;
-  /** True for the span of an in-flight commitNoteBody call - see the
-   * status line this feeds (shell/SaveStatusLine.tsx). */
-  saving: boolean;
-  /** True once an edit has been made that no successful flush has covered
-   * yet (set on the Yjs doc's "update" event, cleared when that update is
-   * durably committed). */
-  dirty: boolean;
-  /** When the most recent flush last committed successfully, or null
-   * before the first one. Not reset by a later failed flush - the
-   * previously committed content is still durably saved even if a newer
-   * edit is not. */
-  savedAt: number | null;
+  /** The closed local-save state for the status line (see
+   * shell/SaveStatusLine.tsx and specs/product-experience's "Note
+   * persistence SHALL be represented only as Saving, Saved, or Could not
+   * save"), or null before this note session's first commit attempt -
+   * the UI treats that the same as "saved", since there is nothing
+   * pending or at risk yet. A commit completion updates this only when
+   * CommitTracker confirms it is not stale - see commitTracker.ts. */
+  saveState: LocalSaveState | null;
   /**
    * flush commits any pending body edits (merged into one update) right
    * now, bypassing the debounce, optionally renaming the note in the same
@@ -47,14 +44,16 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
   const [ydoc, setYdoc] = useState<Y.Doc | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [saveState, setSaveState] = useState<LocalSaveState | null>(null);
 
   const pendingRef = useRef<Uint8Array[]>([]);
   const timerRef = useRef<number | undefined>(undefined);
   const ydocRef = useRef<Y.Doc | null>(null);
   const noteIdRef = useRef(noteId);
+  // One CommitTracker per open note session: a fresh instance each time
+  // noteId changes (reset below), matching one generation sequence per
+  // editor session as design.md decision 2 describes.
+  const trackerRef = useRef(new CommitTracker());
 
   const flush = useCallback(async (title?: string): Promise<boolean> => {
     window.clearTimeout(timerRef.current);
@@ -82,7 +81,13 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
       return true;
     }
 
-    setSaving(true);
+    // The generation this commit represents: whatever dirty() calls (from
+    // doc.on("update") below) have accumulated up to this exact moment.
+    // Captured before awaiting so a completion can later be told apart
+    // from any newer generation that starts (and captures a higher
+    // number) while this commit is still in flight.
+    const generation = trackerRef.current.current();
+    setSaveState("saving");
     try {
       await commitNoteBody({
         note_id: noteIdRef.current,
@@ -90,24 +95,33 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
         update_format: "v1",
         title,
       });
-      setError(null);
-      // Only clear dirty when nothing has queued again while this commit
-      // was in flight (doc.on("update") below may have already pushed a
-      // newer edit into pendingRef and set dirty back to true).
-      if (pendingRef.current.length === 0) setDirty(false);
-      setSavedAt(Date.now());
+      // A stale completion (superseded by newer dirty input that arrived
+      // after this commit started) is discarded here: it must never
+      // downgrade the status newer, still-unsaved input already reports,
+      // even though this older commit itself succeeded.
+      const accepted = trackerRef.current.accept(generation, true);
+      if (accepted) {
+        setError(null);
+        setSaveState(accepted);
+      }
       return true;
     } catch (thrown) {
-      setError(unwrapError(thrown));
       // Put the attempted payload back ahead of anything queued in the
       // meantime, so the next flush retries it instead of silently
       // dropping the edit - this applies equally to the title-only
       // full-state fallback above, which is just as safe to resend later
       // (merged with whatever else has since queued) as a normal delta.
+      // This happens regardless of staleness: a superseded generation's
+      // failed bytes are still real, not-yet-durable content that must
+      // not be lost, even though the status line will not show an error
+      // for them (see the discard comment above).
       pendingRef.current = [payload, ...pendingRef.current];
+      const accepted = trackerRef.current.accept(generation, false);
+      if (accepted) {
+        setError(unwrapError(thrown));
+        setSaveState(accepted);
+      }
       return false;
-    } finally {
-      setSaving(false);
     }
   }, []);
 
@@ -116,10 +130,9 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
     let canceled = false;
     setReady(false);
     setError(null);
-    setSaving(false);
-    setDirty(false);
-    setSavedAt(null);
+    setSaveState(null);
     pendingRef.current = [];
+    trackerRef.current = new CommitTracker();
     window.clearTimeout(timerRef.current);
 
     getNoteDocument(noteId)
@@ -136,7 +149,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
         }
         doc.on("update", (update: Uint8Array) => {
           pendingRef.current.push(update);
-          setDirty(true);
+          trackerRef.current.dirty();
           window.clearTimeout(timerRef.current);
           timerRef.current = window.setTimeout(() => {
             void flush();
@@ -161,5 +174,5 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteId]);
 
-  return { ydoc, ready, error, flush, saving, dirty, savedAt };
+  return { ydoc, ready, error, flush, saveState };
 }

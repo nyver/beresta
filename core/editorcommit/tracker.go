@@ -26,9 +26,18 @@ type Generation uint64
 // commit's completion may still change the session's reported
 // presentation.LocalSaveState. Tracker is safe for concurrent use.
 type Tracker struct {
-	mu       sync.Mutex
-	latest   Generation
-	resolved Generation
+	mu     sync.Mutex
+	latest Generation
+	// saved is the highest generation Accept has confirmed durably saved,
+	// meaningful only once hasSaved is true (the zero Generation is a
+	// legitimate commit target - see Generation's doc comment - so it
+	// cannot double as its own "nothing saved yet" sentinel). saved only
+	// ever advances on a success, never on a failure: a retry of the same
+	// (unchanged) generation - the common case, since a retry resends
+	// identical content and so never calls Dirty again - must still be
+	// able to move that generation from CouldNotSave to Saved.
+	saved    Generation
+	hasSaved bool
 }
 
 // Dirty marks the session dirty with new local input and returns the new
@@ -53,21 +62,26 @@ func (t *Tracker) Latest() Generation {
 // Accept reports the outcome of a commit attempt for generation, which
 // must be a value previously returned by Dirty. When generation is
 // stale - superseded by newer dirty input that arrived after the commit
-// started, or older than a generation Accept has already resolved - the
-// completion is discarded: accepted is false and state is the empty
-// LocalSaveState, and the caller must leave the session's currently
-// displayed save state untouched. Otherwise Accept records generation as
-// resolved and returns the LocalSaveState the UI should now report:
-// SaveStateSaved for succeeded, or SaveStateCouldNotSave otherwise, per
-// specs/product-experience's closed three-value save-state model.
+// started - the completion is discarded: accepted is false and state is
+// the empty LocalSaveState, and the caller must leave the session's
+// currently displayed save state untouched. A failure for a generation
+// that an earlier, different commit attempt has already confirmed saved
+// is discarded the same way, so a late duplicate or superseded failure
+// can never regress a confirmed save. Otherwise Accept returns the
+// LocalSaveState the UI should now report: SaveStateSaved for succeeded,
+// or SaveStateCouldNotSave otherwise, per specs/product-experience's
+// closed three-value save-state model.
 func (t *Tracker) Accept(generation Generation, succeeded bool) (state presentation.LocalSaveState, accepted bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if generation < t.latest || generation <= t.resolved {
+	if generation < t.latest {
 		return "", false
 	}
-	t.resolved = generation
+	if !succeeded && t.hasSaved && generation <= t.saved {
+		return "", false
+	}
 	if succeeded {
+		t.saved, t.hasSaved = generation, true
 		return presentation.SaveStateSaved, true
 	}
 	return presentation.SaveStateCouldNotSave, true

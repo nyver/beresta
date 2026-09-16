@@ -19,6 +19,28 @@ func TestDirtyIssuesStrictlyIncreasingGenerations(t *testing.T) {
 	}
 }
 
+// TestAcceptZeroGenerationFailureIsNotDiscarded covers a real bug found
+// while wiring this tracker into desktop's editor commit controller: a
+// commit with no prior Dirty call (for example, a title-only rename
+// commit before any body edit ever happened) targets the zero
+// Generation. That is a legitimate first commit attempt, not a stale or
+// already-resolved duplicate, so its failure must still be accepted.
+func TestAcceptZeroGenerationFailureIsNotDiscarded(t *testing.T) {
+	var tracker Tracker
+	state, accepted := tracker.Accept(0, false)
+	if !accepted || state != presentation.SaveStateCouldNotSave {
+		t.Fatalf("Accept(0, false) = (%q, %v), want (%q, true)", state, accepted, presentation.SaveStateCouldNotSave)
+	}
+}
+
+func TestAcceptZeroGenerationSuccessIsNotDiscarded(t *testing.T) {
+	var tracker Tracker
+	state, accepted := tracker.Accept(0, true)
+	if !accepted || state != presentation.SaveStateSaved {
+		t.Fatalf("Accept(0, true) = (%q, %v), want (%q, true)", state, accepted, presentation.SaveStateSaved)
+	}
+}
+
 func TestLatestDoesNotMarkDirty(t *testing.T) {
 	var tracker Tracker
 	g := tracker.Dirty()
@@ -103,16 +125,56 @@ func TestAcceptLatestGenerationAfterStaleCompletionStillReportsCorrectly(t *test
 	}
 }
 
-func TestAcceptDuplicateGenerationIsDiscarded(t *testing.T) {
+func TestAcceptDuplicateSuccessForSameGenerationIsIdempotent(t *testing.T) {
+	var tracker Tracker
+	g := tracker.Dirty()
+
+	state, accepted := tracker.Accept(g, true)
+	if !accepted || state != presentation.SaveStateSaved {
+		t.Fatalf("first Accept(success) = (%q, %v), want (%q, true)", state, accepted, presentation.SaveStateSaved)
+	}
+	state, accepted = tracker.Accept(g, true)
+	if !accepted || state != presentation.SaveStateSaved {
+		t.Fatalf("duplicate Accept(success) = (%q, %v), want (%q, true): a repeat success for the same generation is harmless and must re-affirm Saved", state, accepted, presentation.SaveStateSaved)
+	}
+}
+
+func TestAcceptFailureCannotRegressAnAlreadySavedGeneration(t *testing.T) {
+	// A retry legitimately reuses the same generation number (no new
+	// Dirty call happens between a failed attempt and its retry, since
+	// the retried content is unchanged) and must be able to move status
+	// from CouldNotSave to Saved - see the next test. But once any
+	// attempt has confirmed a generation saved, a late or duplicate
+	// failure for that same generation must never regress the display
+	// back to CouldNotSave.
 	var tracker Tracker
 	g := tracker.Dirty()
 
 	if _, accepted := tracker.Accept(g, true); !accepted {
-		t.Fatal("first Accept() accepted = false, want true")
+		t.Fatal("first Accept(success) accepted = false, want true")
 	}
-	state, accepted := tracker.Accept(g, true)
+	state, accepted := tracker.Accept(g, false)
 	if accepted {
-		t.Fatalf("duplicate Accept() accepted = true, want false (got state %q)", state)
+		t.Fatalf("late failure for an already-saved generation: accepted = true, want false (got state %q)", state)
+	}
+}
+
+func TestAcceptRetrySameGenerationAfterFailureCanStillSucceed(t *testing.T) {
+	// The common retry path: a commit fails, its payload is requeued for
+	// the next attempt, and since nothing new was typed in between, the
+	// retry captures the exact same generation as the failed attempt.
+	// That retry's eventual success must be accepted, not discarded as a
+	// stale or duplicate completion.
+	var tracker Tracker
+	g := tracker.Dirty()
+
+	state, accepted := tracker.Accept(g, false)
+	if !accepted || state != presentation.SaveStateCouldNotSave {
+		t.Fatalf("first Accept(failure) = (%q, %v), want (%q, true)", state, accepted, presentation.SaveStateCouldNotSave)
+	}
+	state, accepted = tracker.Accept(g, true)
+	if !accepted || state != presentation.SaveStateSaved {
+		t.Fatalf("retry Accept(success) = (%q, %v), want (%q, true)", state, accepted, presentation.SaveStateSaved)
 	}
 }
 
@@ -163,22 +225,39 @@ func TestTrackerConcurrentDirtyAndAccept(t *testing.T) {
 		t.Fatalf("issued %d distinct generations, want %d", len(seen), goroutines)
 	}
 
+	var maxGeneration Generation
+	for g := range seen {
+		if g > maxGeneration {
+			maxGeneration = g
+		}
+	}
+
+	var mu sync.Mutex
+	accepted := make(map[Generation]bool)
 	var acceptWG sync.WaitGroup
 	for g := range seen {
 		acceptWG.Add(1)
 		go func(g Generation) {
 			defer acceptWG.Done()
-			tracker.Accept(g, true)
+			_, ok := tracker.Accept(g, true)
+			mu.Lock()
+			accepted[g] = ok
+			mu.Unlock()
 		}(g)
 	}
 	acceptWG.Wait()
 
-	// Exactly the true latest generation must end up resolved and
-	// reported as Saved; every other concurrent Accept for an older
-	// generation must have been discarded by the same invariant the
-	// sequential tests above exercise directly.
-	state, accepted := tracker.Accept(tracker.Latest(), true)
-	if accepted {
-		t.Fatalf("re-Accept of the already-resolved latest generation: accepted = true, want false (got state %q)", state)
+	// Every concurrent Accept for a generation older than the true
+	// maximum must have been discarded by the same staleness invariant
+	// the sequential tests above exercise directly; only the maximum
+	// generation (and any that happen to tie it, none here since Dirty
+	// issued strictly increasing values) may be accepted.
+	for g, ok := range accepted {
+		if g < maxGeneration && ok {
+			t.Fatalf("generation %d (max %d) was accepted, want discarded", g, maxGeneration)
+		}
+	}
+	if !accepted[maxGeneration] {
+		t.Fatalf("the true latest generation %d was not accepted", maxGeneration)
 	}
 }

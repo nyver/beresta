@@ -79,12 +79,7 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
-    const [saveState, setSaveState] = useState<NoteSaveState>({
-      saving: false,
-      dirty: false,
-      savedAt: null,
-      hasError: false,
-    });
+    const [saveState, setSaveState] = useState<NoteSaveState>({ state: null });
     const handleSaveStateChange = useCallback((next: NoteSaveState) => setSaveState(next), []);
     // Bumped after RestoreRevision commits a new current revision, and
     // included in NoteEditor's key below to force it to remount and

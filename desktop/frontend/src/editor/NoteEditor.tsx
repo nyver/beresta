@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { QuillBinding } from "y-quill";
 
 import { useI18n } from "../i18n";
+import type { LocalSaveState } from "./commitTracker";
 import { useNoteDocument } from "./useNoteDocument";
 
 export interface NoteEditorHandle {
@@ -14,13 +15,8 @@ export interface NoteEditorHandle {
 /** The open note's local save state, reported to onSaveStateChange below -
  * see shell/SaveStatusLine.tsx, the only current consumer. */
 export interface NoteSaveState {
-  saving: boolean;
-  dirty: boolean;
-  savedAt: number | null;
-  /** True when the most recent flush attempt failed and has not yet
-   * succeeded on retry - distinct from "no edits made yet" (savedAt still
-   * null, but hasError false), which is not an error at all. */
-  hasError: boolean;
+  /** See useNoteDocument's saveState doc comment. */
+  state: LocalSaveState | null;
 }
 
 export interface NoteEditorProps {
@@ -72,7 +68,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function
   ref,
 ) {
   const { t, errorMessage } = useI18n();
-  const { ydoc, ready, error, flush, saving, dirty, savedAt } = useNoteDocument(noteId);
+  const { ydoc, ready, error, flush, saveState } = useNoteDocument(noteId);
   const containerRef = useRef<HTMLDivElement>(null);
   const onAttachFilesRef = useRef(onAttachFiles);
   onAttachFilesRef.current = onAttachFiles;
@@ -82,8 +78,8 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function
   const onSaveStateChangeRef = useRef(onSaveStateChange);
   onSaveStateChangeRef.current = onSaveStateChange;
   useEffect(() => {
-    onSaveStateChangeRef.current?.({ saving, dirty, savedAt, hasError: error !== null });
-  }, [saving, dirty, savedAt, error]);
+    onSaveStateChangeRef.current?.({ state: saveState });
+  }, [saveState]);
 
   useEffect(() => {
     if (!ready || !ydoc || !containerRef.current) return;

@@ -35,6 +35,118 @@ describe("useNoteDocument", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("starts with a null saveState and reports saving/saved around a successful commit", async () => {
+    appMock.GetNoteDocument.mockResolvedValue(emptyDocumentResponse());
+    let resolveCommit: (() => void) | undefined;
+    appMock.CommitNoteBody.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCommit = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useNoteDocument("note-1"));
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+    expect(result.current.saveState).toBeNull();
+
+    act(() => {
+      result.current.ydoc!.getText("body").insert(0, "hello");
+    });
+    let flushPromise!: Promise<boolean>;
+    act(() => {
+      flushPromise = result.current.flush();
+    });
+    expect(result.current.saveState).toBe("saving");
+
+    await act(async () => {
+      resolveCommit?.();
+      await flushPromise;
+    });
+    expect(result.current.saveState).toBe("saved");
+  });
+
+  it("reports could_not_save (not saved) from a failed commit, then saved on retry", async () => {
+    appMock.GetNoteDocument.mockResolvedValue(emptyDocumentResponse());
+    appMock.CommitNoteBody.mockRejectedValueOnce(
+      new Error(JSON.stringify({ code: "internal", message: "disk full" })),
+    );
+    appMock.CommitNoteBody.mockResolvedValueOnce(undefined);
+    const { result } = renderHook(() => useNoteDocument("note-1"));
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    act(() => {
+      result.current.ydoc!.getText("body").insert(0, "hello");
+    });
+    await act(async () => {
+      await result.current.flush();
+    });
+    expect(result.current.saveState).toBe("could_not_save");
+
+    await act(async () => {
+      await result.current.flush();
+    });
+    expect(result.current.saveState).toBe("saved");
+  });
+
+  // The end-to-end version of core/editorcommit/tracker_test.go's stale-
+  // completion guarantee: two commits end up in flight (an explicit flush
+  // while an earlier debounced-equivalent flush has not yet resolved),
+  // the newer one resolves first, and the older one's later completion
+  // must not change what is already displayed for the newer content.
+  it("does not let a stale completion overwrite the status newer dirty content already reported", async () => {
+    appMock.GetNoteDocument.mockResolvedValue(emptyDocumentResponse());
+    let resolveFirst: (() => void) | undefined;
+    let resolveSecond: (() => void) | undefined;
+    appMock.CommitNoteBody.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    ).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSecond = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useNoteDocument("note-1"));
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    act(() => {
+      result.current.ydoc!.getText("body").insert(0, "a");
+    });
+    let firstFlush!: Promise<boolean>;
+    act(() => {
+      firstFlush = result.current.flush();
+    });
+
+    act(() => {
+      result.current.ydoc!.getText("body").insert(1, "b");
+    });
+    let secondFlush!: Promise<boolean>;
+    act(() => {
+      secondFlush = result.current.flush();
+    });
+
+    expect(appMock.CommitNoteBody).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveSecond?.();
+      await secondFlush;
+    });
+    expect(result.current.saveState).toBe("saved");
+
+    await act(async () => {
+      resolveFirst?.();
+      await firstFlush;
+    });
+    expect(result.current.saveState).toBe("saved");
+  });
+
   it("commits a debounced merged update after a local edit", async () => {
     appMock.GetNoteDocument.mockResolvedValue(emptyDocumentResponse());
     appMock.CommitNoteBody.mockResolvedValue(undefined);

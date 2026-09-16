@@ -180,6 +180,17 @@ func (r *SyncRepository) Pending(ctx context.Context, workspaceID model.ID, limi
 	return result, rows.Err()
 }
 
+// CountPending reports how many outbox operations are still waiting to be
+// pushed for the given workspace.
+func (r *SyncRepository) CountPending(ctx context.Context, workspaceID model.ID) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM outbox
+		WHERE workspace_id = ? AND pushed_unix_ms IS NULL AND rejection_reason IS NULL`,
+		workspaceID.Bytes()).Scan(&count)
+	return count, err
+}
+
 func (r *SyncRepository) MarkPushed(ctx context.Context, workspaceID model.ID, results []coresync.PushResult, now time.Time) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -233,6 +244,15 @@ func (r *SyncRepository) ListQuarantine(ctx context.Context, workspaceID model.I
 		entries = append(entries, item)
 	}
 	return entries, rows.Err()
+}
+
+// CountQuarantine reports how many inbox entries are currently quarantined
+// for the given workspace.
+func (r *SyncRepository) CountQuarantine(ctx context.Context, workspaceID model.ID) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbox WHERE workspace_id = ? AND status = 3`,
+		workspaceID.Bytes()).Scan(&count)
+	return count, err
 }
 
 // RetryQuarantined removes only the quarantine record. The cursor remains at

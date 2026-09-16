@@ -6,7 +6,26 @@ import (
 	"time"
 
 	"github.com/beresta-app/beresta/core/presentation"
+	"github.com/beresta-app/beresta/core/presentation/presentationtest"
 )
+
+func TestMarshalLocalSaveState(t *testing.T) {
+	for _, tt := range presentationtest.LocalSaveCases() {
+		t.Run(tt.Name, func(t *testing.T) {
+			encoded, err := MarshalLocalSaveState(tt.State)
+			if err != nil {
+				t.Fatalf("MarshalLocalSaveState(%q): %v", tt.State, err)
+			}
+			var got presentation.LocalSaveState
+			if err := json.Unmarshal([]byte(encoded), &got); err != nil {
+				t.Fatalf("json.Unmarshal(%q): %v", encoded, err)
+			}
+			if got != tt.State {
+				t.Fatalf("got %q, want %q", got, tt.State)
+			}
+		})
+	}
+}
 
 func TestMarshalSyncSummary(t *testing.T) {
 	summary := presentation.SyncSummary{
@@ -37,6 +56,27 @@ func TestMarshalSyncSummary(t *testing.T) {
 		if got[key] != wantValue {
 			t.Errorf("field %q = %v, want %v", key, got[key], wantValue)
 		}
+	}
+}
+
+func TestMarshalSyncSummaryEveryStateRoundTrips(t *testing.T) {
+	for _, tt := range presentationtest.SyncCases() {
+		t.Run(tt.Name, func(t *testing.T) {
+			encoded, err := MarshalSyncSummary(tt.Summary)
+			if err != nil {
+				t.Fatalf("MarshalSyncSummary: %v", err)
+			}
+			var got syncSummaryDTO
+			if err := json.Unmarshal([]byte(encoded), &got); err != nil {
+				t.Fatalf("json.Unmarshal(%q): %v", encoded, err)
+			}
+			if got.State != tt.Summary.State {
+				t.Fatalf("State = %q, want %q", got.State, tt.Summary.State)
+			}
+			if got.ActionRequired != tt.Summary.ActionRequired {
+				t.Fatalf("ActionRequired = %q, want %q", got.ActionRequired, tt.Summary.ActionRequired)
+			}
+		})
 	}
 }
 

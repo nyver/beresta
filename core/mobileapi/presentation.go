@@ -6,6 +6,12 @@ import (
 	"github.com/beresta-app/beresta/core/presentation"
 )
 
+// MarshalLocalSaveState renders state as the strict JSON string value a
+// gomobile caller uses for the editor's save-status display.
+func MarshalLocalSaveState(state presentation.LocalSaveState) (string, error) {
+	return marshal(state)
+}
+
 // syncSummaryDTO is the gomobile-safe JSON projection of
 // presentation.SyncSummary. Its field names and JSON schema match the
 // desktop bridge's SyncSummaryDTO (see desktop/presentation_dto.go) so

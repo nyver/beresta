@@ -7,7 +7,70 @@ import (
 
 	"github.com/beresta-app/beresta/core/mobileapi"
 	"github.com/beresta-app/beresta/core/presentation"
+	"github.com/beresta-app/beresta/core/presentation/presentationtest"
 )
+
+// TestSyncStateParityAcrossPlatforms proves that, for every named
+// presentation.SyncState fixture (local-only, current, active, offline,
+// pending, retrying, action-required), the desktop bridge and the
+// gomobile-safe Android adapter derive the identical semantic state from
+// the identical shared presentation.SyncSummary value. Wails serializes a
+// bound method's struct return value with the same encoding/json used
+// here, so encoding the desktop DTO directly is equivalent to what
+// crosses the real JS bridge.
+func TestSyncStateParityAcrossPlatforms(t *testing.T) {
+	for _, tt := range presentationtest.SyncCases() {
+		t.Run(tt.Name, func(t *testing.T) {
+			desktopEncoded, err := json.Marshal(newSyncSummaryDTO(tt.Summary))
+			if err != nil {
+				t.Fatalf("json.Marshal(desktop DTO): %v", err)
+			}
+			var desktopGot SyncSummaryDTO
+			if err := json.Unmarshal(desktopEncoded, &desktopGot); err != nil {
+				t.Fatalf("json.Unmarshal(desktop JSON): %v", err)
+			}
+
+			mobileEncoded, err := mobileapi.MarshalSyncSummary(tt.Summary)
+			if err != nil {
+				t.Fatalf("mobileapi.MarshalSyncSummary: %v", err)
+			}
+			var mobileGot SyncSummaryDTO
+			if err := json.Unmarshal([]byte(mobileEncoded), &mobileGot); err != nil {
+				t.Fatalf("json.Unmarshal(mobile JSON): %v", err)
+			}
+
+			if desktopGot != mobileGot {
+				t.Fatalf("desktop = %+v, mobile = %+v", desktopGot, mobileGot)
+			}
+			if desktopGot.State != tt.Summary.State {
+				t.Fatalf("State = %q, want fixture state %q", desktopGot.State, tt.Summary.State)
+			}
+		})
+	}
+}
+
+// TestLocalSaveStateParityAcrossPlatforms proves the same parity for
+// every named presentation.LocalSaveState fixture (saving, saved,
+// could-not-save).
+func TestLocalSaveStateParityAcrossPlatforms(t *testing.T) {
+	for _, tt := range presentationtest.LocalSaveCases() {
+		t.Run(tt.Name, func(t *testing.T) {
+			desktopEncoded, err := json.Marshal(tt.State)
+			if err != nil {
+				t.Fatalf("json.Marshal(desktop LocalSaveState): %v", err)
+			}
+
+			mobileEncoded, err := mobileapi.MarshalLocalSaveState(tt.State)
+			if err != nil {
+				t.Fatalf("mobileapi.MarshalLocalSaveState: %v", err)
+			}
+
+			if string(desktopEncoded) != mobileEncoded {
+				t.Fatalf("desktop = %s, mobile = %s", desktopEncoded, mobileEncoded)
+			}
+		})
+	}
+}
 
 func TestNewSyncSummaryDTO(t *testing.T) {
 	summary := presentation.SyncSummary{

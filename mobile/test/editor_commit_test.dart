@@ -31,6 +31,56 @@ Widget hostEditor(FakeGateway gateway, String noteId) => MaterialApp(
 );
 
 void main() {
+  group("ActiveEditorFlush", () {
+    test("flushIfAny is a no-op with nothing registered", () async {
+      await ActiveEditorFlush.flushIfAny();
+    });
+
+    test("register then flushIfAny invokes the registered flush", () async {
+      var called = 0;
+      Future<void> flush() async => called++;
+      ActiveEditorFlush.register(flush);
+      addTearDown(() => ActiveEditorFlush.unregister(flush));
+
+      await ActiveEditorFlush.flushIfAny();
+
+      expect(called, 1);
+    });
+
+    test("unregister stops flushIfAny from invoking it", () async {
+      var called = 0;
+      Future<void> flush() async => called++;
+      ActiveEditorFlush.register(flush);
+      ActiveEditorFlush.unregister(flush);
+
+      await ActiveEditorFlush.flushIfAny();
+
+      expect(called, 0);
+    });
+
+    test(
+      "a stale unregister for a superseded registration does not clear the current one",
+      () async {
+        // Mirrors a disposed EditorScreen's dispose() racing a newly
+        // pushed one's initState(): the stale unregister must not evict
+        // the screen that is actually open now.
+        var firstCalled = 0;
+        var secondCalled = 0;
+        Future<void> first() async => firstCalled++;
+        Future<void> second() async => secondCalled++;
+        ActiveEditorFlush.register(first);
+        ActiveEditorFlush.register(second);
+        addTearDown(() => ActiveEditorFlush.unregister(second));
+
+        ActiveEditorFlush.unregister(first);
+        await ActiveEditorFlush.flushIfAny();
+
+        expect(firstCalled, 0);
+        expect(secondCalled, 1);
+      },
+    );
+  });
+
   testWidgets(
     "cancels a superseded in-flight commit and only persists the newer content",
     (tester) async {
@@ -113,6 +163,78 @@ void main() {
     expect(find.text("Saved"), findsOneWidget);
     expect(gateway.savedBody, "Hello!");
   });
+
+  testWidgets(
+    "flushes the open editor's pending edit when the app backgrounds",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+
+      final controller =
+          tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
+      controller.replaceText(
+        0,
+        0,
+        "Backgrounded edit",
+        const TextSelection.collapsed(offset: 18),
+      );
+      // Before the 800ms debounce would have committed on its own - the
+      // real race this guards against (Home button pressed mid-typing).
+      await tester.pump();
+      expect(gateway.savedBody, isEmpty);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pumpAndSettle();
+
+      expect(gateway.savedBody, "Backgrounded edit");
+    },
+  );
+
+  testWidgets(
+    "flushes a pending body edit before restoring a revision, so it cannot reappear after the restore",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)
+        ..revisionList = [
+          {"id": "rev-1", "checkpoint": true, "created_unix_ms": 1710000000000},
+        ];
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+
+      final controller =
+          tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
+      controller.replaceText(
+        0,
+        0,
+        "Pending edit",
+        const TextSelection.collapsed(offset: 12),
+      );
+      // Open Revisions immediately, before the 800ms debounce would have
+      // committed on its own - the real race this guards against.
+      await tester.pump();
+      expect(gateway.savedBody, isEmpty);
+
+      await tester.tap(find.text("Revisions"));
+      await tester.pumpAndSettle();
+      final revisionDate =
+          DateTime.fromMillisecondsSinceEpoch(
+            1710000000000,
+          ).toLocal().toString();
+      await tester.tap(find.text(revisionDate));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Restore"));
+      await tester.pumpAndSettle();
+
+      // The pending edit committed before restoreRevision ran, instead of
+      // being silently discarded or reappearing on top of the restored
+      // content once the editor reloads it.
+      expect(gateway.savedBody, "Pending edit");
+    },
+  );
 
   testWidgets(
     "a fresh editor session after process recreation starts clean and reads durably saved content",

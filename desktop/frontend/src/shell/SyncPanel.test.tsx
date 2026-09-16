@@ -211,6 +211,36 @@ describe("SyncPanel", () => {
     expect(appMock.SetActiveWorkspace).toHaveBeenCalledWith("shared-workspace");
   });
 
+  it("flushes the open note's editor before switching the active workspace", async () => {
+    mockLocaleCatalog();
+    mockSyncStatus("active");
+    appMock.ListWorkspaces.mockResolvedValue([
+      { workspace_id: "own-workspace", role: "owner", active: true },
+      { workspace_id: "shared-workspace", role: "member", active: false, member_count: 2 },
+    ]);
+    const order: string[] = [];
+    appMock.SetActiveWorkspace.mockImplementation(async () => {
+      order.push("switch");
+    });
+    const onBeforeWorkspaceSwitch = vi.fn(async () => {
+      order.push("flush");
+    });
+    render(
+      <I18nProvider>
+        <SyncPanel deviceId="device-123" onBeforeWorkspaceSwitch={onBeforeWorkspaceSwitch} />
+      </I18nProvider>,
+    );
+
+    await screen.findByText("own-workspace");
+    await userEvent.setup().click(screen.getByRole("button", { name: "sync.workspace_switch_button" }));
+
+    await waitFor(() => expect(appMock.SetActiveWorkspace).toHaveBeenCalled());
+    expect(onBeforeWorkspaceSwitch).toHaveBeenCalled();
+    // The pending local edit must reach durable storage before the
+    // workspace it belongs to is replaced - never the other way around.
+    expect(order).toEqual(["flush", "switch"]);
+  });
+
   it("lets an owner disconnect an active workspace client", async () => {
     mockLocaleCatalog();
     mockSyncStatus("active");

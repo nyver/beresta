@@ -634,7 +634,13 @@ export function Shell({ account, onLocked }: ShellProps) {
 
       {syncModalOpen ? (
         <Modal title={t("sync.title")} onClose={() => setSyncModalOpen(false)}>
-          <SyncPanel deviceId={account.device_id} onWorkspaceChanged={loadAll} />
+          <SyncPanel
+            deviceId={account.device_id}
+            onWorkspaceChanged={loadAll}
+            onBeforeWorkspaceSwitch={async () => {
+              await editorPaneRef.current?.flush();
+            }}
+          />
         </Modal>
       ) : null}
 

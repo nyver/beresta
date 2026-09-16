@@ -45,9 +45,16 @@ export interface SyncPanelProps {
    * workspace, or switching between held ones), so the parent screen can
    * reload notes/notebooks/tags scoped to the newly active workspace. */
   onWorkspaceChanged?: () => void;
+  /** Awaited before switching the active workspace, so an edit still
+   * pending in the currently open note's editor commits to this device
+   * before its content becomes unreachable under the workspace about to
+   * be replaced - the same local-only flush barrier navigation and lock
+   * already go through (see Shell.tsx's editorPaneRef). Never involves
+   * network/transport: it only waits for the local commit. */
+  onBeforeWorkspaceSwitch?: () => Promise<void>;
 }
 
-export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
+export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitch }: SyncPanelProps) {
   const { t, errorMessage } = useI18n();
   const [status, setStatus] = useState<SyncStatusValue | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +182,7 @@ export function SyncPanel({ deviceId, onWorkspaceChanged }: SyncPanelProps) {
     setSharingBusy(true);
     setError(null);
     try {
+      await onBeforeWorkspaceSwitch?.();
       await setActiveWorkspace(workspaceId);
       loadStatus();
       onWorkspaceChanged?.();

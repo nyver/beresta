@@ -37,6 +37,37 @@ void requestCurrentWorkspaceSync(CoreGateway gateway) {
   unawaited(gateway.syncNow().catchError((_) {}));
 }
 
+/// The currently mounted [EditorScreen]'s local-only flush barrier, if
+/// any - see [AppLifecycleLock]'s didChangeAppLifecycleState, which sits
+/// above the Navigator and so has no direct reference to whatever screen
+/// is currently pushed, but still needs to flush a pending edit before
+/// backgrounding lets the app be paused, screenshotted, or eventually
+/// locked. [EditorScreen] registers its commit() in initState and
+/// unregisters it in dispose; this app never shows more than one editor
+/// at a time, so a single slot is sufficient. Like every other flush
+/// barrier in this app, this only waits for the local commit - never for
+/// synchronization.
+class ActiveEditorFlush {
+  static Future<void> Function()? _flush;
+
+  static void register(Future<void> Function() flush) {
+    _flush = flush;
+  }
+
+  static void unregister(Future<void> Function() flush) {
+    // Instance method tear-offs of the same method from the same object
+    // are == but not identical (each `obj.method` expression allocates a
+    // distinct closure), so equality - not identical() - is the correct
+    // comparison here to avoid ever leaving a disposed EditorScreen's
+    // commit() registered.
+    if (_flush == flush) _flush = null;
+  }
+
+  static Future<void> flushIfAny() async {
+    await _flush?.call();
+  }
+}
+
 /// Reports whether the free-text search box already contains one of the
 /// backend filter language's special tokens (tag:/after:/before:/
 /// deleted:true), mirroring desktop's identical check in SearchBar.tsx.
@@ -172,6 +203,12 @@ class _AppLifecycleLockState extends State<AppLifecycleLock>
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
+      // Local-only flush barrier: whatever note is open must commit to
+      // this device before the app can be paused, screenshotted, or
+      // (via lockTimer below) locked - matching desktop's flush before
+      // navigation/workspace switch/lock. Never waits for synchronization,
+      // unlike the best-effort sync request beside it.
+      unawaited(ActiveEditorFlush.flushIfAny());
       requestCurrentWorkspaceSync(widget.gateway);
     }
     if (state == AppLifecycleState.paused ||
@@ -2162,6 +2199,7 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
+    ActiveEditorFlush.register(commit);
     clearDefaultTitleOnFocus = widget.clearDefaultTitleOnFocus;
     titleFocusNode.addListener(clearDefaultTitle);
     widget.gateway.getNote(widget.noteId).then((value) {
@@ -2457,6 +2495,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   void dispose() {
+    ActiveEditorFlush.unregister(commit);
     _commitTimer?.cancel();
     title.dispose();
     titleFocusNode.dispose();
@@ -2920,6 +2959,14 @@ class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
       restoreError = null;
     });
     try {
+      // Local-only flush barrier: this sheet is always opened from within
+      // the note's own open EditorScreen, so any edit still pending there
+      // must commit first - otherwise restoring rewrites the note out
+      // from under it, and reopening the editor afterward (onRestored,
+      // below) would silently reintroduce the stale edit on top of the
+      // just-restored content, exactly as desktop's NoteEditorPane
+      // guards against before RestoreRevision.
+      await ActiveEditorFlush.flushIfAny();
       await widget.gateway.restoreRevision(widget.noteId, widget.revisionId);
       requestCurrentWorkspaceSync(widget.gateway);
       await widget.onRestored();

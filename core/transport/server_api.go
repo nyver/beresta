@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"net"
 	"net/http"
 	"time"
 
@@ -52,11 +53,11 @@ func (h *HTTP) Register(ctx context.Context, request RegistrationRequest) error 
 }
 
 type Diagnostics struct {
-	Reachable     bool   `json:"reachable"`
-	TLS13         bool   `json:"tls_1_3"`
-	Authenticated bool   `json:"authenticated"`
-	LatencyMS     int64  `json:"latency_ms"`
-	ErrorClass    string `json:"error_class,omitempty"`
+	Reachable     bool       `json:"reachable"`
+	TLS13         bool       `json:"tls_1_3"`
+	Authenticated bool       `json:"authenticated"`
+	LatencyMS     int64      `json:"latency_ms"`
+	ErrorClass    ErrorClass `json:"error_class,omitempty"`
 }
 
 func (h *HTTP) Diagnose(ctx context.Context) Diagnostics {
@@ -103,15 +104,93 @@ func (h *HTTP) RevokeDevice(ctx context.Context, deviceID string) error {
 	return h.doJSON(ctx, http.MethodDelete, "/v1/devices/"+deviceID, nil, nil, true)
 }
 
-func classifyTransportError(err error) string {
+// ErrorClass is the closed, stable vocabulary Diagnostics.ErrorClass uses
+// so every client derives the same shared presentation.UserErrorCategory
+// (see core/presentation.ClassifyTransportError) from identical values
+// instead of branching on implementation-specific error text.
+type ErrorClass string
+
+const (
+	// ErrorClassNoNetwork means this device could not resolve or dial the
+	// server at all, and the device itself currently has no other usable
+	// network interface either: the failure is local, not the server's.
+	ErrorClassNoNetwork ErrorClass = "no_network"
+	// ErrorClassServerUnavailable means the device has usable network
+	// connectivity, but the configured server did not respond correctly
+	// (unreachable, timed out, or refused the connection).
+	ErrorClassServerUnavailable ErrorClass = "server_unavailable"
+	// ErrorClassCertificateMismatch means the server's certificate
+	// fingerprint does not match the pinned fingerprint.
+	ErrorClassCertificateMismatch ErrorClass = "certificate_mismatch"
+	// ErrorClassAuthenticationFailed means the server rejected this
+	// device's authentication challenge or session.
+	ErrorClassAuthenticationFailed ErrorClass = "authentication_failed"
+)
+
+// classifyTransportError maps a raw connection or authentication error to
+// the stable ErrorClass vocabulary. It distinguishes "no network" from
+// "server unavailable" by checking whether this device has any other
+// usable network interface: a failure alongside no other working
+// interface is a local connectivity problem, while a failure with other
+// interfaces up points at the configured server instead.
+func classifyTransportError(err error) ErrorClass {
 	switch {
 	case errors.Is(err, ErrCertificatePin):
-		return "certificate_mismatch"
+		return ErrorClassCertificateMismatch
 	case errors.Is(err, ErrAuthentication):
-		return "authentication_failed"
-	case errors.Is(err, context.DeadlineExceeded):
-		return "timeout"
+		return ErrorClassAuthenticationFailed
+	case !hasOtherNetworkConnectivity():
+		return ErrorClassNoNetwork
 	default:
-		return "unreachable"
+		return ErrorClassServerUnavailable
 	}
+}
+
+// interfaceState is the minimal, OS-independent shape
+// hasOtherNetworkConnectivity needs from one network interface. Reducing
+// *net.Interface to this shape (rather than depending on it directly)
+// lets tests exercise both connectivity branches with synthetic values
+// instead of the host machine's real network configuration.
+type interfaceState struct {
+	up       bool
+	loopback bool
+	hasAddrs bool
+}
+
+// listNetworkInterfaces enumerates this device's network interfaces.
+// Tests override it to simulate connectivity states.
+var listNetworkInterfaces = defaultListNetworkInterfaces
+
+func defaultListNetworkInterfaces() ([]interfaceState, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	states := make([]interfaceState, len(interfaces))
+	for i, iface := range interfaces {
+		addrs, _ := iface.Addrs()
+		states[i] = interfaceState{
+			up:       iface.Flags&net.FlagUp != 0,
+			loopback: iface.Flags&net.FlagLoopback != 0,
+			hasAddrs: len(addrs) > 0,
+		}
+	}
+	return states, nil
+}
+
+// hasOtherNetworkConnectivity reports whether this device has at least
+// one non-loopback network interface that is up and holds an address. It
+// fails open (returns true) on an enumeration error, since a local
+// interface-listing failure is never evidence that the network is down.
+func hasOtherNetworkConnectivity() bool {
+	interfaces, err := listNetworkInterfaces()
+	if err != nil {
+		return true
+	}
+	for _, iface := range interfaces {
+		if iface.up && !iface.loopback && iface.hasAddrs {
+			return true
+		}
+	}
+	return false
 }

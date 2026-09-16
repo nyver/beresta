@@ -88,7 +88,7 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	}
 	diagnostics := httpTransport.Diagnose(ctx)
 	if !diagnostics.Reachable || !diagnostics.Authenticated {
-		return ServerConnectionInfo{}, mapError(errors.New("server connection diagnostics failed: " + diagnostics.ErrorClass))
+		return ServerConnectionInfo{}, mapError(errors.New("server connection diagnostics failed: " + string(diagnostics.ErrorClass)))
 	}
 	if err := refreshRemoteDevices(ctx, acc, httpTransport, workspaceID); err != nil {
 		return ServerConnectionInfo{}, mapError(err)

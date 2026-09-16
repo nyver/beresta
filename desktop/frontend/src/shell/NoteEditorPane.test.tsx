@@ -28,7 +28,7 @@ function baseProps(overrides: Partial<NoteEditorPaneProps> = {}): NoteEditorPane
     tags: [],
     assignedTagIds: [],
     onTitleCommitted: vi.fn(),
-    onDeleted: vi.fn(),
+    onDelete: vi.fn(),
     onToggleTag: vi.fn(),
     onCreateTag: vi.fn(),
     ...overrides,
@@ -184,48 +184,29 @@ describe("NoteEditorPane", () => {
     expect(callOrder).toEqual(["commit", "restore"]);
   });
 
-  it("deletes the open note after the inline confirmation", async () => {
+  it("requests deletion of the open note immediately, without a confirmation prompt", async () => {
+    // Recoverable ordinary note deletion (specs/notes-management): no
+    // confirmation dialog here - NoteEditorPane just reports the request;
+    // the caller (Shell) owns removing it from the list and offering
+    // undo, since both need to outlive this pane once the note (and its
+    // selection) is gone. See Shell.test.tsx for that behavior.
     mockLocaleCatalog();
     mockSettings();
     mockEmptyDocument();
-    appMock.DeleteNote.mockResolvedValue(undefined);
     const note = fakeNote({ title: "Title" });
-    const onDeleted = vi.fn();
+    const onDelete = vi.fn();
     render(
       <I18nProvider>
-        <NoteEditorPane {...baseProps({ note, onDeleted })} />
+        <NoteEditorPane {...baseProps({ note, onDelete })} />
       </I18nProvider>,
     );
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
     await user.click(await screen.findByRole("menuitem", { name: "shell.delete_note" }));
-    await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
-    expect(appMock.DeleteNote).toHaveBeenCalledWith(note.id);
-    expect(onDeleted).toHaveBeenCalledWith(note.id);
-  });
-
-  it("shows an error when note deletion fails", async () => {
-    mockLocaleCatalog();
-    mockSettings();
-    mockEmptyDocument();
-    appMock.DeleteNote.mockRejectedValue(
-      new Error(JSON.stringify({ code: "internal", message: "boom" })),
-    );
-    const note = fakeNote({ title: "Title" });
-    render(
-      <I18nProvider>
-        <NoteEditorPane {...baseProps({ note })} />
-      </I18nProvider>,
-    );
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_note" }));
-    await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
+    expect(onDelete).toHaveBeenCalledWith(note.id);
+    expect(appMock.DeleteNote).not.toHaveBeenCalled();
   });
 
   it("assigns and removes a tag on the open note", async () => {

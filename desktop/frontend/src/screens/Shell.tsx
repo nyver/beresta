@@ -11,6 +11,7 @@ import {
   listTags,
   lockAccount,
   noteTagsByWorkspace,
+  restoreNote,
   searchByTag,
   setNoteTag,
   syncNow,
@@ -33,6 +34,7 @@ import { QuickNotePanel } from "../shell/QuickNotePanel";
 import { SearchBar, type SearchBarHandle } from "../shell/SearchBar";
 import { ShellIntegrationPanel } from "../shell/ShellIntegrationPanel";
 import { SyncPanel } from "../shell/SyncPanel";
+import { UndoSnackbar } from "../shell/UndoSnackbar";
 import { TagList } from "../shell/TagList";
 
 // Matches desktop/events.go's EventQuickNoteOpen.
@@ -135,7 +137,13 @@ export function Shell({ account, onLocked }: ShellProps) {
   const [quickNoteSession, setQuickNoteSession] = useState(0);
   const [quickNoteOpen, setQuickNoteOpen] = useState(false);
   const [creatingNote, setCreatingNote] = useState(false);
-  const [noteCreateError, setNoteCreateError] = useState<string | null>(null);
+  // Shared by note creation and delete/undo failures: a non-blocking
+  // inline banner above the note list, distinct from the full-screen
+  // `error` state below (which replaces the whole shell for a load
+  // failure) - a failed note action should never do that.
+  const [noteActionError, setNoteActionError] = useState<string | null>(null);
+  const [deletedNoteId, setDeletedNoteId] = useState<string | null>(null);
+  const deletedNoteTimerRef = useRef<number | undefined>(undefined);
   // The selection-change effect normally closes the open note. Creating a
   // note in another notebook is the exception: after navigating to that
   // notebook, keep the just-created note selected and open.
@@ -344,7 +352,7 @@ export function Shell({ account, onLocked }: ShellProps) {
   ) {
     if (creatingNote) return;
     setCreatingNote(true);
-    setNoteCreateError(null);
+    setNoteActionError(null);
     try {
       const created = await createNote(notebookId, "");
       setNotes((current) => [created, ...current]);
@@ -366,7 +374,7 @@ export function Shell({ account, onLocked }: ShellProps) {
       setAutoFocusNoteId(created.id);
       setSelectedNoteId(created.id);
     } catch (thrown: unknown) {
-      setNoteCreateError(errorMessage(unwrapError(thrown)));
+      setNoteActionError(errorMessage(unwrapError(thrown)));
     } finally {
       setCreatingNote(false);
     }
@@ -396,18 +404,64 @@ export function Shell({ account, onLocked }: ShellProps) {
     }
   }, [selectedNoteId]);
 
+  // How long the undo snackbar stays up before the deletion becomes
+  // final in the UI's eyes (the tombstone itself was already committed
+  // durably the moment this fired - undo just clears it again).
+  const UNDO_DELETE_DURATION_MS = 8000;
+
+  // Recoverable ordinary note deletion (specs/notes-management): removes
+  // the note from the active list immediately and offers undo, with no
+  // confirmation prompt - unlike notebook/tag deletion or a whole backup
+  // restore, which stay behind their own explicit confirmations since
+  // this task's recovery policy does not cover them.
   async function handleDeleteNote(noteId: string) {
-    await deleteNote(noteId);
     // Mirrors handleTitleCommitted's optimistic patch: `notes` drives the
     // "all"/notebook filters directly, while tagNotes and searchResults
     // are separate fetches that would otherwise keep showing the
-    // just-deleted note until the next full reload or re-search.
+    // just-deleted note until the next full reload or re-search. `notes`
+    // itself keeps the row (soft-marked) rather than dropping it, so
+    // noteMetaById and a same-session undo can still find it.
     setNotes((current) => current.map((note) => (note.id === noteId ? { ...note, deleted: true } : note)));
     setTagNotes((current) => current.filter((note) => note.id !== noteId));
     setSearchResults((current) =>
       current === null ? current : current.filter((result) => result.note.id !== noteId),
     );
     setSelectedNoteId("");
+
+    try {
+      await deleteNote(noteId);
+    } catch (thrown: unknown) {
+      // The tombstone commit itself failed: nothing was actually
+      // deleted, so put the optimistic removal back rather than leave
+      // the list disagreeing with local state.
+      setNotes((current) => current.map((note) => (note.id === noteId ? { ...note, deleted: false } : note)));
+      setNoteActionError(errorMessage(unwrapError(thrown)));
+      return;
+    }
+
+    window.clearTimeout(deletedNoteTimerRef.current);
+    setDeletedNoteId(noteId);
+    deletedNoteTimerRef.current = window.setTimeout(() => setDeletedNoteId(null), UNDO_DELETE_DURATION_MS);
+  }
+
+  async function handleUndoDelete() {
+    const noteId = deletedNoteId;
+    if (!noteId) return;
+    window.clearTimeout(deletedNoteTimerRef.current);
+    setDeletedNoteId(null);
+    try {
+      // Offline-capable: this is the same signed local commit path as
+      // any other edit, so it durably un-tombstones the note now and
+      // synchronizes later, with no network required (specs/notes-
+      // management's "note returns from local state and the resulting
+      // operations synchronize later" scenario).
+      await restoreNote(noteId);
+    } catch (thrown: unknown) {
+      setNoteActionError(errorMessage(unwrapError(thrown)));
+      return;
+    }
+    setNotes((current) => current.map((note) => (note.id === noteId ? { ...note, deleted: false } : note)));
+    setSelectedNoteId(noteId);
   }
 
   function handleNotebookMoved(notebookId: string, newParentId: string) {
@@ -751,9 +805,9 @@ export function Shell({ account, onLocked }: ShellProps) {
             />
           </aside>
           <section className="shell-notes">
-            {noteCreateError ? (
+            {noteActionError ? (
               <p className="error" role="alert">
-                {noteCreateError}
+                {noteActionError}
               </p>
             ) : null}
             <SearchBar
@@ -784,7 +838,7 @@ export function Shell({ account, onLocked }: ShellProps) {
               tags={tags}
               assignedTagIds={selectedNote ? (noteTagIds[selectedNote.id] ?? []) : []}
               onTitleCommitted={handleTitleCommitted}
-              onDeleted={handleDeleteNote}
+              onDelete={(noteId) => void handleDeleteNote(noteId)}
               onToggleTag={handleToggleNoteTag}
               onCreateTag={handleCreateAndAssignTag}
               autoFocusNoteId={autoFocusNoteId}
@@ -797,6 +851,16 @@ export function Shell({ account, onLocked }: ShellProps) {
           </section>
         </div>
       )}
+      {deletedNoteId ? (
+        <UndoSnackbar
+          message={t("shell.note_deleted")}
+          onUndo={() => void handleUndoDelete()}
+          onDismiss={() => {
+            window.clearTimeout(deletedNoteTimerRef.current);
+            setDeletedNoteId(null);
+          }}
+        />
+      ) : null}
     </main>
   );
 }

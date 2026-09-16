@@ -27,7 +27,12 @@ Widget hostEditor(FakeGateway gateway, String noteId) => MaterialApp(
     GlobalWidgetsLocalizations.delegate,
     GlobalCupertinoLocalizations.delegate,
   ],
-  home: EditorScreen(gateway: gateway, strings: Strings("en"), noteId: noteId),
+  home: EditorScreen(
+    gateway: gateway,
+    strings: Strings("en"),
+    noteId: noteId,
+    onNoteListChanged: () {},
+  ),
 );
 
 void main() {

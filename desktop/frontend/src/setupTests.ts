@@ -59,6 +59,7 @@ export const appMock = {
   CommitNoteBody: vi.fn(),
   CreateNote: vi.fn(),
   DeleteNote: vi.fn(),
+  RestoreNote: vi.fn(),
   PickAttachmentFile: vi.fn(),
   ListNoteAttachments: vi.fn(),
   AddAttachmentFromFile: vi.fn(),

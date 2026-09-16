@@ -517,7 +517,10 @@ describe("Shell", () => {
     expect(await screen.findByRole("button", { name: "shell.all_notes" })).toHaveClass("selected");
   });
 
-  it("deletes the open note and clears the editor selection", async () => {
+  it("deletes the open note immediately, without a confirmation prompt, and offers undo", async () => {
+    // Recoverable ordinary note deletion (specs/notes-management): "SHALL
+    // remove it from the active list immediately and SHALL offer an
+    // offline-capable undo action without requiring confirmation."
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);
     const note = fakeNote({ title: "Grocery list" });
@@ -530,11 +533,59 @@ describe("Shell", () => {
     await user.click(await screen.findByText("Grocery list"));
     await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
     await user.click(await screen.findByRole("menuitem", { name: "shell.delete_note" }));
-    await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
 
     expect(appMock.DeleteNote).toHaveBeenCalledWith(note.id);
     expect(screen.queryByText("shell.detail_placeholder")).not.toBeInTheDocument();
     expect(screen.queryByText("Grocery list")).not.toBeInTheDocument();
+    expect(await screen.findByText("shell.note_deleted")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "common.undo" })).toBeInTheDocument();
+  });
+
+  it("restores a deleted note when undo is chosen, even while offline", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    const note = fakeNote({ title: "Grocery list" });
+    appMock.ListNotes.mockResolvedValue([note]);
+    mockEmptyNoteDocument();
+    appMock.DeleteNote.mockResolvedValue(undefined);
+    // RestoreNote is the same local-only tombstone-toggle commit as any
+    // other edit - it never itself talks to a server, so resolving here
+    // (with no sync/transport call involved anywhere in this flow) is
+    // exactly what "offline" looks like for this scenario.
+    appMock.RestoreNote.mockResolvedValue(undefined);
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText("Grocery list"));
+    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_note" }));
+    await screen.findByText("shell.note_deleted");
+
+    await user.click(await screen.findByRole("button", { name: "common.undo" }));
+
+    expect(appMock.RestoreNote).toHaveBeenCalledWith(note.id);
+    expect(await screen.findByText("Grocery list")).toBeInTheDocument();
+    expect(screen.queryByText("shell.note_deleted")).not.toBeInTheDocument();
+  });
+
+  it("puts the note back and shows an error if the delete commit itself fails", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    const note = fakeNote({ title: "Grocery list" });
+    appMock.ListNotes.mockResolvedValue([note]);
+    mockEmptyNoteDocument();
+    appMock.DeleteNote.mockRejectedValue(
+      new Error(JSON.stringify({ code: "internal", message: "boom" })),
+    );
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByText("Grocery list"));
+    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.delete_note" }));
+
+    expect(await screen.findByText("Grocery list")).toBeInTheDocument();
+    expect(screen.queryByText("shell.note_deleted")).not.toBeInTheDocument();
   });
 
   it("opens the quick-note capture panel on quicknote:open and reloads notes once it closes", async () => {

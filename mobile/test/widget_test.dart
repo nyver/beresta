@@ -350,24 +350,54 @@ void main() {
     ));
   });
 
-  testWidgets("a note can be deleted from the editor", (tester) async {
-    final gateway = FakeGateway(unlocked: true);
-    await tester.pumpWidget(BerestaApp(gateway: gateway));
-    await tester.pumpAndSettle();
+  testWidgets(
+    "a note is deleted immediately from the editor, without a confirmation prompt, and offers undo",
+    (tester) async {
+      // Recoverable ordinary note deletion (specs/notes-management): "SHALL
+      // remove it from the active list immediately and SHALL offer an
+      // offline-capable undo action without requiring confirmation."
+      final gateway = FakeGateway(unlocked: true);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text("Offline note"));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.delete_forever_outlined));
-    await tester.pumpAndSettle();
-    expect(find.text("Delete this note?"), findsOneWidget);
+      await tester.tap(find.text("Offline note"));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.delete_forever_outlined));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(FilledButton, "Delete"));
-    await tester.pumpAndSettle();
+      expect(find.text("Delete this note?"), findsNothing);
+      expect(gateway.note["deleted"], true);
+      expect(find.byType(QuillEditor), findsNothing);
+      expect(find.text("Offline note"), findsNothing);
+      expect(find.text("Note deleted"), findsOneWidget);
+      expect(find.widgetWithText(SnackBarAction, "Undo"), findsOneWidget);
+    },
+  );
 
-    expect(gateway.note["deleted"], true);
-    expect(find.byType(QuillEditor), findsNothing);
-    expect(find.text("Offline note"), findsNothing);
-  });
+  testWidgets(
+    "restores a deleted note when Undo is tapped on the snackbar, even while offline",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text("Offline note"));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.delete_forever_outlined));
+      await tester.pumpAndSettle();
+      expect(gateway.note["deleted"], true);
+
+      // FakeGateway.deleteNote(id, false) is the same local tombstone
+      // toggle as any other commit - resolving here with no transport
+      // call anywhere in this flow is exactly what "offline" looks like
+      // for this scenario.
+      await tester.tap(find.widgetWithText(SnackBarAction, "Undo"));
+      await tester.pumpAndSettle();
+
+      expect(gateway.note["deleted"], false);
+      expect(find.text("Offline note"), findsOneWidget);
+    },
+  );
 
   testWidgets("background transition does not expose note text", (
     tester,

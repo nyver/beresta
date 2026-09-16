@@ -669,13 +669,39 @@ li:hover > .tree-row-delete,
   font-size: 0.85rem;
 }
 
-.note-delete-confirm {
-  flex: none;
+.undo-snackbar {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: #2b2118;
+  color: #f8f6f1;
+  box-shadow: 0 0.25rem 1rem rgba(30, 27, 24, 0.35);
+  z-index: 20;
+}
+
+.undo-snackbar-message {
   white-space: nowrap;
+}
+
+.undo-snackbar-undo {
+  color: #e8c887;
+  font-weight: 700;
+}
+
+.undo-snackbar-dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
 }
 
 .note-title-input:focus {

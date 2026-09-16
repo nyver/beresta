@@ -1007,6 +1007,7 @@ class _NotesShellState extends State<NotesShell> {
               strings: widget.strings,
               noteId: noteId,
               autoFocusTitle: autoFocusTitle,
+              onNoteListChanged: () => unawaited(refresh()),
             ),
       ),
     );
@@ -2139,6 +2140,7 @@ class EditorScreen extends StatefulWidget {
     required this.gateway,
     required this.strings,
     required this.noteId,
+    required this.onNoteListChanged,
     this.autoFocusTitle = false,
     super.key,
   });
@@ -2153,6 +2155,12 @@ class EditorScreen extends StatefulWidget {
   // silent removal if the user leaves without editing it - see
   // _EditorScreenState's PopScope handler and _touched.
   final bool autoFocusTitle;
+  // Called after this note is deleted (once, on the way out) and again
+  // if the user later taps Undo on the snackbar - both happen after this
+  // screen has already popped, so the caller (NotesShell.refresh) is
+  // reached via this captured callback rather than any BuildContext of
+  // this screen's own, which is gone by then.
+  final VoidCallback onNoteListChanged;
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -2472,39 +2480,56 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  // Recoverable ordinary note deletion (specs/notes-management): removes
+  // the note immediately and offers undo via a snackbar, with no
+  // confirmation prompt - unlike notebook deletion or a whole backup
+  // restore, which stay behind their own explicit confirmations since
+  // this task's recovery policy does not cover them.
   Future<void> deleteNote() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder:
-          (dialogContext) => AlertDialog(
-            title: Text(widget.strings("delete_note")),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: Text(widget.strings("cancel")),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: Text(widget.strings("delete")),
-              ),
-            ],
-          ),
-    );
-    if (confirmed != true) return;
+    final noteId = widget.noteId;
+    final gateway = widget.gateway;
+    final onNoteListChanged = widget.onNoteListChanged;
     try {
-      await widget.gateway.deleteNote(widget.noteId, true);
-      requestCurrentWorkspaceSync(widget.gateway);
-      if (mounted) {
-        setState(() => dirty = false);
-        Navigator.pop(context);
-      }
+      await gateway.deleteNote(noteId, true);
+      requestCurrentWorkspaceSync(gateway);
     } catch (failure) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(describeFailure(widget.strings, failure))),
         );
       }
+      return;
     }
+    if (!mounted) return;
+    // Captured before popping: this screen's own context is gone once
+    // Navigator.pop returns, but the snackbar (and, if tapped, Undo) must
+    // still show on whatever screen becomes visible underneath.
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => dirty = false);
+    Navigator.pop(context);
+    onNoteListChanged();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(widget.strings("note_deleted")),
+        action: SnackBarAction(
+          label: widget.strings("undo"),
+          onPressed: () {
+            // Offline-capable: deleteNote(..., false) is the same signed
+            // local commit path as any other edit, so it durably un-
+            // tombstones the note now and synchronizes later, with no
+            // network required (specs/notes-management's "note returns
+            // from local state and the resulting operations synchronize
+            // later" scenario).
+            unawaited(
+              gateway.deleteNote(noteId, false).then((_) {
+                requestCurrentWorkspaceSync(gateway);
+                onNoteListChanged();
+              }),
+            );
+          },
+        ),
+      ),
+    );
   }
 
   @override

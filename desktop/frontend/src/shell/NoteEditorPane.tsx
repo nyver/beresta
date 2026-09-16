@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-import { deleteNote, unwrapError, type SyncStatusValue } from "../api";
+import { type SyncStatusValue } from "../api";
 import { NoteEditor, type NoteEditorHandle, type NoteSaveState } from "../editor/NoteEditor";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
@@ -27,10 +27,13 @@ export interface NoteEditorPaneProps {
    * committed, so the caller can patch its own note list state. Never
    * called if the commit failed - see commitTitleIfChanged. */
   onTitleCommitted: (noteId: string, title: string) => void;
-  /** Called after the open note has been durably tombstoned, so the
-   * caller (Shell) can drop it from its own note list state and clear
-   * the selection. */
-  onDeleted: (noteId: string) => Promise<void> | void;
+  /** Called when the user chooses "Delete" for the open note. Recoverable
+   * ordinary note deletion (specs/notes-management) removes it from the
+   * active list immediately and offers an undo, without asking for
+   * confirmation here - the caller (Shell) owns that whole flow, since
+   * the undo snackbar must outlive this pane once the note (and this
+   * pane's selection) is gone. */
+  onDelete: (noteId: string) => void;
   /** Assigns or unassigns one tag on the open note. */
   onToggleTag: (noteId: string, tagId: string, present: boolean) => Promise<void>;
   /** Creates a new workspace tag and assigns it to the open note. */
@@ -76,7 +79,7 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
       tags,
       assignedTagIds,
       onTitleCommitted,
-      onDeleted,
+      onDelete,
       onToggleTag,
       onCreateTag,
       autoFocusNoteId = "",
@@ -88,14 +91,11 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     },
     ref,
   ) {
-    const { t, errorMessage } = useI18n();
+    const { t } = useI18n();
     const editorRef = useRef<NoteEditorHandle>(null);
     const attachmentPanelRef = useRef<AttachmentPanelHandle>(null);
     const titleInputRef = useRef<HTMLInputElement>(null);
     const [title, setTitle] = useState(note?.title ?? "");
-    const [confirmingDelete, setConfirmingDelete] = useState(false);
-    const [deleting, setDeleting] = useState(false);
-    const [deleteError, setDeleteError] = useState<string | null>(null);
     const [saveState, setSaveState] = useState<NoteSaveState>({ state: null });
     const handleSaveStateChange = useCallback((next: NoteSaveState) => setSaveState(next), []);
     // Bumped after RestoreRevision commits a new current revision, and
@@ -115,13 +115,9 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
 
     useEffect(() => {
       setTitle(note?.title ?? "");
-      // Also covers a just-completed delete: onDeleted clears the parent's
+      // Also covers a just-completed delete: onDelete clears the parent's
       // selection, which re-renders this same component instance with
-      // note=null rather than unmounting it, so `deleting` would otherwise
-      // stay stuck at true from handleDelete's success path.
-      setConfirmingDelete(false);
-      setDeleting(false);
-      setDeleteError(null);
+      // note=null rather than unmounting it.
       setHistoryOpen(false);
       setAttachmentsOpen(false);
     }, [note?.id, note?.title]);
@@ -137,19 +133,6 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [note?.id, autoFocusNoteId]);
-
-    async function handleDelete() {
-      if (!note) return;
-      setDeleting(true);
-      setDeleteError(null);
-      try {
-        await deleteNote(note.id);
-        await onDeleted(note.id);
-      } catch (thrown: unknown) {
-        setDeleteError(errorMessage(unwrapError(thrown)));
-        setDeleting(false);
-      }
-    }
 
     async function commitTitleIfChanged() {
       if (!note) return;
@@ -194,36 +177,14 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
             aria-label={t("shell.detail_title_label")}
             placeholder={t("shell.untitled_note")}
           />
-          {confirmingDelete ? (
-            <span className="note-delete-confirm">
-              <span>{t("shell.delete_note_confirm")}</span>
-              <button type="button" disabled={deleting} onClick={() => void handleDelete()}>
-                {deleting ? t("shell.deleting") : t("shell.delete_confirm_button")}
-              </button>
-              <button
-                type="button"
-                className="link-button"
-                disabled={deleting}
-                onClick={() => setConfirmingDelete(false)}
-              >
-                {t("common.cancel")}
-              </button>
-            </span>
-          ) : (
-            <KebabMenu
-              label={t("shell.note_actions")}
-              items={[
-                { label: t("revisions.open_button"), onSelect: () => setHistoryOpen(true) },
-                { label: t("shell.delete_note"), onSelect: () => setConfirmingDelete(true), destructive: true },
-              ]}
-            />
-          )}
+          <KebabMenu
+            label={t("shell.note_actions")}
+            items={[
+              { label: t("revisions.open_button"), onSelect: () => setHistoryOpen(true) },
+              { label: t("shell.delete_note"), onSelect: () => onDelete(note.id), destructive: true },
+            ]}
+          />
         </div>
-        {deleteError ? (
-          <p className="error" role="alert">
-            {deleteError}
-          </p>
-        ) : null}
         <NoteTagsEditor
           tags={tags}
           assignedTagIds={assignedTagIds}

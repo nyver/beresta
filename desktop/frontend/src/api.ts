@@ -49,6 +49,7 @@ import {
   ReadAttachmentPreview,
   RemoveAttachment,
   RenameNotebook,
+  RestoreNote,
   RestoreRevision,
   RestoreSelective,
   RestoreWhole,
@@ -409,6 +410,15 @@ export async function createNotebook(parentId: string, name: string): Promise<ma
  * durability warning to the user beyond the usual UI confirmation. */
 export async function deleteNote(noteId: string): Promise<void> {
   return DeleteNote(noteId);
+}
+
+/** restoreNote clears a note's tombstone, reversing deleteNote - the
+ * offline-capable undo behind the note-deleted snackbar (Shell.tsx). The
+ * tombstone toggle is itself a signed encrypted outbox operation, so an
+ * undo made while offline still commits locally now and synchronizes
+ * once a transport is reachable, the same as any other local edit. */
+export async function restoreNote(noteId: string): Promise<void> {
+  return RestoreNote(noteId);
 }
 
 /** deleteNotebook tombstones a notebook. Notes filed in it are not

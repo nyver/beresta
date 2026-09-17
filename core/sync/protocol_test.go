@@ -98,13 +98,16 @@ func (t *workerTransport) Push(_ context.Context, _ model.ID, ops []WireOperatio
 }
 
 type workerRepository struct {
-	calls   []string
-	cursor  Cursor
-	pending []WireOperation
+	calls       []string
+	cursor      Cursor
+	pending     []WireOperation
+	quarantined []WireOperation
 }
 
 func (r *workerRepository) Cursor(context.Context, model.ID) (Cursor, error) { return r.cursor, nil }
-func (*workerRepository) Quarantine(context.Context, WireOperation, string, time.Time) error {
+func (r *workerRepository) Quarantine(_ context.Context, op WireOperation, _ string, _ time.Time) error {
+	r.calls = append(r.calls, "quarantine")
+	r.quarantined = append(r.quarantined, op)
 	return nil
 }
 func (*workerRepository) QuarantineBlocked(context.Context, model.ID) (bool, error) {

@@ -32,11 +32,24 @@ const (
 	authSignatureDomain  = "beresta.auth.v1"
 )
 
+// trustError marks ErrCertificatePin and ErrAuthentication as trust-boundary
+// failures rather than ordinary connectivity errors: a client's pinned
+// fingerprint no longer matching the server, or the server rejecting this
+// device's credentials, is a security-relevant condition the user must
+// review, not something to retry silently forever. Its TrustFailure method
+// lets core/sync's worker recognize this structurally (see
+// core/sync.classifySyncError) without importing this package, which
+// itself imports core/sync for OperationTransport.
+type trustError struct{ message string }
+
+func (e *trustError) Error() string    { return e.message }
+func (*trustError) TrustFailure() bool { return true }
+
 var (
-	ErrCertificatePin = errors.New("transport: server certificate fingerprint mismatch")
-	ErrAuthentication = errors.New("transport: device authentication failed")
-	ErrPermanent      = errors.New("transport: permanent server rejection")
-	ErrNotFound       = errors.New("transport: remote object not found")
+	ErrCertificatePin error = &trustError{"transport: server certificate fingerprint mismatch"}
+	ErrAuthentication error = &trustError{"transport: device authentication failed"}
+	ErrPermanent            = errors.New("transport: permanent server rejection")
+	ErrNotFound             = errors.New("transport: remote object not found")
 )
 
 type HTTPSecurityMode string

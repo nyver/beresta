@@ -73,6 +73,11 @@ func Summarize(in Inputs) presentation.SyncSummary {
 	}
 	switch in.Progress.Phase {
 	case coresync.PhaseBackoff:
+		if in.Progress.ErrorClass == "trust_or_configuration" {
+			summary.State = presentation.SyncStateActionRequired
+			summary.ActionRequired = presentation.RecoveryActionReviewConnection
+			return summary
+		}
 		if retryIn := in.Progress.RetryDeadline.Sub(in.Now); retryIn > 0 {
 			summary.RetryIn = retryIn
 		}

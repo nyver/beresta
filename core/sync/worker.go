@@ -371,6 +371,19 @@ func stopAndDrain(timer *time.Timer) {
 	}
 }
 
+// trustFailure is implemented by a transport error indicating the server's
+// certificate or authentication no longer matches what this client trusts
+// (specs/release-quality's "TLS identity changes" scenario), as opposed to
+// an ordinary connectivity failure. classifySyncError recognizes it
+// structurally, via errors.As against this interface, because core/sync
+// cannot import core/transport (which itself imports core/sync for
+// OperationTransport) to reference its concrete error types directly. See
+// core/transport's ErrCertificatePin and ErrAuthentication.
+type trustFailure interface {
+	error
+	TrustFailure() bool
+}
+
 func classifySyncError(err error) string {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
@@ -378,6 +391,10 @@ func classifySyncError(err error) string {
 	case errors.Is(err, ErrUnsupportedVersion):
 		return "unsupported_version"
 	default:
+		var trust trustFailure
+		if errors.As(err, &trust) && trust.TrustFailure() {
+			return "trust_or_configuration"
+		}
 		return "transient_transport"
 	}
 }

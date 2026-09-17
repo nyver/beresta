@@ -83,6 +83,34 @@ func TestSummarizeBackoffWithOtherErrorClassIsRetrying(t *testing.T) {
 	}
 }
 
+// TestSummarizeBackoffWithTrustErrorClassIsActionRequired covers task 3.8's
+// "TLS identity change" regression (specs/release-quality's "TLS identity
+// changes" scenario: "trust action is requested"): a certificate/auth
+// trust-boundary failure must surface as actionable review_connection, not
+// as an ordinary offline/retrying state a user would dismiss as a routine
+// network hiccup that resolves itself.
+func TestSummarizeBackoffWithTrustErrorClassIsActionRequired(t *testing.T) {
+	now := time.Now()
+	summary := Summarize(Inputs{
+		Configured: true,
+		Progress: coresync.CoordinatorProgress{
+			Phase:         coresync.PhaseBackoff,
+			ErrorClass:    "trust_or_configuration",
+			RetryDeadline: now.Add(5 * time.Second),
+		},
+		Now: now,
+	})
+	if summary.State != presentation.SyncStateActionRequired {
+		t.Fatalf("state = %q, want action_required", summary.State)
+	}
+	if summary.ActionRequired != presentation.RecoveryActionReviewConnection {
+		t.Fatalf("action required = %q, want review_connection", summary.ActionRequired)
+	}
+	if summary.RetryIn != 0 {
+		t.Fatalf("retry in = %v, want 0 - a trust failure is not an automatic retry", summary.RetryIn)
+	}
+}
+
 func TestSummarizeBackoffPastDeadlineReportsNoRetryIn(t *testing.T) {
 	now := time.Now()
 	summary := Summarize(Inputs{

@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -108,6 +109,89 @@ func TestWorkerBackoffRetryInComesFromTheInjectedJitterFunction(t *testing.T) {
 			observed++
 		case <-deadline:
 			t.Fatalf("only observed %d backoff events before timing out, want 3", observed)
+		}
+	}
+}
+
+// fakeTrustFailure implements trustFailure so tests can prove
+// classifySyncError recognizes a transport's trust-boundary error
+// structurally, exactly as core/transport's real ErrCertificatePin and
+// ErrAuthentication do, without this package importing core/transport.
+type fakeTrustFailure struct{}
+
+func (fakeTrustFailure) Error() string      { return "sync: fake trust failure" }
+func (fakeTrustFailure) TrustFailure() bool { return true }
+
+// TestClassifySyncErrorRecognizesTrustFailureStructurally covers task 3.8's
+// "TLS identity change" regression: classifySyncError must find a
+// trustFailure even after the transport/worker layers wrap it with %w (the
+// same wrapping Worker.SyncOnce applies to every transport error), and must
+// not misclassify an ordinary error as one.
+func TestClassifySyncErrorRecognizesTrustFailureStructurally(t *testing.T) {
+	wrapped := fmt.Errorf("sync: pull: %w", fakeTrustFailure{})
+	if got := classifySyncError(wrapped); got != "trust_or_configuration" {
+		t.Fatalf("classifySyncError(wrapped trust failure) = %q, want trust_or_configuration", got)
+	}
+	if got := classifySyncError(errors.New("sync: pull: connection refused")); got != "transient_transport" {
+		t.Fatalf("classifySyncError(ordinary error) = %q, want transient_transport", got)
+	}
+}
+
+// trustFailingTransport always fails Pull with a trust-boundary error,
+// mirroring what core/transport.HTTP returns when a pinned fingerprint no
+// longer matches the server's certificate.
+type trustFailingTransport struct{}
+
+func (trustFailingTransport) Pull(context.Context, model.ID, Cursor, int) (PullPage, error) {
+	return PullPage{}, fmt.Errorf("sync: pull: %w", fakeTrustFailure{})
+}
+func (trustFailingTransport) Push(context.Context, model.ID, []WireOperation) ([]PushResult, error) {
+	return nil, nil
+}
+
+// TestWorkerReportsTrustFailureAsActionableNotOffline covers task 3.8's
+// "TLS identity change" regression end to end through Worker.Run: a
+// certificate/authentication trust-boundary failure must reach Progress as
+// the "trust_or_configuration" class - which core/syncsummary.Summarize
+// routes to action_required/review_connection - rather than the generic
+// "transient_transport" class a routine connectivity hiccup produces,
+// which would instead surface as an ordinary, dismissible offline state
+// (specs/release-quality's "TLS identity changes" scenario: "trust action
+// is requested").
+func TestWorkerReportsTrustFailureAsActionableNotOffline(t *testing.T) {
+	workspaceID := testID(53)
+	repository := &workerRepository{cursor: Cursor{WorkspaceID: workspaceID, Epoch: 1}}
+	progressCh := make(chan Progress, 32)
+	worker, err := NewWorker(workspaceID, repository, trustFailingTransport{}, acceptingProcessor{}, WorkerOptions{
+		InitialBackoff: 10 * time.Second,
+		MaxBackoff:     time.Minute,
+		Progress:       func(p Progress) { progressCh <- p },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx, make(chan struct{})) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case p := <-progressCh:
+			if p.Phase != PhaseBackoff {
+				continue
+			}
+			if p.ErrorClass != "trust_or_configuration" {
+				t.Fatalf("ErrorClass = %q, want trust_or_configuration", p.ErrorClass)
+			}
+			return
+		case <-deadline:
+			t.Fatal("never observed a backoff progress event")
 		}
 	}
 }

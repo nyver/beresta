@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -67,11 +68,15 @@ func TestTechnicalDiagnosticsReportsIdentifiersAndMigrationVersion(t *testing.T)
 	}
 }
 
-// TestCopyDiagnosticsBundleOmitsNoteContentAndPassphrase covers task 4.2's
-// seeded-secret guarantee at the real collection layer (not just the fixed
-// schema internal/diagnostics validates): a note's distinctive title/body
-// and the account passphrase must never appear in the copied bundle, only
-// the allowlisted counts and identifiers.
+// TestCopyDiagnosticsBundleOmitsNoteContentAndPassphrase covers task 4.3's
+// seeded-secret sweep across every category
+// specs/product-experience's "Layered privacy-preserving diagnostics"
+// requirement prohibits: note content and titles, search queries,
+// sensitive attachment names, and passwords. Each seed is planted through
+// the same public App methods a real user action would use, then checked
+// against the real collection pipeline's output - not the fixed schema
+// internal/diagnostics validates in isolation, but what CopyDiagnostics
+// actually assembles from a live account.
 func TestCopyDiagnosticsBundleOmitsNoteContentAndPassphrase(t *testing.T) {
 	a := newTestApp(t)
 	dbPath := testDatabasePath(t, a)
@@ -89,12 +94,29 @@ func TestCopyDiagnosticsBundleOmitsNoteContentAndPassphrase(t *testing.T) {
 	if err := a.CommitNoteBody(CommitNoteBodyRequest{NoteID: note.ID, UpdateBase64: update, UpdateFormat: format}); err != nil {
 		t.Fatalf("CommitNoteBody: %v", err)
 	}
+	const notebookName = "seeded-secret-notebook-canary"
+	if _, err := a.CreateNotebook("", notebookName); err != nil {
+		t.Fatalf("CreateNotebook: %v", err)
+	}
+	const tagName = "seeded-secret-tag-canary"
+	if _, err := a.CreateTag(tagName); err != nil {
+		t.Fatalf("CreateTag: %v", err)
+	}
+	const searchQuery = "seeded-secret-search-query-canary"
+	if _, err := a.CreateSavedSearch("saved search", searchQuery); err != nil {
+		t.Fatalf("CreateSavedSearch: %v", err)
+	}
+	const attachmentName = "seeded-secret-attachment-name-canary.png"
+	if _, err := a.AddAttachmentFromBytes(note.ID, attachmentName, "image/png", base64.StdEncoding.EncodeToString([]byte("fake-image-bytes"))); err != nil {
+		t.Fatalf("AddAttachmentFromBytes: %v", err)
+	}
 
 	bundle, err := a.CopyDiagnostics()
 	if err != nil {
 		t.Fatalf("CopyDiagnostics: %v", err)
 	}
-	for _, secret := range []string{passphrase, title, body} {
+	seeds := []string{passphrase, title, body, notebookName, tagName, searchQuery, attachmentName}
+	for _, secret := range seeds {
 		if strings.Contains(bundle, secret) {
 			t.Fatalf("CopyDiagnostics() bundle exposed a seeded secret %q: %s", secret, bundle)
 		}

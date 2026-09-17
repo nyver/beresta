@@ -66,10 +66,15 @@ func TestTechnicalDiagnosticsReportsIdentifiers(t *testing.T) {
 	}
 }
 
-// TestCopyDiagnosticsBundleOmitsNoteContentAndPassphrase covers task 4.2's
-// seeded-secret guarantee at the real collection layer (not just the fixed
-// schema internal/diagnostics validates): a note's distinctive title and
-// the account passphrase must never appear in the copied bundle.
+// TestCopyDiagnosticsBundleOmitsNoteContentAndPassphrase covers task 4.3's
+// seeded-secret sweep across every category
+// specs/product-experience's "Layered privacy-preserving diagnostics"
+// requirement prohibits: note content and titles, sensitive attachment
+// names, and passwords. Each seed is planted through the same public
+// Service methods a real user action would use, then checked against the
+// real collection pipeline's output - not the fixed schema
+// internal/diagnostics validates in isolation, but what CopyDiagnostics
+// actually assembles from a live account.
 func TestCopyDiagnosticsBundleOmitsNoteContentAndPassphrase(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "beresta.db")
 	service, err := NewService(newTestServiceDeviceSecret(t))
@@ -82,15 +87,30 @@ func TestCopyDiagnosticsBundleOmitsNoteContentAndPassphrase(t *testing.T) {
 		t.Fatalf("CreateAccount: %v", err)
 	}
 	const title = "seeded-secret-note-title-canary"
-	if _, err := service.CreateNote("req-2", "", title); err != nil {
+	created, err := service.CreateNote("req-2", "", title)
+	if err != nil {
 		t.Fatalf("CreateNote: %v", err)
+	}
+	noteID := decodeJSON[map[string]any](t, created)["id"].(string)
+	const notebookName = "seeded-secret-notebook-canary"
+	if _, err := service.CreateNotebook("req-3", "", notebookName); err != nil {
+		t.Fatalf("CreateNotebook: %v", err)
+	}
+	const tagName = "seeded-secret-tag-canary"
+	if _, err := service.CreateTag("req-4", tagName); err != nil {
+		t.Fatalf("CreateTag: %v", err)
+	}
+	const attachmentName = "seeded-secret-attachment-name-canary.png"
+	if err := service.AddAttachmentData("req-5", noteID, attachmentName, "image/png", []byte("fake-image-bytes")); err != nil {
+		t.Fatalf("AddAttachmentData: %v", err)
 	}
 
 	bundle, err := service.CopyDiagnostics("4.2.0")
 	if err != nil {
 		t.Fatalf("CopyDiagnostics: %v", err)
 	}
-	for _, secret := range []string{passphrase, title} {
+	seeds := []string{passphrase, title, notebookName, tagName, attachmentName}
+	for _, secret := range seeds {
 		if strings.Contains(bundle, secret) {
 			t.Fatalf("CopyDiagnostics() bundle exposed a seeded secret %q: %s", secret, bundle)
 		}

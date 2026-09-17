@@ -13,6 +13,13 @@ import "core_gateway.dart";
 import "markdown_delta.dart";
 import "strings.dart";
 
+/// appVersion is this Flutter app's display version, matching
+/// pubspec.yaml's version field (without its build-number suffix). The Go
+/// core has no knowledge of the Android app package's own version, so
+/// diagnostics calls that need it (see DiagnosticsSection below) pass this
+/// constant explicitly rather than the core inventing one.
+const String appVersion = "0.1.0";
+
 /// Renders a localized error with the underlying platform failure appended
 /// in debug builds, so a real device can be diagnosed without attaching a
 /// debugger or reading logcat.
@@ -2020,9 +2027,332 @@ class _SettingsSheetState extends State<SettingsSheet> {
             },
             child: Text(widget.strings("save")),
           ),
+          const Divider(height: 32),
+          DiagnosticsSection(gateway: widget.gateway, strings: widget.strings),
         ],
       ),
     );
+  }
+}
+
+/// DiagnosticsSection covers task 4.2's Android user diagnostics screen:
+/// the always-shown summary, plus an expandable technical-details layer
+/// and a shared copy-diagnostics flow (specs/product-experience's
+/// "Layered privacy-preserving diagnostics" requirement). Both layers
+/// load lazily, on first expand, so opening Settings for an unrelated
+/// reason never fetches diagnostics the user did not ask for.
+class DiagnosticsSection extends StatefulWidget {
+  const DiagnosticsSection({required this.gateway, required this.strings, super.key});
+
+  final CoreGateway gateway;
+  final Strings strings;
+
+  @override
+  State<DiagnosticsSection> createState() => _DiagnosticsSectionState();
+}
+
+class _DiagnosticsSectionState extends State<DiagnosticsSection> {
+  bool expanded = false;
+  Map<String, dynamic>? summary;
+  String? summaryError;
+  bool loadingSummary = false;
+
+  bool technicalExpanded = false;
+  Map<String, dynamic>? technical;
+  String? technicalError;
+  bool loadingTechnical = false;
+
+  String? copyError;
+  bool copied = false;
+
+  Future<void> loadSummary() async {
+    setState(() {
+      loadingSummary = true;
+      summaryError = null;
+    });
+    try {
+      final value = await widget.gateway.diagnosticSummary(appVersion);
+      if (mounted) setState(() => summary = value);
+    } catch (failure) {
+      if (mounted) {
+        setState(() => summaryError = describeFailure(widget.strings, failure));
+      }
+    } finally {
+      if (mounted) setState(() => loadingSummary = false);
+    }
+  }
+
+  void toggleExpanded() {
+    final next = !expanded;
+    setState(() => expanded = next);
+    if (next && summary == null && !loadingSummary) {
+      unawaited(loadSummary());
+    }
+  }
+
+  Future<void> toggleTechnical() async {
+    final next = !technicalExpanded;
+    setState(() => technicalExpanded = next);
+    if (next && technical == null && !loadingTechnical) {
+      setState(() {
+        loadingTechnical = true;
+        technicalError = null;
+      });
+      try {
+        final value = await widget.gateway.technicalDiagnostics();
+        if (mounted) setState(() => technical = value);
+      } catch (failure) {
+        if (mounted) {
+          setState(
+            () => technicalError = describeFailure(widget.strings, failure),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => loadingTechnical = false);
+      }
+    }
+  }
+
+  Future<void> handleCopy() async {
+    setState(() => copyError = null);
+    try {
+      final bundle = await widget.gateway.copyDiagnostics(appVersion);
+      await Clipboard.setData(ClipboardData(text: bundle));
+      if (mounted) setState(() => copied = true);
+    } catch (failure) {
+      if (mounted) {
+        setState(() => copyError = describeFailure(widget.strings, failure));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = summary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton(
+          onPressed: toggleExpanded,
+          child: Text(widget.strings("diagnostics_title")),
+        ),
+        if (expanded)
+          if (loadingSummary)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: CircularProgressIndicator(),
+            )
+          else if (summaryError != null)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  summaryError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+                TextButton(
+                  onPressed: () => unawaited(loadSummary()),
+                  child: Text(widget.strings("retry")),
+                ),
+              ],
+            )
+          else if (current != null)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _diagnosticsRow(
+                  widget.strings("diagnostics_app_version"),
+                  current["app_version"] as String? ?? "",
+                ),
+                _diagnosticsRow(
+                  widget.strings("diagnostics_platform"),
+                  current["platform"] as String? ?? "",
+                ),
+                _diagnosticsRow(
+                  widget.strings("diagnostics_sync_configured"),
+                  current["sync_configured"] == true
+                      ? widget.strings("diagnostics_yes")
+                      : widget.strings("diagnostics_no"),
+                ),
+                _diagnosticsRow(
+                  widget.strings("diagnostics_last_successful_sync"),
+                  ((current["last_successful_sync_unix_ms"] as num?)
+                                  ?.toInt() ??
+                              0) >
+                          0
+                      ? DateTime.fromMillisecondsSinceEpoch(
+                        (current["last_successful_sync_unix_ms"] as num)
+                            .toInt(),
+                      ).toLocal().toString()
+                      : widget.strings("diagnostics_never"),
+                ),
+                _diagnosticsRow(
+                  widget.strings("diagnostics_pending_count"),
+                  "${current["pending_count"] ?? 0}",
+                ),
+                _diagnosticsRow(
+                  widget.strings("diagnostics_connection_state"),
+                  widget.strings(
+                    "sync_status_${current["connection_state"]}",
+                  ),
+                ),
+                _diagnosticsRow(
+                  widget.strings("diagnostics_backup"),
+                  widget.strings(
+                    "backup_health_${(current["backup"] as Map<String, dynamic>?)?["health"] ?? "unknown"}",
+                  ),
+                ),
+                _diagnosticsRow(
+                  widget.strings("diagnostics_storage_usage"),
+                  _formatBytes(
+                    (current["storage_usage_bytes"] as num?)?.toInt() ?? 0,
+                  ),
+                ),
+                _diagnosticsRow(
+                  widget.strings("diagnostics_database"),
+                  widget.strings("database_health_${current["database"]}"),
+                ),
+                _diagnosticsRow(
+                  widget.strings("diagnostics_update"),
+                  widget.strings("update_status_${current["update"]}"),
+                ),
+                TextButton(
+                  onPressed: () => unawaited(toggleTechnical()),
+                  child: Text(
+                    widget.strings(
+                      technicalExpanded
+                          ? "diagnostics_hide_technical_details"
+                          : "diagnostics_show_technical_details",
+                    ),
+                  ),
+                ),
+                if (technicalExpanded)
+                  if (loadingTechnical)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: CircularProgressIndicator(),
+                    )
+                  else if (technicalError != null)
+                    Text(
+                      technicalError!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    )
+                  else if (technical != null)
+                    _technicalDetails(technical!),
+                if (copyError != null)
+                  Text(
+                    copyError!,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                TextButton(
+                  onPressed: () => unawaited(handleCopy()),
+                  child: Text(
+                    widget.strings(
+                      copied ? "diagnostics_copied" : "diagnostics_copy",
+                    ),
+                  ),
+                ),
+              ],
+            ),
+      ],
+    );
+  }
+
+  Widget _technicalDetails(Map<String, dynamic> technical) {
+    final quarantined =
+        (technical["quarantined_operation_ids"] as List<dynamic>? ?? [])
+            .cast<String>();
+    final retryInMs = (technical["retry_in_ms"] as num?)?.toInt() ?? 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _diagnosticsRow(
+          widget.strings("diagnostics_workspace_id"),
+          technical["workspace_id"] as String? ?? "",
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_device_id"),
+          technical["device_id"] as String? ?? "",
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_last_error_class"),
+          (technical["last_error_class"] as String?)?.isNotEmpty == true
+              ? technical["last_error_class"] as String
+              : widget.strings("diagnostics_none"),
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_pending_operation_count"),
+          "${technical["pending_operation_count"] ?? 0}",
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_quarantined_operation_ids"),
+          quarantined.isEmpty
+              ? widget.strings("diagnostics_none")
+              : quarantined.join(", "),
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_cursor"),
+          "${technical["cursor_sequence"] ?? 0}@${technical["cursor_epoch"] ?? 0}",
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_retry_count"),
+          "${technical["retry_count"] ?? 0}",
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_retry_in"),
+          retryInMs > 0
+              ? "${(retryInMs / 1000).ceil()}s"
+              : widget.strings("diagnostics_none"),
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_transport_protocol"),
+          (technical["transport_protocol"] as String?)?.isNotEmpty == true
+              ? technical["transport_protocol"] as String
+              : widget.strings("diagnostics_none"),
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_transport_security_mode"),
+          (technical["transport_security_mode"] as String?)?.isNotEmpty ==
+                  true
+              ? technical["transport_security_mode"] as String
+              : widget.strings("diagnostics_none"),
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_transport_url"),
+          (technical["transport_url"] as String?)?.isNotEmpty == true
+              ? technical["transport_url"] as String
+              : widget.strings("diagnostics_none"),
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_migration_version"),
+          "${technical["migration_version"] ?? 0}",
+        ),
+      ],
+    );
+  }
+
+  Widget _diagnosticsRow(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(width: 160, child: Text(label)),
+        Expanded(child: SelectableText(value)),
+      ],
+    ),
+  );
+
+  String _formatBytes(int bytes) {
+    const units = ["B", "KB", "MB", "GB"];
+    double value = bytes.toDouble();
+    var unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex++;
+    }
+    return "${value.toStringAsFixed(unitIndex == 0 ? 0 : 1)} ${units[unitIndex]}";
   }
 }
 

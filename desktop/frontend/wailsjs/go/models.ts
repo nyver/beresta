@@ -204,6 +204,22 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class BackupStatusDTO {
+	    health: string;
+	    last_verified_unix_ms: number;
+	    location: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BackupStatusDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.health = source["health"];
+	        this.last_verified_unix_ms = source["last_verified_unix_ms"];
+	        this.location = source["location"];
+	    }
+	}
 	export class CommitNoteBodyRequest {
 	    note_id: string;
 	    update_base64: string;
@@ -257,6 +273,54 @@ export namespace main {
 	        this.database_path = source["database_path"];
 	        this.passphrase = source["passphrase"];
 	    }
+	}
+	export class DiagnosticSummaryDTO {
+	    app_version: string;
+	    platform: string;
+	    sync_configured: boolean;
+	    last_successful_sync_unix_ms: number;
+	    pending_count: number;
+	    connection_state: string;
+	    backup: BackupStatusDTO;
+	    storage_usage_bytes: number;
+	    database: string;
+	    update: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnosticSummaryDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.app_version = source["app_version"];
+	        this.platform = source["platform"];
+	        this.sync_configured = source["sync_configured"];
+	        this.last_successful_sync_unix_ms = source["last_successful_sync_unix_ms"];
+	        this.pending_count = source["pending_count"];
+	        this.connection_state = source["connection_state"];
+	        this.backup = this.convertValues(source["backup"], BackupStatusDTO);
+	        this.storage_usage_bytes = source["storage_usage_bytes"];
+	        this.database = source["database"];
+	        this.update = source["update"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class DiffLineDTO {
 	    op: string;
@@ -732,6 +796,42 @@ export namespace main {
 	        this.workspace_id = source["workspace_id"];
 	        this.name = source["name"];
 	        this.deleted = source["deleted"];
+	    }
+	}
+	export class TechnicalDiagnosticsDTO {
+	    workspace_id: string;
+	    device_id: string;
+	    last_error_class: string;
+	    pending_operation_count: number;
+	    quarantined_operation_ids: string[];
+	    cursor_sequence: number;
+	    cursor_epoch: number;
+	    retry_count: number;
+	    retry_in_ms: number;
+	    transport_protocol: string;
+	    transport_security_mode: string;
+	    transport_url: string;
+	    migration_version: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TechnicalDiagnosticsDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.workspace_id = source["workspace_id"];
+	        this.device_id = source["device_id"];
+	        this.last_error_class = source["last_error_class"];
+	        this.pending_operation_count = source["pending_operation_count"];
+	        this.quarantined_operation_ids = source["quarantined_operation_ids"];
+	        this.cursor_sequence = source["cursor_sequence"];
+	        this.cursor_epoch = source["cursor_epoch"];
+	        this.retry_count = source["retry_count"];
+	        this.retry_in_ms = source["retry_in_ms"];
+	        this.transport_protocol = source["transport_protocol"];
+	        this.transport_security_mode = source["transport_security_mode"];
+	        this.transport_url = source["transport_url"];
+	        this.migration_version = source["migration_version"];
 	    }
 	}
 	export class UnlockAccountRequest {

@@ -17,6 +17,8 @@ export function CommitNoteBody(arg1:main.CommitNoteBodyRequest):Promise<void>;
 
 export function ConnectServer(arg1:main.ConnectServerRequest):Promise<main.ServerConnectionInfo>;
 
+export function CopyDiagnostics():Promise<string>;
+
 export function CreateAccount(arg1:main.CreateAccountRequest):Promise<main.AccountInfo>;
 
 export function CreateManualBackup(arg1:string):Promise<main.BackupDTO>;
@@ -36,6 +38,8 @@ export function DeleteNote(arg1:string):Promise<void>;
 export function DeleteSavedSearch(arg1:string):Promise<void>;
 
 export function DiagnoseServer():Promise<transport.Diagnostics>;
+
+export function DiagnosticSummary():Promise<main.DiagnosticSummaryDTO>;
 
 export function DiffRevisions(arg1:string,arg2:string,arg3:string):Promise<Array<main.DiffLineDTO>>;
 
@@ -150,6 +154,8 @@ export function SyncConnectionInfo():Promise<main.ServerConnectionInfo>;
 export function SyncNow():Promise<void>;
 
 export function SyncSummary():Promise<main.SyncSummaryDTO>;
+
+export function TechnicalDiagnostics():Promise<main.TechnicalDiagnosticsDTO>;
 
 export function UnlockAccount(arg1:main.UnlockAccountRequest):Promise<main.AccountInfo>;
 

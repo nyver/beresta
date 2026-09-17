@@ -318,6 +318,9 @@ class MainActivity : FlutterFragmentActivity() {
             "importBackups" -> BackupDestination.importSelected(this, service, requestId)
             "getSettings" -> service.getSettings(requestId)
             "updateSettings" -> service.updateSettings(requestId, required(call, "encoded"))
+            "diagnosticSummary" -> service.diagnosticSummary(required(call, "appVersion"))
+            "technicalDiagnostics" -> service.technicalDiagnostics()
+            "copyDiagnostics" -> service.copyDiagnostics(required(call, "appVersion"))
             else -> error("unsupported core method: ${call.method}")
         }
     }

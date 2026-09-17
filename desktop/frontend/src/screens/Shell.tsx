@@ -32,6 +32,7 @@ import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPa
 import { NoteList, type NoteListMeta } from "../shell/NoteList";
 import { QuickNotePanel } from "../shell/QuickNotePanel";
 import { SearchBar, type SearchBarHandle } from "../shell/SearchBar";
+import { DiagnosticsPanel } from "../shell/DiagnosticsPanel";
 import { ShellIntegrationPanel } from "../shell/ShellIntegrationPanel";
 import { SyncPanel } from "../shell/SyncPanel";
 import { UndoSnackbar } from "../shell/UndoSnackbar";
@@ -721,6 +722,7 @@ export function Shell({ account, onLocked }: ShellProps) {
           <BackupsPanel onRestored={loadAll} />
           <ImportExportPanel onImported={loadAll} />
           <ShellIntegrationPanel />
+          <DiagnosticsPanel />
         </Modal>
       ) : null}
 

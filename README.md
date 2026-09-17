@@ -234,6 +234,23 @@ synchronization state ("· Offline", "· Syncing…", "· Synced HH:MM", or a
 clickable "· Sync failed" that opens the Synchronization dialog) - replaces
 relying on the topbar Sync button alone to know whether an edit is safe.
 
+Both clients now expose a Settings > Diagnostics section (specs/product-experience's
+"Layered privacy-preserving diagnostics" requirement): app version, platform,
+whether sync is configured, last successful sync, pending changes, connection
+state, backup health, local storage usage, database health, and update status,
+always visible once expanded. An "expand technical details" layer additionally
+shows the workspace/device ID, last synchronization error class, quarantined
+operation IDs, cursor position, retry state, transport configuration, and the
+local database's schema migration version - internal identifiers that stay out
+of the primary summary. Both layers load only when opened. A "Copy diagnostics"
+action renders the same bounded fields as a plain-text bundle for support
+conversations; `internal/diagnostics.CopyDiagnostics` accepts only these two
+fixed, reviewed schemas (`core/presentation.DiagnosticSummary` and
+`TechnicalDiagnostics`) and re-validates their field names against a
+forbidden-word list (password, key, content, title, query, invite, clipboard,
+and similar) on every call, so it can never carry note content, titles, search
+queries, passwords, keys, tokens, invite codes, or clipboard data.
+
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
 Cryptographic/platform protection verification is recorded in

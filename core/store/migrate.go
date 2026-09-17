@@ -129,6 +129,15 @@ func ensureSchemaMigrationsTable(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+// SchemaVersion reads the database's current recorded schema migration
+// version, or zero for a database that has never been migrated. Migrate
+// already ensures the schema_migrations table exists during account
+// creation/unlock, so callers reporting diagnostics after that point can
+// call this directly.
+func SchemaVersion(ctx context.Context, db *sql.DB) (int, error) {
+	return schemaVersion(ctx, db)
+}
+
 // schemaVersion reads the database's current recorded schema version, or
 // zero for a database that has never been migrated. Callers that have not
 // already ensured the schema_migrations table exists must call

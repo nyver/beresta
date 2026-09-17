@@ -35,18 +35,19 @@ type mobileEvent struct {
 // error. Long operations are canceled by request ID; UI events are polled in
 // bounded batches instead of invoking callbacks on foreign threads.
 type Service struct {
-	mu              sync.Mutex
-	root            context.Context
-	cancelRoot      context.CancelFunc
-	wrapper         *deviceWrapper
-	account         *account.Account
-	workspaceID     model.ID
-	requests        map[string]context.CancelFunc
-	events          []mobileEvent
-	nextEvent       uint64
-	coordinator *coresync.Coordinator
-	remote      *transport.HTTP
-	repository  *store.SyncRepository
+	mu           sync.Mutex
+	root         context.Context
+	cancelRoot   context.CancelFunc
+	wrapper      *deviceWrapper
+	account      *account.Account
+	databasePath string
+	workspaceID  model.ID
+	requests     map[string]context.CancelFunc
+	events       []mobileEvent
+	nextEvent    uint64
+	coordinator  *coresync.Coordinator
+	remote       *transport.HTTP
+	repository   *store.SyncRepository
 	// syncGeneration is bumped by DisconnectServer and Lock so a
 	// ConnectServer call already in flight (in particular
 	// reconnectSavedServer's background attempt after unlock) can detect
@@ -136,7 +137,7 @@ func (s *Service) CreateAccount(requestID, databasePath, passphrase string) (str
 	if err != nil {
 		return "", err
 	}
-	return s.activate(created)
+	return s.activate(created, databasePath)
 }
 
 func (s *Service) UnlockAccount(requestID, databasePath, passphrase string) (string, error) {
@@ -149,7 +150,7 @@ func (s *Service) UnlockAccount(requestID, databasePath, passphrase string) (str
 	if err != nil {
 		return "", err
 	}
-	return s.activate(unlocked)
+	return s.activate(unlocked, databasePath)
 }
 
 // EnableDeviceUnlock persists a platform-wrapped Root Key for the current
@@ -180,10 +181,10 @@ func (s *Service) UnlockWithDeviceKey(requestID, databasePath string) (string, e
 	if err != nil {
 		return "", err
 	}
-	return s.activate(unlocked)
+	return s.activate(unlocked, databasePath)
 }
 
-func (s *Service) activate(value *account.Account) (string, error) {
+func (s *Service) activate(value *account.Account, databasePath string) (string, error) {
 	workspaces, err := value.Workspaces()
 	if err != nil || len(workspaces) == 0 {
 		value.Lock()
@@ -203,7 +204,7 @@ func (s *Service) activate(value *account.Account) (string, error) {
 	}
 	s.mu.Lock()
 	previous, coordinator := s.account, s.coordinator
-	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = value, activeWorkspace, nil, nil, nil
+	s.account, s.databasePath, s.workspaceID, s.coordinator, s.remote, s.repository = value, databasePath, activeWorkspace, nil, nil, nil
 	s.mu.Unlock()
 	if coordinator != nil {
 		coordinator.Detach()
@@ -238,7 +239,7 @@ func (s *Service) reconnectSavedServer(value *account.Account) {
 func (s *Service) Lock() error {
 	s.mu.Lock()
 	value, coordinator := s.account, s.coordinator
-	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = nil, model.Nil, nil, nil, nil
+	s.account, s.databasePath, s.workspaceID, s.coordinator, s.remote, s.repository = nil, "", model.Nil, nil, nil, nil
 	// A ConnectServer call already past accountState() (in particular
 	// reconnectSavedServer's background retry after unlock) has no other
 	// way to notice this lock happened mid-attempt; bumping the generation

@@ -48,12 +48,14 @@ func TestWorkerBackoffDoublesThenCapsAtMaxBackoff(t *testing.T) {
 		80 * time.Millisecond,
 	}
 	var got []time.Duration
+	var gotRetryCounts []int
 	deadline := time.After(2 * time.Second)
 	for len(got) < len(want) {
 		select {
 		case p := <-progressCh:
 			if p.Phase == PhaseBackoff {
 				got = append(got, p.RetryIn)
+				gotRetryCounts = append(gotRetryCounts, p.RetryCount)
 			}
 		case <-deadline:
 			t.Fatalf("only observed %d backoff events before timing out, want %d: %v", len(got), len(want), got)
@@ -63,6 +65,58 @@ func TestWorkerBackoffDoublesThenCapsAtMaxBackoff(t *testing.T) {
 	for i, w := range want {
 		if got[i] != w {
 			t.Fatalf("backoff[%d] = %v, want %v (full sequence: %v)", i, got[i], w, got)
+		}
+		// RetryCount covers task 4.2's diagnostics technical-details field:
+		// it must count consecutive failures 1, 2, 3, ... rather than stay
+		// fixed or reset early, since a transport that never succeeds
+		// never hits the reset-to-zero branch on a successful cycle.
+		if want := i + 1; gotRetryCounts[i] != want {
+			t.Fatalf("RetryCount[%d] = %d, want %d (full sequence: %v)", i, gotRetryCounts[i], want, gotRetryCounts)
+		}
+	}
+}
+
+// TestWorkerRetryCountResetsAfterASuccessfulCycle proves RetryCount is not
+// a lifetime failure counter: once a cycle succeeds, the next failure
+// after it must start counting from 1 again, not continue from wherever
+// the prior failure streak left off.
+func TestWorkerRetryCountResetsAfterASuccessfulCycle(t *testing.T) {
+	workspaceID := testID(54)
+	repository := &workerRepository{cursor: Cursor{WorkspaceID: workspaceID, Epoch: 1}}
+	transport := &onceFailingTransport{}
+	progressCh := make(chan Progress, 32)
+	worker, err := NewWorker(workspaceID, repository, transport, acceptingProcessor{}, WorkerOptions{
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     time.Second,
+		Jitter:         func(cap time.Duration) time.Duration { return cap },
+		Progress:       func(p Progress) { progressCh <- p },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx, make(chan struct{})) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case p := <-progressCh:
+			if p.Phase == PhaseBackoff {
+				if p.RetryCount != 1 {
+					t.Fatalf("RetryCount on the first failure = %d, want 1", p.RetryCount)
+				}
+			}
+			if p.Phase == PhaseCurrent {
+				return
+			}
+		case <-deadline:
+			t.Fatal("never reached PhaseCurrent after the single failure recovered")
 		}
 	}
 }

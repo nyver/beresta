@@ -96,6 +96,46 @@ func newDiagnosticSummaryDTO(summary presentation.DiagnosticSummary) DiagnosticS
 	}
 }
 
+// TechnicalDiagnosticsDTO is the desktop JS-bridge projection of
+// presentation.TechnicalDiagnostics.
+type TechnicalDiagnosticsDTO struct {
+	WorkspaceID             string   `json:"workspace_id"`
+	DeviceID                string   `json:"device_id"`
+	LastErrorClass          string   `json:"last_error_class"`
+	PendingOperationCount   int      `json:"pending_operation_count"`
+	QuarantinedOperationIDs []string `json:"quarantined_operation_ids"`
+	CursorSequence          uint64   `json:"cursor_sequence"`
+	CursorEpoch             uint32   `json:"cursor_epoch"`
+	RetryCount              int      `json:"retry_count"`
+	RetryInMS               int64    `json:"retry_in_ms"`
+	TransportProtocol       string   `json:"transport_protocol"`
+	TransportSecurityMode   string   `json:"transport_security_mode"`
+	TransportURL            string   `json:"transport_url"`
+	MigrationVersion        int      `json:"migration_version"`
+}
+
+func newTechnicalDiagnosticsDTO(technical presentation.TechnicalDiagnostics) TechnicalDiagnosticsDTO {
+	quarantined := technical.QuarantinedOperationIDs
+	if quarantined == nil {
+		quarantined = []string{}
+	}
+	return TechnicalDiagnosticsDTO{
+		WorkspaceID:             technical.WorkspaceID,
+		DeviceID:                technical.DeviceID,
+		LastErrorClass:          technical.LastErrorClass,
+		PendingOperationCount:   technical.PendingOperationCount,
+		QuarantinedOperationIDs: quarantined,
+		CursorSequence:          technical.CursorSequence,
+		CursorEpoch:             technical.CursorEpoch,
+		RetryCount:              technical.RetryCount,
+		RetryInMS:               technical.RetryIn.Milliseconds(),
+		TransportProtocol:       technical.TransportProtocol,
+		TransportSecurityMode:   technical.TransportSecurityMode,
+		TransportURL:            technical.TransportURL,
+		MigrationVersion:        technical.MigrationVersion,
+	}
+}
+
 // unixMS renders t in the bridge's millisecond-epoch convention. The zero
 // time.Time (never happened) renders as 0, matching the "never" sentinel
 // every other bridge timestamp field already uses.

@@ -92,6 +92,23 @@ abstract interface class CoreGateway {
   Future<Map<String, dynamic>> getSettings();
   Future<void> updateSettings(Map<String, dynamic> settings);
   Future<List<Map<String, dynamic>>> pollEvents(int afterSequence);
+
+  /// Returns the bounded facts the user diagnostics screen always shows,
+  /// matching desktop's identical DiagnosticSummaryDTO - see
+  /// core/mobileapi.Service.DiagnosticSummary. appVersion is supplied by
+  /// the Flutter host, since the Go core has no knowledge of the Android
+  /// app package's own version.
+  Future<Map<String, dynamic>> diagnosticSummary(String appVersion);
+
+  /// Returns the additional facts the "expand technical details" layer of
+  /// the user diagnostics screen MAY show, matching desktop's identical
+  /// TechnicalDiagnosticsDTO - see core/mobileapi.Service.TechnicalDiagnostics.
+  Future<Map<String, dynamic>> technicalDiagnostics();
+
+  /// Renders the current diagnostics as the sanitized plain-text bundle
+  /// the "Copy diagnostics" action places on the clipboard - see
+  /// core/mobileapi.Service.CopyDiagnostics.
+  Future<String> copyDiagnostics(String appVersion);
 }
 
 class MethodChannelCore implements CoreGateway {
@@ -341,4 +358,19 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<List<Map<String, dynamic>>> pollEvents(int afterSequence) async =>
       _list(await _invoke("pollEvents", {"afterSequence": afterSequence}));
+
+  @override
+  Future<Map<String, dynamic>> diagnosticSummary(String appVersion) async =>
+      _object(
+        await _invoke("diagnosticSummary", {"appVersion": appVersion}),
+      );
+
+  @override
+  Future<Map<String, dynamic>> technicalDiagnostics() async =>
+      _object(await _invoke("technicalDiagnostics"));
+
+  @override
+  Future<String> copyDiagnostics(String appVersion) async =>
+      await _invoke("copyDiagnostics", {"appVersion": appVersion})
+          as String;
 }

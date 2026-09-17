@@ -29,6 +29,7 @@ type Coordinator struct {
 	lastErrorClass string
 	lastSuccess    time.Time
 	retryDeadline  time.Time
+	lastRetryCount int
 }
 
 func NewCoordinator(root context.Context) *Coordinator {
@@ -55,6 +56,7 @@ func (c *Coordinator) Attach(worker *Worker) error {
 	c.lastErrorClass = ""
 	c.lastSuccess = time.Time{}
 	c.retryDeadline = time.Time{}
+	c.lastRetryCount = 0
 
 	// Wrap the worker's own Progress callback so Coordinator can derive
 	// CoordinatorProgress without every caller replaying Progress events
@@ -140,6 +142,7 @@ func (c *Coordinator) recordProgress(p Progress, now func() time.Time) {
 	defer c.mu.Unlock()
 	c.lastPhase = p.Phase
 	c.lastErrorClass = p.ErrorClass
+	c.lastRetryCount = p.RetryCount
 	switch p.Phase {
 	case PhaseCurrent:
 		c.lastSuccess = now()
@@ -176,6 +179,9 @@ type CoordinatorProgress struct {
 	// not PhaseBackoff. It is diagnostic-only and never carries operation
 	// content or protocol detail.
 	ErrorClass string
+	// RetryCount is how many consecutive cycles have failed since the last
+	// success. It is zero once a cycle succeeds.
+	RetryCount int
 }
 
 // Progress returns the coordinator's current CoordinatorProgress snapshot.
@@ -188,5 +194,6 @@ func (c *Coordinator) Progress() CoordinatorProgress {
 		LastSuccess:   c.lastSuccess,
 		RetryDeadline: c.retryDeadline,
 		ErrorClass:    c.lastErrorClass,
+		RetryCount:    c.lastRetryCount,
 	}
 }

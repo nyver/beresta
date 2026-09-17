@@ -95,6 +95,9 @@ type Progress struct {
 	// ErrorDetail is a bounded, diagnostic-only description. It never
 	// contains operation ciphertext or key material.
 	ErrorDetail string
+	// RetryCount is how many consecutive cycles have failed since the last
+	// success, for a PhaseBackoff report. It is zero otherwise.
+	RetryCount int
 }
 
 type WorkerOptions struct {
@@ -267,6 +270,7 @@ func (w *Worker) SyncOnce(ctx context.Context) error {
 // a single workspace worker and applies capped full-jitter retry.
 func (w *Worker) Run(ctx context.Context, triggers <-chan struct{}) error {
 	backoff := w.options.InitialBackoff
+	retryCount := 0
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -281,14 +285,16 @@ func (w *Worker) Run(ctx context.Context, triggers <-chan struct{}) error {
 		err := w.SyncOnce(ctx)
 		if err == nil {
 			backoff = w.options.InitialBackoff
+			retryCount = 0
 			timer.Reset(w.options.PollInterval)
 			continue
 		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, ErrWorkspaceQuarantined) {
 			return err
 		}
+		retryCount++
 		delay := w.options.Jitter(backoff)
-		w.emit(Progress{WorkspaceID: w.workspace, Phase: PhaseBackoff, RetryIn: delay, ErrorClass: classifySyncError(err), ErrorDetail: syncErrorDetail(err)})
+		w.emit(Progress{WorkspaceID: w.workspace, Phase: PhaseBackoff, RetryIn: delay, ErrorClass: classifySyncError(err), ErrorDetail: syncErrorDetail(err), RetryCount: retryCount})
 		timer.Reset(delay)
 		if backoff < w.options.MaxBackoff/2 {
 			backoff *= 2

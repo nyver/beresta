@@ -8,6 +8,7 @@ import {
   ConnectServer,
   CreateAccount,
   CreateManualBackup,
+  CopyDiagnostics,
   CreateNote,
   CreateNotebook,
   CreateSavedSearch,
@@ -16,6 +17,7 @@ import {
   DeleteNote,
   DeleteSavedSearch,
   DiagnoseServer,
+  DiagnosticSummary,
   DisableServer,
   DiffRevisions,
   EnsureDailyBackup,
@@ -70,6 +72,7 @@ import {
   SyncConnectionInfo,
   SyncNow,
   SyncSummary,
+  TechnicalDiagnostics,
   UnlockAccount,
   UpdateSavedSearch,
   UpdateSettings,
@@ -309,6 +312,72 @@ export async function listSyncQuarantine(): Promise<QuarantineEntry[]> {
 
 export async function retrySyncQuarantine(operationId: string): Promise<void> {
   await RetrySyncQuarantine(operationId);
+}
+
+/** BackupHealth is the TypeScript projection of core/presentation.BackupHealth. */
+export type BackupHealth = "healthy" | "warning" | "corrupt" | "unknown";
+
+export interface BackupStatus {
+  health: BackupHealth;
+  last_verified_unix_ms: number;
+  location: string;
+}
+
+/** DatabaseHealth is the TypeScript projection of core/presentation.DatabaseHealth. */
+export type DatabaseHealth = "ok" | "degraded" | "unknown";
+
+/** UpdateStatus is the TypeScript projection of core/presentation.UpdateStatus. */
+export type UpdateStatus = "up_to_date" | "available" | "downloading" | "ready_to_install" | "failed" | "unknown";
+
+/**
+ * DiagnosticSummary is the TypeScript projection of
+ * core/presentation.DiagnosticSummary: the facts the user diagnostics view
+ * always shows.
+ */
+export interface DiagnosticSummary {
+  app_version: string;
+  platform: string;
+  sync_configured: boolean;
+  last_successful_sync_unix_ms: number;
+  pending_count: number;
+  connection_state: SyncState;
+  backup: BackupStatus;
+  storage_usage_bytes: number;
+  database: DatabaseHealth;
+  update: UpdateStatus;
+}
+
+/**
+ * TechnicalDiagnostics is the TypeScript projection of
+ * core/presentation.TechnicalDiagnostics: the additional facts the
+ * "expand technical details" layer of the user diagnostics view MAY show.
+ */
+export interface TechnicalDiagnostics {
+  workspace_id: string;
+  device_id: string;
+  last_error_class: string;
+  pending_operation_count: number;
+  quarantined_operation_ids: string[];
+  cursor_sequence: number;
+  cursor_epoch: number;
+  retry_count: number;
+  retry_in_ms: number;
+  transport_protocol: string;
+  transport_security_mode: string;
+  transport_url: string;
+  migration_version: number;
+}
+
+export async function diagnosticSummary(): Promise<DiagnosticSummary> {
+  return DiagnosticSummary() as unknown as Promise<DiagnosticSummary>;
+}
+
+export async function technicalDiagnostics(): Promise<TechnicalDiagnostics> {
+  return TechnicalDiagnostics() as unknown as Promise<TechnicalDiagnostics>;
+}
+
+export async function copyDiagnostics(): Promise<string> {
+  return CopyDiagnostics();
 }
 
 export interface WorkspaceSummary {

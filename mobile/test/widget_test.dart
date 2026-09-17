@@ -795,4 +795,42 @@ class FakeGateway implements CoreGateway {
       events
           .where((event) => (event["sequence"] as int) > afterSequence)
           .toList();
+
+  Map<String, dynamic> diagnosticSummaryValue = {
+    "app_version": "0.1.0",
+    "platform": "android",
+    "sync_configured": false,
+    "last_successful_sync_unix_ms": 0,
+    "pending_count": 0,
+    "connection_state": "local_only",
+    "backup": {"health": "unknown", "last_verified_unix_ms": 0, "location": ""},
+    "storage_usage_bytes": 0,
+    "database": "ok",
+    "update": "unknown",
+  };
+  Map<String, dynamic> technicalDiagnosticsValue = {
+    "workspace_id": "",
+    "device_id": "",
+    "last_error_class": "",
+    "pending_operation_count": 0,
+    "quarantined_operation_ids": <String>[],
+    "cursor_sequence": 0,
+    "cursor_epoch": 0,
+    "retry_count": 0,
+    "retry_in_ms": 0,
+    "transport_protocol": "",
+    "transport_security_mode": "",
+    "transport_url": "",
+    "migration_version": 0,
+  };
+  String copyDiagnosticsValue = "Beresta diagnostics\n";
+  @override
+  Future<Map<String, dynamic>> diagnosticSummary(String appVersion) async =>
+      diagnosticSummaryValue;
+  @override
+  Future<Map<String, dynamic>> technicalDiagnostics() async =>
+      technicalDiagnosticsValue;
+  @override
+  Future<String> copyDiagnostics(String appVersion) async =>
+      copyDiagnosticsValue;
 }

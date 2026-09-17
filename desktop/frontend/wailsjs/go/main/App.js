@@ -30,6 +30,10 @@ export function ConnectServer(arg1) {
   return window['go']['main']['App']['ConnectServer'](arg1);
 }
 
+export function CopyDiagnostics() {
+  return window['go']['main']['App']['CopyDiagnostics']();
+}
+
 export function CreateAccount(arg1) {
   return window['go']['main']['App']['CreateAccount'](arg1);
 }
@@ -68,6 +72,10 @@ export function DeleteSavedSearch(arg1) {
 
 export function DiagnoseServer() {
   return window['go']['main']['App']['DiagnoseServer']();
+}
+
+export function DiagnosticSummary() {
+  return window['go']['main']['App']['DiagnosticSummary']();
 }
 
 export function DiffRevisions(arg1, arg2, arg3) {
@@ -296,6 +304,10 @@ export function SyncNow() {
 
 export function SyncSummary() {
   return window['go']['main']['App']['SyncSummary']();
+}
+
+export function TechnicalDiagnostics() {
+  return window['go']['main']['App']['TechnicalDiagnostics']();
 }
 
 export function UnlockAccount(arg1) {

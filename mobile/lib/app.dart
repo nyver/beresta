@@ -20,6 +20,34 @@ import "strings.dart";
 /// constant explicitly rather than the core inventing one.
 const String appVersion = "0.1.0";
 
+/// knownQuarantineReasons is the complete, closed set of classes
+/// core/sync.Reject can currently produce (see
+/// core/store/sync_repository.go and core/sync/worker.go's
+/// verificationClass) - a rejected operation never carries free-form
+/// text, so this stays exhaustive rather than growing an ever-widening
+/// switch.
+const Set<String> knownQuarantineReasons = {
+  "unsupported_version",
+  "verification_failed",
+  "empty_verified_operation",
+  "op_id_reuse",
+  "apply_failed",
+};
+
+/// quarantineReasonMessage localizes a quarantined operation's rejection
+/// class (specs/product-experience's "Actionable and safe error
+/// presentation" requirement: raw internal classification codes must not
+/// appear as primary UI text) instead of rendering the class string
+/// verbatim, falling back to a generic message for a class this build
+/// does not recognize (server/client version skew) rather than showing
+/// nothing or the raw code.
+String quarantineReasonMessage(Strings strings, String reason) {
+  final key = knownQuarantineReasons.contains(reason)
+      ? "sync_quarantine_reason_$reason"
+      : "sync_quarantine_reason_unknown";
+  return strings(key);
+}
+
 /// Renders a localized error with the underlying platform failure appended
 /// in debug builds, so a real device can be diagnosed without attaching a
 /// debugger or reading logcat.
@@ -1546,7 +1574,12 @@ class _ServerSheetState extends State<ServerSheet> {
                   title: SelectableText(
                     entry["operation_id"] as String? ?? "",
                   ),
-                  subtitle: Text(entry["reason"] as String? ?? ""),
+                  subtitle: Text(
+                    quarantineReasonMessage(
+                      widget.strings,
+                      entry["reason"] as String? ?? "",
+                    ),
+                  ),
                   trailing: TextButton(
                     onPressed:
                         () =>

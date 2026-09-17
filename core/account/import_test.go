@@ -173,6 +173,75 @@ func TestEnmlToPlainTextStripsTagsAndPreservesLineBreaks(t *testing.T) {
 	}
 }
 
+// TestImportBerestaArchiveAttachmentWarningOmitsRawFilesystemDetail covers
+// task 4.4's "Actionable and safe error presentation" requirement: a
+// missing/unreadable exported attachment must still produce a warning
+// naming which attachment failed, but never the underlying os.Open error
+// text, which typically carries a full filesystem path (and, on a real
+// machine, the OS username embedded in that path) - not something that
+// belongs in primary UI text.
+func TestImportBerestaArchiveAttachmentWarningOmitsRawFilesystemDetail(t *testing.T) {
+	ctx := context.Background()
+	source := createTestAccount(t)
+	sourceWorkspace := defaultWorkspaceID(t, source)
+
+	note, err := source.CreateNote(ctx, sourceWorkspace, model.Nil, "Trip photos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitInsert(t, source, sourceWorkspace, note.ID, "see attached")
+	if _, err := source.AddAttachment(ctx, sourceWorkspace, note.ID, "photo.txt", "text/plain", bytes.NewReader([]byte("stack of pancakes"))); err != nil {
+		t.Fatal(err)
+	}
+
+	exportDir := filepath.Join(t.TempDir(), "export")
+	if _, err := source.ExportNotes(ctx, sourceWorkspace, exportDir, nil, time.Now()); err != nil {
+		t.Fatalf("ExportNotes: %v", err)
+	}
+
+	// Remove the exported attachment file itself (but keep the manifest
+	// referencing it), so import's os.Open on it fails with a real,
+	// path-carrying filesystem error - exactly the shape of error that
+	// must never reach ImportWarning.Message.
+	removed := false
+	if err := filepath.Walk(exportDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		for _, component := range strings.Split(filepath.ToSlash(path), "/") {
+			if component == "attachments" {
+				removed = true
+				return os.Remove(path)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("did not find the exported attachment file to remove")
+	}
+
+	target := createTestAccount(t)
+	targetWorkspace := defaultWorkspaceID(t, target)
+	result, err := target.ImportBerestaArchive(ctx, targetWorkspace, exportDir)
+	if err != nil {
+		t.Fatalf("ImportBerestaArchive: %v", err)
+	}
+	if len(result.Warnings) == 0 {
+		t.Fatal("expected a warning for the missing attachment")
+	}
+	for _, warning := range result.Warnings {
+		if strings.Contains(warning.Message, exportDir) {
+			t.Fatalf("ImportWarning.Message leaked the export directory path: %q", warning.Message)
+		}
+		if strings.Contains(strings.ToLower(warning.Message), "no such file") ||
+			strings.Contains(warning.Message, "cannot find the file") {
+			t.Fatalf("ImportWarning.Message leaked raw OS error text: %q", warning.Message)
+		}
+	}
+}
+
 func TestAttachmentMediaTypeFromExtension(t *testing.T) {
 	cases := map[string]string{
 		"photo.png":    "image/png",

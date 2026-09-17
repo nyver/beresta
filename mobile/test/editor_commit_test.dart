@@ -408,7 +408,13 @@ void main() {
         find.text("018f0000-0000-7000-8000-000000000099"),
         findsOneWidget,
       );
-      expect(find.text("verification_failed"), findsOneWidget);
+      expect(
+        find.text(
+          "This operation could not be verified and may be corrupted.",
+        ),
+        findsOneWidget,
+      );
+      expect(find.text("verification_failed"), findsNothing);
 
       await tester.tap(find.text("Retry"));
       await tester.pumpAndSettle();

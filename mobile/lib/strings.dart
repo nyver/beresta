@@ -81,6 +81,18 @@ class Strings {
       "retry": "Retry",
       "sync_journal_title": "Unsafe incoming operations",
       "sync_journal_empty": "No unsafe incoming operations.",
+      "sync_quarantine_reason_unsupported_version":
+          "This operation uses a protocol version this device does not support yet.",
+      "sync_quarantine_reason_verification_failed":
+          "This operation could not be verified and may be corrupted.",
+      "sync_quarantine_reason_empty_verified_operation":
+          "This operation could not be processed.",
+      "sync_quarantine_reason_op_id_reuse":
+          "This operation reused an identifier with different content.",
+      "sync_quarantine_reason_apply_failed":
+          "This operation could not be applied to your local data.",
+      "sync_quarantine_reason_unknown":
+          "This operation could not be safely applied.",
       "share_workspace": "Share this workspace",
       "paste_identity": "Paste their identity code",
       "generate_share_code": "Generate share code",
@@ -245,6 +257,18 @@ class Strings {
       "retry": "Повторить",
       "sync_journal_title": "Небезопасные входящие операции",
       "sync_journal_empty": "Нет небезопасных входящих операций.",
+      "sync_quarantine_reason_unsupported_version":
+          "Эта операция использует версию протокола, которую это устройство пока не поддерживает.",
+      "sync_quarantine_reason_verification_failed":
+          "Эту операцию не удалось проверить, возможно, она повреждена.",
+      "sync_quarantine_reason_empty_verified_operation":
+          "Эту операцию не удалось обработать.",
+      "sync_quarantine_reason_op_id_reuse":
+          "Эта операция повторно использует идентификатор с другим содержимым.",
+      "sync_quarantine_reason_apply_failed":
+          "Эту операцию не удалось применить к локальным данным.",
+      "sync_quarantine_reason_unknown":
+          "Эту операцию не удалось безопасно применить.",
       "share_workspace": "Поделиться этим пространством",
       "paste_identity": "Вставьте их код идентификации",
       "generate_share_code": "Создать код доступа",

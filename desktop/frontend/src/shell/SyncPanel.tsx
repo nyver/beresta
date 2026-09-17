@@ -32,6 +32,33 @@ import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
 const EVENT_SYNC_SUMMARY = "sync:summary";
 const EVENT_WORKSPACE_CHANGED = "workspace:changed";
 
+// KNOWN_QUARANTINE_REASONS is the complete, closed set of classes
+// core/sync.Reject can currently produce (see core/store/sync_repository.go
+// and core/sync/worker.go's verificationClass) - a rejected operation
+// never carries free-form text, so this stays exhaustive rather than
+// growing an ever-widening switch.
+const KNOWN_QUARANTINE_REASONS = [
+  "unsupported_version",
+  "verification_failed",
+  "empty_verified_operation",
+  "op_id_reuse",
+  "apply_failed",
+] as const;
+
+/**
+ * quarantineReasonMessage localizes a quarantined operation's rejection
+ * class (specs/product-experience's "Actionable and safe error
+ * presentation" requirement: raw internal classification codes must not
+ * appear as primary UI text) instead of rendering the class string
+ * verbatim, falling back to a generic message for a class this build does
+ * not recognize (server/client version skew) rather than showing nothing
+ * or the raw code.
+ */
+function quarantineReasonMessage(t: (key: string) => string, reason: string): string {
+  const known = (KNOWN_QUARANTINE_REASONS as readonly string[]).includes(reason);
+  return t(`sync.quarantine_reason_${known ? reason : "unknown"}`);
+}
+
 export interface SyncPanelProps {
   deviceId: string;
   /** Called whenever the active workspace changes (joining a shared
@@ -297,7 +324,7 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
       <section aria-labelledby="sync-journal-title">
         <h3 id="sync-journal-title">{t("sync.journal_title")}</h3>
         {quarantine.length === 0 ? <p>{t("sync.journal_empty")}</p> : quarantine.map((entry) => (
-          <div className="sync-device-row" key={entry.operation_id}><div><code>{entry.operation_id}</code><p>{entry.reason}</p></div><button type="button" onClick={() => void retrySyncQuarantine(entry.operation_id).then(loadStatus)}>{t("common.retry")}</button></div>
+          <div className="sync-device-row" key={entry.operation_id}><div><code>{entry.operation_id}</code><p>{quarantineReasonMessage(t, entry.reason)}</p></div><button type="button" onClick={() => void retrySyncQuarantine(entry.operation_id).then(loadStatus)}>{t("common.retry")}</button></div>
         ))}
       </section>
 

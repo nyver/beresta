@@ -95,7 +95,12 @@ func (a *Account) ImportBerestaArchive(ctx context.Context, workspaceID model.ID
 			if err := a.importAttachmentFile(ctx, workspaceID, newNote.ID, filepath.Join(sourceDir, filepath.FromSlash(attachmentPath))); err != nil {
 				result.Warnings = append(result.Warnings, ImportWarning{
 					NoteTitle: entry.Title,
-					Message:   fmt.Sprintf("attachment %q could not be imported: %v", filepath.Base(attachmentPath), err),
+					// The underlying error is deliberately not interpolated
+					// here: it can be a raw filesystem error carrying a full
+					// path (including the OS username), which must not
+					// appear as primary UI text (specs/product-experience's
+					// "Actionable and safe error presentation" requirement).
+					Message: fmt.Sprintf("attachment %q could not be imported", filepath.Base(attachmentPath)),
 				})
 			}
 		}
@@ -276,7 +281,10 @@ func (a *Account) ImportEvernoteArchive(ctx context.Context, workspaceID model.I
 			if err := a.importEnexResource(ctx, workspaceID, newNote.ID, i, res); err != nil {
 				result.Warnings = append(result.Warnings, ImportWarning{
 					NoteTitle: title,
-					Message:   fmt.Sprintf("resource %d could not be imported: %v", i+1, err),
+					// The underlying error is deliberately not interpolated
+					// here: see the identical rationale on the Beresta
+					// archive import path above.
+					Message: fmt.Sprintf("resource %d could not be imported", i+1),
 				})
 			}
 		}

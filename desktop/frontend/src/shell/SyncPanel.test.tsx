@@ -106,6 +106,25 @@ describe("SyncPanel", () => {
     expect(screen.getByRole("button", { name: "sync.connect_button" })).toBeDisabled();
   });
 
+  it("localizes a quarantined operation's rejection reason instead of showing the raw class", async () => {
+    mockLocaleCatalog();
+    mockSyncSummary("current");
+    appMock.ListSyncQuarantine.mockResolvedValue([
+      { operation_id: "op-known", sequence: 1, reason: "op_id_reuse", received_unix_ms: 0 },
+      { operation_id: "op-unknown", sequence: 2, reason: "some_future_class", received_unix_ms: 0 },
+    ]);
+    render(
+      <I18nProvider>
+        <SyncPanel deviceId="device-123" />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("sync.quarantine_reason_op_id_reuse")).toBeInTheDocument();
+    expect(screen.getByText("sync.quarantine_reason_unknown")).toBeInTheDocument();
+    expect(screen.queryByText("op_id_reuse")).not.toBeInTheDocument();
+    expect(screen.queryByText("some_future_class")).not.toBeInTheDocument();
+  });
+
   it("offers a retry when status loading fails", async () => {
     mockLocaleCatalog();
     appMock.SyncSummary.mockRejectedValueOnce(new Error("bridge failed")).mockResolvedValue({

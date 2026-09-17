@@ -99,3 +99,58 @@ type DiagnosticSummary struct {
 	// Update is the current application update status.
 	Update UpdateStatus
 }
+
+// TechnicalDiagnostics is the bounded, locale-free set of additional facts
+// the "expand technical details" layer of the user diagnostics view MAY
+// show, per the "Layered privacy-preserving diagnostics" requirement in
+// specs/product-experience: workspace and device identifiers, sanitized
+// codes, operation counts, unsafe-entry identifiers, cursor state, retry
+// counters, transport details, and migration version. Like
+// DiagnosticSummary, it never carries note content, titles, search
+// queries, sensitive attachment names, passwords, keys, tokens, invite
+// codes, plaintext exports, or clipboard content - identifiers here are
+// opaque, non-secret values already visible elsewhere in the product (for
+// example, the same workspace ID a sharing code encodes, or the same
+// server URL synchronization settings already display).
+type TechnicalDiagnostics struct {
+	// WorkspaceID is the active workspace's opaque identifier.
+	WorkspaceID string
+	// DeviceID is this device's opaque identifier.
+	DeviceID string
+	// LastErrorClass is the stable, sanitized classification of the most
+	// recent synchronization failure (see core/sync's classifySyncError).
+	// It is empty when the last attempt succeeded or none has run yet.
+	LastErrorClass string
+	// PendingOperationCount is the durable count of local changes not yet
+	// acknowledged by a configured transport.
+	PendingOperationCount int
+	// QuarantinedOperationIDs lists the opaque identifiers of incoming
+	// operations currently blocking the cursor, matching the identifiers
+	// the unsafe-incoming-operation journal already shows.
+	QuarantinedOperationIDs []string
+	// CursorSequence is the durable local cursor's last applied sequence
+	// number for the active workspace's configured transport.
+	CursorSequence uint64
+	// CursorEpoch is the durable local cursor's epoch for the active
+	// workspace's configured transport.
+	CursorEpoch uint32
+	// RetryCount is how many consecutive synchronization attempts have
+	// failed since the last success.
+	RetryCount int
+	// RetryIn is the remaining backoff before the next automatic retry.
+	// It is zero when no retry is pending.
+	RetryIn time.Duration
+	// TransportProtocol is the configured transport's protocol ("https").
+	// It is empty when no transport is configured.
+	TransportProtocol string
+	// TransportSecurityMode is the configured transport's certificate
+	// verification mode ("pinned" or "trusted"). It is empty when no
+	// transport is configured.
+	TransportSecurityMode string
+	// TransportURL is the configured server's address, already visible in
+	// synchronization settings.
+	TransportURL string
+	// MigrationVersion is the local database's applied schema migration
+	// version.
+	MigrationVersion int
+}

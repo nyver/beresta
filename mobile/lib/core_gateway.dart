@@ -64,6 +64,18 @@ abstract interface class CoreGateway {
   /// see core/mobileapi.Service.SyncSummary and desktop's identical
   /// SyncSummaryDTO.
   Future<Map<String, dynamic>> syncSummary();
+
+  /// Lists the active workspace's quarantined incoming operations: a
+  /// sanitized operation id, sequence, rejection reason, and receipt time -
+  /// never ciphertext or other protocol detail - matching desktop's
+  /// identical SyncQuarantineDTO.
+  Future<List<Map<String, dynamic>>> listSyncQuarantine();
+
+  /// Discards operationId's locally-rejected copy so the next cycle
+  /// re-pulls and re-verifies it from scratch, reattaching the sync worker
+  /// first if a prior quarantine detached it - see
+  /// core/mobileapi.Service.RetryQuarantined.
+  Future<void> retryQuarantined(String operationId);
   Future<Map<String, dynamic>> syncConnectionInfo();
   Future<String> exportIdentity();
   Future<String> shareWorkspace(String identityCode);
@@ -256,6 +268,14 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<Map<String, dynamic>> syncSummary() async =>
       _object(await _invoke("syncSummary"));
+
+  @override
+  Future<List<Map<String, dynamic>>> listSyncQuarantine() async =>
+      _list(await _invoke("listSyncQuarantine"));
+
+  @override
+  Future<void> retryQuarantined(String operationId) =>
+      _invoke("retryQuarantined", {"operationId": operationId});
 
   @override
   Future<Map<String, dynamic>> syncConnectionInfo() async =>

@@ -1367,6 +1367,7 @@ class _ServerSheetState extends State<ServerSheet> {
   String connectedProtocol = "";
   String connectedSecurityMode = "pinned";
   List<Map<String, dynamic>> workspaces = const [];
+  List<Map<String, dynamic>> quarantine = const [];
   Timer? syncStatusTimer;
 
   @override
@@ -1418,6 +1419,32 @@ class _ServerSheetState extends State<ServerSheet> {
       }
     } catch (_) {
       // Keep showing the last known status; the periodic timer retries.
+    }
+    // Unsafe-incoming-operation details (specs/sync-engine's "Safe
+    // incoming-operation recovery" requirement) share the same refresh
+    // cadence as the status pill above.
+    await loadQuarantine();
+  }
+
+  Future<void> loadQuarantine() async {
+    try {
+      final entries = await widget.gateway.listSyncQuarantine();
+      if (mounted) setState(() => quarantine = entries);
+    } catch (_) {
+      // No account/server context yet, or a transient bridge error; the
+      // periodic refresh above retries.
+    }
+  }
+
+  Future<void> retryQuarantine(String operationId) async {
+    try {
+      await widget.gateway.retryQuarantined(operationId);
+      await loadQuarantine();
+      await refreshSyncSummary();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
     }
   }
 
@@ -1494,6 +1521,33 @@ class _ServerSheetState extends State<ServerSheet> {
             ],
           ),
           const SizedBox(height: 12),
+          // Only surfaced when there is something to act on: an
+          // always-visible "no issues" row would push later sections (e.g.
+          // the workspace list) further down for every ordinary user who
+          // never hits an unsafe incoming operation.
+          if (quarantine.isNotEmpty || syncStatusValue == "action_required") ...[
+            Text(
+              widget.strings("sync_journal_title"),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            if (quarantine.isEmpty)
+              Text(widget.strings("sync_journal_empty"))
+            else
+              for (final entry in quarantine)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: SelectableText(
+                    entry["operation_id"] as String? ?? "",
+                  ),
+                  subtitle: Text(entry["reason"] as String? ?? ""),
+                  trailing: TextButton(
+                    onPressed:
+                        () =>
+                            retryQuarantine(entry["operation_id"] as String),
+                    child: Text(widget.strings("retry")),
+                  ),
+                ),
+          ],
           if (connectionEnabled && connectedURL.isNotEmpty)
             Card(
               child: Padding(

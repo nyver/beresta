@@ -477,8 +477,16 @@ func (a *App) ListSyncQuarantine() ([]SyncQuarantineDTO, error) {
 	return result, nil
 }
 
+// RetrySyncQuarantine discards a quarantined operation's locally-rejected
+// copy so the next cycle re-pulls and re-verifies it from scratch - the
+// durable cursor was never advanced past it, so this can never skip or lose
+// an operation, only give a fixed client (or a transient false rejection)
+// another chance to accept it. A quarantined worker exits permanently (see
+// coresync.Coordinator.Attach), so retrying also reattaches it when needed;
+// otherwise Trigger would silently no-op against a coordinator with no
+// worker left to wake.
 func (a *App) RetrySyncQuarantine(operationID string) error {
-	_, workspaceID, err := a.primaryWorkspace()
+	acc, workspaceID, err := a.primaryWorkspace()
 	if err != nil {
 		return mapError(err)
 	}
@@ -495,11 +503,33 @@ func (a *App) RetrySyncQuarantine(operationID string) error {
 	if err := repository.RetryQuarantined(a.requestContext(), workspaceID, id); err != nil {
 		return mapError(err)
 	}
+	coordinator, err = a.reattachIfDetached(acc, workspaceID, coordinator)
+	if err != nil {
+		return mapError(err)
+	}
 	if coordinator != nil {
 		coordinator.Trigger()
 	}
 	a.emit(EventSyncSummary)
 	return nil
+}
+
+// reattachIfDetached returns coordinator unchanged if it is still attached
+// and running; otherwise it rebuilds and attaches a fresh worker for
+// workspaceID (the same worker attachWorkspaceSync always builds) and
+// returns that. Both RetrySyncQuarantine and SyncNow need this: a
+// quarantined worker exits and detaches itself permanently, so acting on a
+// stale coordinator reference after that would silently do nothing.
+func (a *App) reattachIfDetached(acc *account.Account, workspaceID model.ID, coordinator *coresync.Coordinator) (*coresync.Coordinator, error) {
+	if coordinator != nil && coordinator.Enabled() {
+		return coordinator, nil
+	}
+	if err := a.attachWorkspaceSync(acc, workspaceID); err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.syncCoordinator, nil
 }
 
 // SyncNow starts an immediate synchronization cycle for the currently active
@@ -509,11 +539,20 @@ func (a *App) SyncNow() error {
 	a.mu.Lock()
 	coordinator, remote := a.syncCoordinator, a.httpTransport
 	a.mu.Unlock()
-	if coordinator == nil || remote == nil {
+	if remote == nil {
 		return &AppError{Code: ErrCodeInvalidInput, Message: "server synchronization is disabled"}
 	}
+	if coordinator == nil || !coordinator.Enabled() {
+		acc, workspaceID, err := a.primaryWorkspace()
+		if err != nil {
+			return mapError(err)
+		}
+		if coordinator, err = a.reattachIfDetached(acc, workspaceID, coordinator); err != nil {
+			return mapError(err)
+		}
+	}
 	a.emit(EventSyncSummary)
-	if !coordinator.Trigger() {
+	if coordinator == nil || !coordinator.Trigger() {
 		a.emit(EventSyncSummary)
 		return &AppError{Code: ErrCodeInternal, Message: "synchronization worker is not running"}
 	}

@@ -302,6 +302,8 @@ class MainActivity : FlutterFragmentActivity() {
             "connectServer" -> service.connectServer(requestId, required(call, "encoded"))
             "disconnectServer" -> service.disconnectServer()
             "syncSummary" -> service.syncSummary()
+            "listSyncQuarantine" -> service.listSyncQuarantine()
+            "retryQuarantined" -> service.retryQuarantined(required(call, "operationId"))
             "syncConnectionInfo" -> service.syncConnectionInfo(requestId)
             "exportIdentity" -> service.exportIdentity(requestId)
             "shareWorkspace" -> service.shareWorkspace(requestId, required(call, "identityCode"))

@@ -1310,6 +1310,81 @@ func (s *Service) SyncNow() error {
 	return nil
 }
 
+// quarantineDTO mirrors desktop's SyncQuarantineDTO field-for-field so
+// Flutter and desktop render identical unsafe-incoming-operation details
+// (specs/sync-engine's "Safe incoming-operation recovery" requirement).
+type quarantineDTO struct {
+	OperationID    string `json:"operation_id"`
+	Sequence       uint64 `json:"sequence"`
+	Reason         string `json:"reason"`
+	ReceivedUnixMS int64  `json:"received_unix_ms"`
+}
+
+// ListSyncQuarantine returns the active workspace's quarantined incoming
+// operations as strict JSON: a sanitized operation id, sequence, rejection
+// reason, and receipt time - never ciphertext or other protocol detail.
+func (s *Service) ListSyncQuarantine() (string, error) {
+	_, workspaceID, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	repository := s.repository
+	s.mu.Unlock()
+	if repository == nil {
+		return marshal([]quarantineDTO{})
+	}
+	entries, err := repository.ListQuarantine(s.root, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	result := make([]quarantineDTO, len(entries))
+	for i, entry := range entries {
+		result[i] = quarantineDTO{OperationID: entry.OperationID.String(), Sequence: entry.Sequence, Reason: entry.Reason, ReceivedUnixMS: entry.ReceivedAt.UnixMilli()}
+	}
+	return marshal(result)
+}
+
+// RetryQuarantined discards operationID's locally-rejected copy so the next
+// cycle re-pulls and re-verifies it from scratch: the durable cursor was
+// never advanced past it, so this can never skip or lose an operation, only
+// give a fixed client (or a transient false rejection) another chance to
+// accept it. A quarantined worker exits and detaches itself permanently
+// (see coresync.Coordinator.Attach's doc comment), so - like SyncNow -
+// this reattaches a fresh worker first when needed; otherwise Trigger
+// would silently no-op against a coordinator with no worker left to wake.
+func (s *Service) RetryQuarantined(operationID string) error {
+	value, workspaceID, err := s.accountState()
+	if err != nil {
+		return err
+	}
+	id, err := parseID(operationID)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	repository, coordinator := s.repository, s.coordinator
+	s.mu.Unlock()
+	if repository == nil {
+		return errors.New("mobileapi: server synchronization is disabled")
+	}
+	if err := repository.RetryQuarantined(s.root, workspaceID, id); err != nil {
+		return err
+	}
+	if coordinator == nil || !coordinator.Enabled() {
+		if err := s.attachWorkspaceSync(value, workspaceID); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		coordinator = s.coordinator
+		s.mu.Unlock()
+	}
+	if coordinator != nil {
+		coordinator.Trigger()
+	}
+	return nil
+}
+
 // DisconnectServer detaches networking only: the local database, full
 // collection, and previously downloaded data remain untouched. The saved
 // connection details stay on disk (with enabled cleared) so the connect

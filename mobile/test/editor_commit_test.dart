@@ -363,6 +363,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text("open"));
       await tester.pumpAndSettle();
+      // A second settle: ServerSheet's several independent initState
+      // futures (identity, connection info, sync summary/quarantine,
+      // workspaces) can still have one resolve and schedule its setState
+      // just as the first pumpAndSettle finishes; without this the
+      // workspaces list can intermittently still be empty here.
+      await tester.pumpAndSettle();
 
       await tester.ensureVisible(find.text("Switch"));
       await tester.pumpAndSettle();
@@ -375,6 +381,43 @@ void main() {
         reason:
             "the registered editor flush must run before the workspace switch reaches the gateway",
       );
+    },
+  );
+
+  testWidgets(
+    "shows an unsafe incoming operation's sanitized details and retries it",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..syncStatusValue = "action_required"
+            ..quarantineEntries = [
+              {
+                "operation_id": "018f0000-0000-7000-8000-000000000099",
+                "sequence": 5,
+                "reason": "verification_failed",
+                "received_unix_ms": 1710000000000,
+              },
+            ];
+
+      await tester.pumpWidget(hostServerSheet(gateway));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("open"));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text("018f0000-0000-7000-8000-000000000099"),
+        findsOneWidget,
+      );
+      expect(find.text("verification_failed"), findsOneWidget);
+
+      await tester.tap(find.text("Retry"));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text("018f0000-0000-7000-8000-000000000099"),
+        findsNothing,
+      );
+      expect(find.text("No unsafe incoming operations."), findsOneWidget);
     },
   );
 }

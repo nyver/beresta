@@ -730,6 +730,17 @@ class FakeGateway implements CoreGateway {
     "unsafe_count": 0,
     "action_required": "none",
   };
+  List<Map<String, dynamic>> quarantineEntries = [];
+  @override
+  Future<List<Map<String, dynamic>>> listSyncQuarantine() async =>
+      quarantineEntries;
+  @override
+  Future<void> retryQuarantined(String operationId) async {
+    quarantineEntries = quarantineEntries
+        .where((entry) => entry["operation_id"] != operationId)
+        .toList();
+  }
+
   @override
   Future<Map<String, dynamic>> syncConnectionInfo() async => connectionInfo;
   @override

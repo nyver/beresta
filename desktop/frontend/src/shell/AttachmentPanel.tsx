@@ -109,7 +109,10 @@ function readFileAsBase64(file: File): Promise<string> {
  * upload queue as the "Attach file..." picker button. Uploads run one at a
  * time; a still-queued (not yet started) item can be canceled, but an
  * in-flight one runs to completion since the underlying bound call has no
- * cooperative cancellation across the JS bridge.
+ * cooperative cancellation across the JS bridge. A failed item stays in the
+ * queue with its error message and offers Retry (re-enqueues the same
+ * source) or Dismiss, rather than sitting there indefinitely or silently
+ * disappearing.
  */
 export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanelProps>(
   function AttachmentPanel({ noteId, open, onOpenChange }, ref) {
@@ -308,6 +311,19 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
       syncQueue();
     }
 
+    function retryItem(id: string) {
+      queueRef.current = queueRef.current.map((entry) =>
+        entry.id === id ? { ...entry, status: "pending", errorText: undefined } : entry,
+      );
+      syncQueue();
+      void processQueue();
+    }
+
+    function dismissItem(id: string) {
+      queueRef.current = queueRef.current.filter((entry) => entry.id !== id);
+      syncQueue();
+    }
+
     async function handlePickFile() {
       const path = await pickAttachmentFile().catch((thrown: unknown) => {
         setItemError(errorMessage(unwrapError(thrown)));
@@ -396,6 +412,16 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
                           ? t("attachments.uploading")
                           : t("attachments.queued")}
                     </span>
+                    {item.status === "error" ? (
+                      <span className="attachment-upload-actions">
+                        <button type="button" className="link-button" onClick={() => retryItem(item.id)}>
+                          {t("attachments.retry_button")}
+                        </button>
+                        <button type="button" className="link-button" onClick={() => dismissItem(item.id)}>
+                          {t("attachments.dismiss_button")}
+                        </button>
+                      </span>
+                    ) : null}
                   </li>
                 ))}
               </ul>

@@ -106,6 +106,8 @@
   "attachments.queued": "Queued",
   "attachments.uploading": "Attaching…",
   "attachments.cancel_pending_button": "Cancel remaining",
+  "attachments.retry_button": "Retry",
+  "attachments.dismiss_button": "Dismiss",
   "attachments.save_button": "Save as…",
   "attachments.remove_button": "Remove",
   "attachments.actions": "Attachment actions",

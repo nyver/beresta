@@ -832,13 +832,20 @@ li:hover > .tree-row-delete,
 
 .attachment-upload-item {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
+  align-items: center;
   gap: 0.5rem;
   font-size: 0.85rem;
 }
 
 .attachment-upload-item.status-error .attachment-upload-status {
   color: #8a2c1f;
+}
+
+.attachment-upload-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .attachment-row {

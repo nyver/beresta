@@ -115,6 +115,8 @@
   "attachments.queued": "В очереди",
   "attachments.uploading": "Прикрепление…",
   "attachments.cancel_pending_button": "Отменить оставшиеся",
+  "attachments.retry_button": "Повторить",
+  "attachments.dismiss_button": "Скрыть",
   "attachments.save_button": "Сохранить как…",
   "attachments.remove_button": "Удалить",
   "attachments.actions": "Действия с вложением",

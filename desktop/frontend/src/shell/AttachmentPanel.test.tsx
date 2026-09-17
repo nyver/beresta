@@ -237,6 +237,43 @@ describe("AttachmentPanel", () => {
     expect(appMock.AddAttachmentFromFile).not.toHaveBeenCalledWith("note-1", "C:\\b.bin");
   });
 
+  it("retries a failed upload and shows the attachment once it succeeds", async () => {
+    appMock.ListNoteAttachments.mockResolvedValueOnce([]).mockResolvedValueOnce([fakeAttachment()]);
+    appMock.PickAttachmentFile.mockResolvedValue("C:\\a.bin");
+    appMock.AddAttachmentFromFile.mockRejectedValueOnce(
+      new Error(JSON.stringify({ code: "internal", message: "boom" })),
+    ).mockResolvedValueOnce(fakeAttachment());
+    renderPanel("note-1");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "attachments.add_button" }));
+    expect(await screen.findByText("errors.internal")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "attachments.retry_button" }));
+
+    await waitFor(() => expect(appMock.AddAttachmentFromFile).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("photo.png")).toBeInTheDocument();
+    expect(screen.queryByText("errors.internal")).not.toBeInTheDocument();
+  });
+
+  it("dismisses a failed upload without retrying it", async () => {
+    appMock.ListNoteAttachments.mockResolvedValue([]);
+    appMock.PickAttachmentFile.mockResolvedValue("C:\\a.bin");
+    appMock.AddAttachmentFromFile.mockRejectedValue(
+      new Error(JSON.stringify({ code: "internal", message: "boom" })),
+    );
+    renderPanel("note-1");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "attachments.add_button" }));
+    expect(await screen.findByText("errors.internal")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "attachments.dismiss_button" }));
+
+    expect(screen.queryByText("errors.internal")).not.toBeInTheDocument();
+    expect(appMock.AddAttachmentFromFile).toHaveBeenCalledTimes(1);
+  });
+
   it("renders just a compact trigger with a count badge when closed, and asks to open on click", async () => {
     appMock.ListNoteAttachments.mockResolvedValue([fakeAttachment(), fakeAttachment({ blob_id: "blob-2" })]);
     mockLocaleCatalog();

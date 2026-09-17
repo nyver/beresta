@@ -29,7 +29,14 @@ type App struct {
 	syncCoordinator *coresync.Coordinator
 	syncRepository  *store.SyncRepository
 	syncErrorDetail string
-	settings        AppSettings
+	// syncGeneration is bumped by DisableServer and lockAccount so a
+	// ConnectServer call already in flight (in particular activate's
+	// background reconnect-after-unlock attempt) can detect that the user
+	// disabled sync or locked the account while it was still working, and
+	// discard its result instead of silently resurrecting a connection the
+	// user just turned off.
+	syncGeneration uint64
+	settings       AppSettings
 
 	// keyWrapperFactory builds the platform keystore.Wrapper used to
 	// wrap/unwrap the local device database key. It defaults to
@@ -324,6 +331,7 @@ func (a *App) lockAccount() error {
 	a.syncCoordinator = nil
 	a.syncRepository = nil
 	a.syncErrorDetail = ""
+	a.syncGeneration++
 	a.mu.Unlock()
 	if coordinator != nil {
 		coordinator.Detach()

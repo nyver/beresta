@@ -25,7 +25,11 @@ import (
 func startMobileE2EServer(t *testing.T) (*server.Runtime, string) {
 	t.Helper()
 	cfg := server.DefaultConfig()
-	cfg.Server.DataDirectory = t.TempDir()
+	// retryTempDir rather than plain t.TempDir(): the server's own SQLite
+	// handle inside this directory (runtime.Close(), registered below) can
+	// still be briefly held by Windows/AV just after Close returns, and
+	// t.TempDir()'s single-shot RemoveAll has no tolerance for that.
+	cfg.Server.DataDirectory = retryTempDir(t)
 	cfg.Backups.Enabled = false
 	cfg.Limits.RequestsPerSecond = 10000
 	cfg.Limits.RequestBurst = 10000
@@ -52,11 +56,14 @@ func startMobileE2EServer(t *testing.T) (*server.Runtime, string) {
 // layer.
 func newConnectedMobileService(t *testing.T, runtime *server.Runtime, baseURL, name string) (*Service, string) {
 	t.Helper()
-	// t.TempDir()'s RemoveAll cleanup must run after service.Close closes the
-	// account's SQLite handle, or Windows can still hold the file open when
-	// cleanup tries to remove it (t.Cleanup runs LIFO, so TempDir must be
-	// registered - via this call - before service.Close is).
-	dbPath := filepath.Join(t.TempDir(), "beresta.db")
+	// retryTempDir's RemoveAll cleanup must run after service.Close closes
+	// the account's SQLite handle, or Windows can still hold the file open
+	// when cleanup tries to remove it (t.Cleanup runs LIFO, so TempDir must
+	// be registered - via this call - before service.Close is). A live sync
+	// worker (as this helper leaves attached) can still have Windows/AV
+	// briefly holding the file just after Close returns, so this uses the
+	// retrying variant rather than plain t.TempDir().
+	dbPath := filepath.Join(retryTempDir(t), "beresta.db")
 	service, err := NewService(newTestServiceDeviceSecret(t))
 	if err != nil {
 		t.Fatalf("NewService(%s): %v", name, err)

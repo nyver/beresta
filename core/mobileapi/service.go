@@ -47,10 +47,11 @@ type Service struct {
 	remote          *transport.HTTP
 	repository      *store.SyncRepository
 	syncErrorDetail string
-	// syncGeneration is bumped by DisconnectServer so a ConnectServer call
-	// already in flight (in particular reconnectSavedServer's background
-	// attempt after unlock) can detect that the user disconnected while it
-	// was still working and discard its result instead of silently
+	// syncGeneration is bumped by DisconnectServer and Lock so a
+	// ConnectServer call already in flight (in particular
+	// reconnectSavedServer's background attempt after unlock) can detect
+	// that the user disconnected or locked the account again while it was
+	// still working and discard its result instead of silently
 	// resurrecting a connection the user just turned off.
 	syncGeneration uint64
 }
@@ -238,6 +239,12 @@ func (s *Service) Lock() error {
 	s.mu.Lock()
 	value, coordinator := s.account, s.coordinator
 	s.account, s.workspaceID, s.coordinator, s.remote, s.repository, s.syncErrorDetail = nil, model.Nil, nil, nil, nil, ""
+	// A ConnectServer call already past accountState() (in particular
+	// reconnectSavedServer's background retry after unlock) has no other
+	// way to notice this lock happened mid-attempt; bumping the generation
+	// here, not just in DisconnectServer, keeps its staleness check
+	// meaningful in this case too.
+	s.syncGeneration++
 	s.mu.Unlock()
 	if coordinator != nil {
 		coordinator.Detach()
@@ -1058,18 +1065,6 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 	if err := coordinator.Attach(worker); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	stale := s.syncGeneration != generation
-	s.mu.Unlock()
-	if stale {
-		// DisconnectServer ran while this attempt was still working (most
-		// often reconnectSavedServer's background retry after unlock,
-		// raced by the user tapping Disconnect before it finished): drop
-		// the result instead of silently resurrecting a connection the
-		// user just turned off.
-		coordinator.Detach()
-		return errors.New("mobileapi: server connection was disabled before this connection attempt finished")
-	}
 	// Persisted only once the coordinator has actually attached, so a
 	// failed attach never leaves the on-disk config claiming an active
 	// connection that isn't running.
@@ -1080,6 +1075,19 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 		return err
 	}
 	s.mu.Lock()
+	if s.syncGeneration != generation {
+		// Lock or DisconnectServer ran while this attempt was still working
+		// (most often reconnectSavedServer's background retry after
+		// unlock, raced by the user locking again or tapping Disconnect
+		// before it finished): drop the result instead of silently
+		// resurrecting a connection the user just turned off. Checked in
+		// the same critical section as the commit below, so there is no
+		// window between the check and the assignment for a concurrent
+		// Lock/DisconnectServer to land in.
+		s.mu.Unlock()
+		coordinator.Detach()
+		return errors.New("mobileapi: server connection was disabled before this connection attempt finished")
+	}
 	previous := s.coordinator
 	s.coordinator, s.remote, s.repository = coordinator, remote, repository
 	s.mu.Unlock()

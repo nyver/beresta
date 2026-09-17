@@ -68,6 +68,9 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	if err != nil {
 		return ServerConnectionInfo{}, mapError(err)
 	}
+	a.mu.Lock()
+	generation := a.syncGeneration
+	a.mu.Unlock()
 	httpTransport, err := transport.NewHTTP(transport.HTTPConfig{
 		BaseURL: request.URL, SecurityMode: transport.HTTPSecurityMode(request.SecurityMode),
 		PinnedFingerprint: request.Fingerprint, DeviceID: acc.DeviceID, SignChallenge: acc.SignDeviceChallenge,
@@ -119,6 +122,19 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 		return ServerConnectionInfo{}, mapError(err)
 	}
 	a.mu.Lock()
+	if a.syncGeneration != generation {
+		// DisableServer or lockAccount ran while this attempt was still
+		// working (most often activate's background reconnect-after-unlock
+		// retry, raced by the user disabling sync or locking again before
+		// it finished): drop the result instead of silently resurrecting a
+		// connection the user just turned off. Checked in the same critical
+		// section as the commit below, so there is no window between the
+		// check and the assignment for a concurrent DisableServer/
+		// lockAccount to land in.
+		a.mu.Unlock()
+		coordinator.Detach()
+		return ServerConnectionInfo{}, &AppError{Code: ErrCodeInvalidInput, Message: "server connection was disabled before this connection attempt finished"}
+	}
 	previous := a.syncCoordinator
 	a.settings, a.transport, a.httpTransport, a.syncCoordinator, a.syncRepository = next, httpTransport, httpTransport, coordinator, repository
 	a.mu.Unlock()
@@ -358,6 +374,7 @@ func (a *App) DisableServer() error {
 	a.mu.Lock()
 	a.settings, a.transport, a.httpTransport, a.syncCoordinator, a.syncRepository = next, transport.NewLocal(), nil, nil, nil
 	a.syncErrorDetail = ""
+	a.syncGeneration++
 	a.mu.Unlock()
 	a.emit(EventSyncError, "")
 	a.emit(EventSyncStatus, string(transport.StatusDisabled))

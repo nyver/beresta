@@ -11,12 +11,11 @@ const (
 	// EventAccountLocked carries no payload; it fires whenever the active
 	// account is locked, including on application shutdown.
 	EventAccountLocked = "account:locked"
-	// EventSyncStatus carries the current transport.Status string whenever
-	// synchronization status is queried or changes.
-	EventSyncStatus = "sync:status"
-	// EventSyncError carries a bounded diagnostic string from the latest
-	// failed synchronization cycle, or an empty string after a full success.
-	EventSyncError = "sync:error"
+	// EventSyncSummary carries no payload; it fires whenever the active
+	// workspace's synchronization progress changes, signaling the frontend
+	// to re-fetch the current SyncSummaryDTO via the App.SyncSummary bound
+	// method rather than racing a stale value embedded in the event itself.
+	EventSyncSummary = "sync:summary"
 	// EventQuickNoteOpen carries no payload; it fires whenever the global
 	// quick-note hotkey is pressed or the tray menu's "Quick Note" item is
 	// selected, after the main window has already been shown/restored.

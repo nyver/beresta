@@ -7,7 +7,7 @@ import {
   lockAccount,
   restoreWhole,
   search,
-  syncStatus,
+  syncSummary,
   unwrapError,
 } from "./api";
 import { appMock } from "./setupTests";
@@ -57,10 +57,17 @@ describe("Wails API adapter", () => {
     expect(appMock.LockAccount).toHaveBeenCalledOnce();
   });
 
-  it("rejects an unknown synchronization status instead of misreporting it", async () => {
-    appMock.SyncStatus.mockResolvedValue("future-state");
+  it("rejects an unknown synchronization state instead of misreporting it", async () => {
+    appMock.SyncSummary.mockResolvedValue({
+      state: "future-state",
+      pending_count: 0,
+      last_success_unix_ms: 0,
+      retry_in_ms: 0,
+      unsafe_count: 0,
+      action_required: "none",
+    });
 
-    await expect(syncStatus()).rejects.toThrow("unknown synchronization status");
+    await expect(syncSummary()).rejects.toThrow("unknown synchronization state");
   });
 
   it("preserves structured AppError codes and safely normalizes bridge failures", () => {

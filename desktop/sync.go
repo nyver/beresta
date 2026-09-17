@@ -11,6 +11,7 @@ import (
 	"github.com/beresta-app/beresta/core/model"
 	"github.com/beresta-app/beresta/core/store"
 	coresync "github.com/beresta-app/beresta/core/sync"
+	"github.com/beresta-app/beresta/core/syncsummary"
 	"github.com/beresta-app/beresta/core/transport"
 )
 
@@ -141,6 +142,7 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	if previous != nil {
 		previous.Detach()
 	}
+	a.emit(EventSyncSummary)
 	return ServerConnectionInfo{Enabled: true, URL: request.URL, Protocol: "https", SecurityMode: request.SecurityMode, Fingerprint: request.Fingerprint, Diagnostics: diagnostics}, nil
 }
 
@@ -273,24 +275,30 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 			return nil
 		},
 		Progress: func(progress coresync.Progress) {
-			status := transport.StatusActive
+			// progress.ErrorDetail is bounded diagnostic text; it is not
+			// surfaced through SyncSummary today (specs/sync-engine's
+			// "Aggregated synchronization state" requirement deliberately
+			// keeps raw backend errors out of the shared summary) but will
+			// feed the sanitized technical diagnostics screen once that
+			// lands (specs/product-experience's "Layered privacy-preserving
+			// diagnostics" requirement).
 			switch progress.Phase {
 			case coresync.PhaseCurrent:
-				status = transport.StatusCurrent
 				httpTransport.CompleteSync()
-				a.setSyncError("")
 			case coresync.PhaseBackoff:
-				status = transport.StatusOffline
 				httpTransport.SyncOffline()
-				a.setSyncError(progress.ErrorDetail)
 			case coresync.PhaseQuarantine:
-				status = transport.StatusFailed
 				httpTransport.SyncFailed()
-				a.setSyncError(progress.ErrorDetail)
 			default:
 				httpTransport.BeginSync()
 			}
-			a.emit(EventSyncStatus, string(status))
+			// The frontend's shared SyncSummary combines this progress
+			// snapshot with durable pending/unsafe counts (see SyncSummary
+			// below); emitting only a signal here, instead of computing
+			// that summary on every phase transition, keeps this callback
+			// - which runs on the worker's own goroutine mid-cycle - free
+			// of extra database reads.
+			a.emit(EventSyncSummary)
 		},
 	})
 	if err != nil {
@@ -299,11 +307,45 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 	return worker, repository, nil
 }
 
-func (a *App) setSyncError(detail string) {
+// SyncSummary returns the shared platform-neutral synchronization summary
+// (see core/syncsummary and specs/sync-engine's "Aggregated synchronization
+// state" requirement) for the active workspace, combining live coordinator
+// progress with durable pending and unsafe-operation counts. The frontend
+// calls this on load, on an interval, and in response to EventSyncSummary
+// instead of branching on raw transport status strings.
+func (a *App) SyncSummary() (SyncSummaryDTO, error) {
+	_, workspaceID, err := a.primaryWorkspace()
+	if err != nil {
+		return SyncSummaryDTO{}, mapError(err)
+	}
 	a.mu.Lock()
-	a.syncErrorDetail = detail
+	coordinator := a.syncCoordinator
+	repository := a.syncRepository
+	configured := a.httpTransport != nil
 	a.mu.Unlock()
-	a.emit(EventSyncError, detail)
+
+	var progress coresync.CoordinatorProgress
+	if coordinator != nil {
+		progress = coordinator.Progress()
+	}
+	var pendingCount, unsafeCount int
+	if repository != nil {
+		ctx := a.requestContext()
+		if pendingCount, err = repository.CountPending(ctx, workspaceID); err != nil {
+			return SyncSummaryDTO{}, mapError(err)
+		}
+		if unsafeCount, err = repository.CountQuarantine(ctx, workspaceID); err != nil {
+			return SyncSummaryDTO{}, mapError(err)
+		}
+	}
+	summary := syncsummary.Summarize(syncsummary.Inputs{
+		Configured:   configured,
+		Progress:     progress,
+		PendingCount: pendingCount,
+		UnsafeCount:  unsafeCount,
+		Now:          time.Now(),
+	})
+	return newSyncSummaryDTO(summary), nil
 }
 
 // attachWorkspaceSync builds a sync worker for workspaceID and swaps it into
@@ -373,11 +415,9 @@ func (a *App) DisableServer() error {
 	}
 	a.mu.Lock()
 	a.settings, a.transport, a.httpTransport, a.syncCoordinator, a.syncRepository = next, transport.NewLocal(), nil, nil, nil
-	a.syncErrorDetail = ""
 	a.syncGeneration++
 	a.mu.Unlock()
-	a.emit(EventSyncError, "")
-	a.emit(EventSyncStatus, string(transport.StatusDisabled))
+	a.emit(EventSyncSummary)
 	return nil
 }
 
@@ -458,6 +498,7 @@ func (a *App) RetrySyncQuarantine(operationID string) error {
 	if coordinator != nil {
 		coordinator.Trigger()
 	}
+	a.emit(EventSyncSummary)
 	return nil
 }
 
@@ -472,11 +513,10 @@ func (a *App) SyncNow() error {
 		return &AppError{Code: ErrCodeInvalidInput, Message: "server synchronization is disabled"}
 	}
 	remote.BeginSync()
-	a.emit(EventSyncStatus, string(transport.StatusActive))
+	a.emit(EventSyncSummary)
 	if !coordinator.Trigger() {
 		remote.SyncFailed()
-		a.setSyncError("synchronization worker is not running")
-		a.emit(EventSyncStatus, string(transport.StatusFailed))
+		a.emit(EventSyncSummary)
 		return &AppError{Code: ErrCodeInternal, Message: "synchronization worker is not running"}
 	}
 	return nil

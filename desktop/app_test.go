@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/beresta-app/beresta/core/presentation"
 	"github.com/beresta-app/beresta/locales"
 )
 
@@ -357,10 +358,17 @@ func TestCatalogReturnsRequestedLocale(t *testing.T) {
 	}
 }
 
-func TestSyncStatusReportsDisabledForLocalTransport(t *testing.T) {
+func TestSyncSummaryReportsLocalOnlyForLocalTransport(t *testing.T) {
 	a := newTestApp(t)
-	if got := a.SyncStatus(); got != "disabled" {
-		t.Fatalf("SyncStatus() = %q, want %q", got, "disabled")
+	if _, err := a.CreateAccount(CreateAccountRequest{DatabasePath: testDatabasePath(t, a), Passphrase: "correct horse battery staple"}); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := a.SyncSummary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.State != presentation.SyncStateLocalOnly {
+		t.Fatalf("SyncSummary().State = %q, want %q", summary.State, presentation.SyncStateLocalOnly)
 	}
 }
 

@@ -147,11 +147,9 @@ export function Status():Promise<main.AccountStatus>;
 
 export function SyncConnectionInfo():Promise<main.ServerConnectionInfo>;
 
-export function SyncError():Promise<string>;
-
 export function SyncNow():Promise<void>;
 
-export function SyncStatus():Promise<string>;
+export function SyncSummary():Promise<main.SyncSummaryDTO>;
 
 export function UnlockAccount(arg1:main.UnlockAccountRequest):Promise<main.AccountInfo>;
 

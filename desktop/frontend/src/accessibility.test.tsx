@@ -11,7 +11,7 @@ import {
   mockLockedStatus,
   mockSavedSearches,
   mockSettings,
-  mockSyncStatus,
+  mockSyncSummary,
   mockUnlockedStatus,
 } from "./testUtils";
 
@@ -57,7 +57,7 @@ describe("desktop accessibility acceptance", () => {
     mockUnlockedStatus(fakeAccountInfo());
     mockSettings();
     mockSavedSearches();
-    mockSyncStatus();
+    mockSyncSummary();
     appMock.AutostartStatus.mockResolvedValue({ enabled: false, conflict_path: "" });
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([fakeTag({ name: "Important" })]);

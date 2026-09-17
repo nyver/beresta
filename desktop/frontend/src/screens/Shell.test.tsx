@@ -14,7 +14,7 @@ import {
   mockLocaleCatalog,
   mockSavedSearches,
   mockSettings,
-  mockSyncStatus,
+  mockSyncSummary,
 } from "../testUtils";
 import { Shell } from "./Shell";
 import { main } from "../../wailsjs/go/models";
@@ -243,7 +243,7 @@ describe("Shell", () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);
     appMock.ListNotes.mockResolvedValue([]);
-    mockSyncStatus();
+    mockSyncSummary();
     renderShell({ account: fakeAccountInfo({ device_id: "device-local" }) });
 
     await userEvent.setup().click(await screen.findByRole("button", { name: "sync.open_button" }));
@@ -251,10 +251,10 @@ describe("Shell", () => {
     const dialog = await screen.findByRole("dialog", { name: "sync.title" });
     expect(within(dialog).getByText("device-local")).toBeInTheDocument();
     // The topbar's own compact status pill (task: passive sync status
-    // instead of a plain button) now shows this same "sync.status_disabled"
-    // text outside the dialog too, so this must be scoped to the dialog to
-    // stay unambiguous.
-    expect(within(dialog).getByText("sync.status_disabled")).toBeInTheDocument();
+    // instead of a plain button) now shows this same
+    // "sync.status_local_only" text outside the dialog too, so this must
+    // be scoped to the dialog to stay unambiguous.
+    expect(within(dialog).getByText("sync.status_local_only")).toBeInTheDocument();
   });
 
   it("starts an immediate synchronization cycle for the active workspace", async () => {
@@ -262,7 +262,7 @@ describe("Shell", () => {
     appMock.ListTags.mockResolvedValue([]);
     appMock.ListNotes.mockResolvedValue([]);
     appMock.SyncNow.mockResolvedValue(undefined);
-    mockSyncStatus("current");
+    mockSyncSummary("current");
     renderShell();
 
     const button = await screen.findByRole("button", { name: "sync.force_button" });
@@ -281,22 +281,26 @@ describe("Shell", () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);
     appMock.ListNotes.mockResolvedValue([note]);
-    mockSyncStatus("active");
+    mockSyncSummary("active");
     renderShell();
 
     expect(await screen.findByText("Before mobile rename")).toBeInTheDocument();
     await waitFor(() => expect(runtimeMock.EventsOnMultiple).toHaveBeenCalled());
-    const [, onSyncStatus] =
-      runtimeMock.EventsOnMultiple.mock.calls.find(([eventName]) => eventName === "sync:status") ?? [];
-    expect(onSyncStatus).toBeDefined();
+    const [, onSyncSummary] =
+      runtimeMock.EventsOnMultiple.mock.calls.find(([eventName]) => eventName === "sync:summary") ?? [];
+    expect(onSyncSummary).toBeDefined();
 
+    // The event itself carries no payload - it signals Shell to re-fetch
+    // the summary, which is where the new "current" state actually comes
+    // from.
     appMock.ListNotes.mockResolvedValue([{ ...note, title: "Renamed on mobile" }]);
-    act(() => onSyncStatus?.("current"));
+    mockSyncSummary("current");
+    act(() => onSyncSummary?.());
 
     expect(await screen.findByText("Renamed on mobile")).toBeInTheDocument();
     expect(appMock.ListNotes).toHaveBeenCalledTimes(2);
 
-    act(() => onSyncStatus?.("current"));
+    act(() => onSyncSummary?.());
     await waitFor(() => expect(appMock.ListNotes).toHaveBeenCalledTimes(2));
   });
 

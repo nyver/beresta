@@ -46,13 +46,21 @@ export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
   return settings;
 }
 
-export function mockSyncStatus(status = "disabled") {
-  appMock.SyncStatus.mockResolvedValue(status);
-  appMock.SyncError.mockResolvedValue("");
+export function mockSyncSummary(state = "local_only", overrides: Partial<main.SyncSummaryDTO> = {}) {
+  const summary: main.SyncSummaryDTO = {
+    state,
+    pending_count: 0,
+    last_success_unix_ms: 0,
+    retry_in_ms: 0,
+    unsafe_count: 0,
+    action_required: "none",
+    ...overrides,
+  };
+  appMock.SyncSummary.mockResolvedValue(summary);
   appMock.SyncConnectionInfo.mockResolvedValue({
-    enabled: status !== "disabled",
-    url: status === "disabled" ? "" : "https://sync.example.com",
-    protocol: status === "disabled" ? "" : "https",
+    enabled: state !== "local_only",
+    url: state === "local_only" ? "" : "https://sync.example.com",
+    protocol: state === "local_only" ? "" : "https",
     security_mode: "pinned",
     fingerprint: "",
   });
@@ -61,6 +69,7 @@ export function mockSyncStatus(status = "disabled") {
   appMock.ExportIdentity.mockResolvedValue("beresta://identity?user=test&key=00");
   appMock.ListWorkspaceMembers.mockResolvedValue([]);
   appMock.ListWorkspaces.mockResolvedValue([]);
+  return summary;
 }
 
 export function mockAutostartStatus(overrides: Partial<main.AutostartStatusDTO> = {}) {

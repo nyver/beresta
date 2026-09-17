@@ -1,11 +1,11 @@
 import { formatClockTime } from "../format";
 import { useI18n } from "../i18n";
-import type { SyncStatusValue } from "../api";
+import type { SyncState } from "../api";
 import type { NoteSaveState } from "../editor/NoteEditor";
 
 export interface SaveStatusLineProps {
   saveState: NoteSaveState;
-  syncStatus: SyncStatusValue | null;
+  syncStatus: SyncState | null;
   syncedAt: number | null;
   onOpenSync: () => void;
 }
@@ -32,17 +32,14 @@ export function SaveStatusLine({ saveState, syncStatus, syncedAt, onOpenSync }: 
         ? t("savestate.could_not_save")
         : t("savestate.saved");
 
-  // "disabled" (local-only account) and null (not loaded yet) render no
-  // sync fragment at all: there is nothing synchronization-related to
-  // report yet, and the local-save half above already covers what an
-  // offline-first user needs to know in that case.
+  // "local_only" and null (not loaded yet) render no sync fragment at all:
+  // there is nothing synchronization-related to report yet, and the
+  // local-save half above already covers what an offline-first user needs
+  // to know in that case.
   let syncFragment: string | null = null;
-  if (syncStatus === "offline") syncFragment = t("sync.status_offline");
-  else if (syncStatus === "active") syncFragment = t("sync.status_active");
-  else if (syncStatus === "current") syncFragment = t("sync.status_current");
-  else if (syncStatus === "failed") syncFragment = t("sync.status_failed");
+  if (syncStatus && syncStatus !== "local_only") syncFragment = t(`sync.status_${syncStatus}`);
 
-  const clickable = syncStatus === "offline" || syncStatus === "failed";
+  const clickable = syncStatus === "offline" || syncStatus === "retrying" || syncStatus === "action_required";
 
   return (
     <p className="save-status-line">

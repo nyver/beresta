@@ -694,6 +694,28 @@ export namespace main {
 	        this.received_unix_ms = source["received_unix_ms"];
 	    }
 	}
+	export class SyncSummaryDTO {
+	    state: string;
+	    pending_count: number;
+	    last_success_unix_ms: number;
+	    retry_in_ms: number;
+	    unsafe_count: number;
+	    action_required: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncSummaryDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.pending_count = source["pending_count"];
+	        this.last_success_unix_ms = source["last_success_unix_ms"];
+	        this.retry_in_ms = source["retry_in_ms"];
+	        this.unsafe_count = source["unsafe_count"];
+	        this.action_required = source["action_required"];
+	    }
+	}
 	export class TagDTO {
 	    id: string;
 	    workspace_id: string;

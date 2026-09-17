@@ -28,7 +28,6 @@ type App struct {
 	httpTransport   *transport.HTTP
 	syncCoordinator *coresync.Coordinator
 	syncRepository  *store.SyncRepository
-	syncErrorDetail string
 	// syncGeneration is bumped by DisableServer and lockAccount so a
 	// ConnectServer call already in flight (in particular activate's
 	// background reconnect-after-unlock attempt) can detect that the user
@@ -330,7 +329,6 @@ func (a *App) lockAccount() error {
 	a.httpTransport = nil
 	a.syncCoordinator = nil
 	a.syncRepository = nil
-	a.syncErrorDetail = ""
 	a.syncGeneration++
 	a.mu.Unlock()
 	if coordinator != nil {
@@ -342,34 +340,6 @@ func (a *App) lockAccount() error {
 	err := acc.Lock()
 	a.emit(EventAccountLocked)
 	return err
-}
-
-// SyncStatus returns the current synchronization transport's status
-// string (see core/transport.Status). Phase 4 only wires the local
-// no-op transport, so this always currently reports "disabled"; the field
-// exists now so the desktop shell's sync indicator (task 5.10) has a
-// stable contract to bind against before a real transport lands.
-func (a *App) SyncStatus() string {
-	a.mu.Lock()
-	t := a.transport
-	ctx := a.ctx
-	a.mu.Unlock()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	status := string(t.Status(ctx))
-	a.emit(EventSyncStatus, status)
-	return status
-}
-
-// SyncError returns the bounded diagnostic detail from the most recent
-// failed synchronization cycle. It is cleared only after a full successful
-// cycle, disconnect, or lock; individual successful HTTP requests do not
-// hide an unapplied sync error.
-func (a *App) SyncError() string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.syncErrorDetail
 }
 
 // keyWrapper builds the platform keystore.Wrapper used to wrap/unwrap the

@@ -19,15 +19,16 @@ type Coordinator struct {
 	trigger   chan struct{}
 	done      chan error
 
-	// lastPhase, lastSuccess, and retryDeadline track the most recent
-	// Progress reported by the attached worker, exposed via Progress, so
-	// callers can derive a SyncSummary without replaying every Progress
-	// event themselves. They are reset on each Attach, since a new worker
-	// means a new (or newly reconnected) workspace whose progress history
-	// does not carry over.
-	lastPhase     Phase
-	lastSuccess   time.Time
-	retryDeadline time.Time
+	// lastPhase, lastErrorClass, lastSuccess, and retryDeadline track the
+	// most recent Progress reported by the attached worker, exposed via
+	// Progress, so callers can derive a SyncSummary without replaying every
+	// Progress event themselves. They are reset on each Attach, since a new
+	// worker means a new (or newly reconnected) workspace whose progress
+	// history does not carry over.
+	lastPhase      Phase
+	lastErrorClass string
+	lastSuccess    time.Time
+	retryDeadline  time.Time
 }
 
 func NewCoordinator(root context.Context) *Coordinator {
@@ -51,6 +52,7 @@ func (c *Coordinator) Attach(worker *Worker) error {
 	// new (or newly reconnected) workspace whose history does not carry
 	// over from whatever was attached before.
 	c.lastPhase = ""
+	c.lastErrorClass = ""
 	c.lastSuccess = time.Time{}
 	c.retryDeadline = time.Time{}
 
@@ -137,6 +139,7 @@ func (c *Coordinator) recordProgress(p Progress, now func() time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastPhase = p.Phase
+	c.lastErrorClass = p.ErrorClass
 	switch p.Phase {
 	case PhaseCurrent:
 		c.lastSuccess = now()
@@ -168,6 +171,11 @@ type CoordinatorProgress struct {
 	// RetryDeadline is when the next automatic retry is due, or the zero
 	// time.Time when no retry is pending.
 	RetryDeadline time.Time
+	// ErrorClass is the classification of the error behind the last
+	// PhaseBackoff report (see classifySyncError), or empty when Phase is
+	// not PhaseBackoff. It is diagnostic-only and never carries operation
+	// content or protocol detail.
+	ErrorClass string
 }
 
 // Progress returns the coordinator's current CoordinatorProgress snapshot.
@@ -179,5 +187,6 @@ func (c *Coordinator) Progress() CoordinatorProgress {
 		Phase:         c.lastPhase,
 		LastSuccess:   c.lastSuccess,
 		RetryDeadline: c.retryDeadline,
+		ErrorClass:    c.lastErrorClass,
 	}
 }

@@ -4,12 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "../i18n";
 import { appMock, runtimeMock } from "../setupTests";
-import { mockLocaleCatalog, mockSyncStatus } from "../testUtils";
+import { mockLocaleCatalog, mockSyncSummary } from "../testUtils";
 import { SyncPanel } from "./SyncPanel";
 
-function renderPanel(status = "disabled") {
+function renderPanel(status = "local_only") {
   mockLocaleCatalog();
-  mockSyncStatus(status);
+  mockSyncSummary(status);
   render(
     <I18nProvider>
       <SyncPanel deviceId="device-123" />
@@ -18,7 +18,7 @@ function renderPanel(status = "disabled") {
 }
 
 describe("SyncPanel", () => {
-  it.each(["disabled", "offline", "active", "current", "failed"])(
+  it.each(["local_only", "offline", "active", "current", "pending", "retrying", "action_required"])(
     "renders the explicit %s state",
     async (status) => {
       renderPanel(status);
@@ -30,7 +30,7 @@ describe("SyncPanel", () => {
 
   it("shows the connected endpoint and applies a replacement server and certificate policy", async () => {
     mockLocaleCatalog();
-    mockSyncStatus("current");
+    mockSyncSummary("current");
     appMock.SyncConnectionInfo.mockResolvedValue({
       enabled: true,
       url: "https://old.example.com",
@@ -72,28 +72,30 @@ describe("SyncPanel", () => {
 
   it("updates from the shared synchronization event", async () => {
     renderPanel();
-    await screen.findByText("sync.status_disabled");
+    await screen.findByText("sync.status_local_only");
     await waitFor(() => expect(runtimeMock.EventsOnMultiple).toHaveBeenCalled());
-    const [, onStatus] =
-      runtimeMock.EventsOnMultiple.mock.calls.find(([name]) => name === "sync:status") ?? [];
+    const [, onSummary] =
+      runtimeMock.EventsOnMultiple.mock.calls.find(([name]) => name === "sync:summary") ?? [];
 
-    act(() => onStatus?.("offline"));
+    // The event itself carries no payload - it signals a re-fetch, which is
+    // where the new "offline" state actually comes from.
+    mockSyncSummary("offline");
+    act(() => onSummary?.());
 
     expect(await screen.findByText("sync.status_offline")).toBeInTheDocument();
   });
 
-  it("shows the diagnostic detail for a failed synchronization cycle", async () => {
+  it("shows the durable pending count while synchronization is queued", async () => {
     mockLocaleCatalog();
-    mockSyncStatus("failed");
-    appMock.SyncError.mockResolvedValue("sync: review snapshot: signature verification failed");
+    mockSyncSummary("pending", { pending_count: 3 });
     render(
       <I18nProvider>
         <SyncPanel deviceId="device-123" />
       </I18nProvider>,
     );
 
-    expect(await screen.findByText("sync.error_details_label")).toBeInTheDocument();
-    expect(screen.getByText("sync: review snapshot: signature verification failed")).toBeInTheDocument();
+    expect(await screen.findByText("sync.pending_count_label")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
   });
 
   it("shows only the real local device and current-phase placeholders", async () => {
@@ -106,7 +108,14 @@ describe("SyncPanel", () => {
 
   it("offers a retry when status loading fails", async () => {
     mockLocaleCatalog();
-    appMock.SyncStatus.mockRejectedValueOnce(new Error("bridge failed")).mockResolvedValue("current");
+    appMock.SyncSummary.mockRejectedValueOnce(new Error("bridge failed")).mockResolvedValue({
+      state: "current",
+      pending_count: 0,
+      last_success_unix_ms: 0,
+      retry_in_ms: 0,
+      unsafe_count: 0,
+      action_required: "none",
+    });
     render(
       <I18nProvider>
         <SyncPanel deviceId="device-123" />
@@ -167,7 +176,7 @@ describe("SyncPanel", () => {
     });
     const onWorkspaceChanged = vi.fn();
     mockLocaleCatalog();
-    mockSyncStatus("active");
+    mockSyncSummary("active");
     render(
       <I18nProvider>
         <SyncPanel deviceId="device-123" onWorkspaceChanged={onWorkspaceChanged} />
@@ -189,8 +198,8 @@ describe("SyncPanel", () => {
 
   it("lists held workspaces and switches the active one", async () => {
     mockLocaleCatalog();
-    mockSyncStatus("active");
-    // mockSyncStatus defaults ListWorkspaces to []; override it after, since
+    mockSyncSummary("active");
+    // mockSyncSummary defaults ListWorkspaces to []; override it after, since
     // renderPanel would otherwise re-apply that default on top of this.
     appMock.ListWorkspaces.mockResolvedValue([
       { workspace_id: "own-workspace", role: "owner", active: true },
@@ -213,7 +222,7 @@ describe("SyncPanel", () => {
 
   it("flushes the open note's editor before switching the active workspace", async () => {
     mockLocaleCatalog();
-    mockSyncStatus("active");
+    mockSyncSummary("active");
     appMock.ListWorkspaces.mockResolvedValue([
       { workspace_id: "own-workspace", role: "owner", active: true },
       { workspace_id: "shared-workspace", role: "member", active: false, member_count: 2 },
@@ -243,7 +252,7 @@ describe("SyncPanel", () => {
 
   it("lets an owner disconnect an active workspace client", async () => {
     mockLocaleCatalog();
-    mockSyncStatus("active");
+    mockSyncSummary("active");
     appMock.ListWorkspaces.mockResolvedValue([
       { workspace_id: "own-workspace", role: "owner", active: true, member_count: 2 },
     ]);

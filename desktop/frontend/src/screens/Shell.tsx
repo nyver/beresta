@@ -15,11 +15,11 @@ import {
   searchByTag,
   setNoteTag,
   syncNow,
-  syncStatus,
+  syncSummary,
   updateSettings,
   unwrapError,
   verifyAllBackups,
-  type SyncStatusValue,
+  type SyncState,
 } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
@@ -39,10 +39,12 @@ import { TagList } from "../shell/TagList";
 
 // Matches desktop/events.go's EventQuickNoteOpen.
 const EVENT_QUICK_NOTE_OPEN = "quicknote:open";
-// Matches desktop/events.go's EventSyncStatus (see also SyncPanel.tsx's own
+// Matches desktop/events.go's EventSyncSummary (see also SyncPanel.tsx's own
 // subscription - this one feeds the topbar's compact status pill and the
-// open note's footer status line instead of the full Sync modal).
-const EVENT_SYNC_STATUS = "sync:status";
+// open note's footer status line instead of the full Sync modal). The event
+// itself carries no payload; it signals this effect to re-fetch the summary
+// via syncSummary() instead of racing a value embedded in the event.
+const EVENT_SYNC_SUMMARY = "sync:summary";
 
 // Persisted across launches (task: collapsible sidebar/focus mode for
 // smaller windows) so the user's chosen layout survives a restart.
@@ -113,11 +115,11 @@ export function Shell({ account, onLocked }: ShellProps) {
   const [highlightTerms, setHighlightTerms] = useState<string[]>([]);
   const [dataModalOpen, setDataModalOpen] = useState(false);
   const [syncModalOpen, setSyncModalOpen] = useState(false);
-  // Workspace-wide synchronization status, shared by the topbar's compact
+  // Workspace-wide synchronization state, shared by the topbar's compact
   // pill and the open note's footer status line (SaveStatusLine) so the two
-  // never disagree; loaded once and kept live via the same "sync:status"
+  // never disagree; loaded once and kept live via the same "sync:summary"
   // event SyncPanel itself listens for.
-  const [syncStatusValue, setSyncStatusValue] = useState<SyncStatusValue | null>(null);
+  const [syncStatusValue, setSyncStatusValue] = useState<SyncState | null>(null);
   const [forcingSync, setForcingSync] = useState(false);
   // Avoid refetching the entire workspace for every status poll that keeps
   // reporting "current". It is reset while a new cycle is active so the
@@ -211,7 +213,7 @@ export function Shell({ account, onLocked }: ShellProps) {
   useEffect(() => {
     if (!ready) return;
     let disposed = false;
-    function applyStatus(next: SyncStatusValue) {
+    function applyState(next: SyncState) {
       if (disposed) return;
       setSyncStatusValue(next);
       if (next === "current") {
@@ -227,23 +229,21 @@ export function Shell({ account, onLocked }: ShellProps) {
         syncWasCurrentRef.current = false;
       }
     }
-    const refreshStatus = () => {
-      syncStatus()
-        .then(applyStatus)
+    const refreshSummary = () => {
+      syncSummary()
+        .then((summary) => applyState(summary.state))
         .catch(() => {});
     };
-    refreshStatus();
-    // Events normally update this state as phases advance. Polling the
-    // bound transport status as well prevents the visual state from staying
-    // on "Synchronizing" if an event is missed while the worker completes.
-    const interval = window.setInterval(refreshStatus, 5_000);
-    EventsOn(EVENT_SYNC_STATUS, (next: unknown) => {
-      if (typeof next === "string") applyStatus(next as SyncStatusValue);
-    });
+    refreshSummary();
+    // EventSyncSummary normally triggers a refetch as phases advance.
+    // Polling as well prevents the visual state from staying on
+    // "Synchronizing" if an event is missed while the worker completes.
+    const interval = window.setInterval(refreshSummary, 5_000);
+    EventsOn(EVENT_SYNC_SUMMARY, refreshSummary);
     return () => {
       disposed = true;
       window.clearInterval(interval);
-      EventsOff(EVENT_SYNC_STATUS);
+      EventsOff(EVENT_SYNC_SUMMARY);
     };
   }, [ready, loadAll]);
 
@@ -552,12 +552,12 @@ export function Shell({ account, onLocked }: ShellProps) {
     setForcingSync(true);
     try {
       await syncNow();
-      // The event emitted by SyncNow updates this too in the desktop
-      // runtime. Set it locally as well so the control immediately reflects
-      // the requested cycle even if event delivery is delayed.
+      // EventSyncSummary (emitted by SyncNow in the desktop runtime) will
+      // refresh this from the real backend state shortly. Set it locally
+      // as well so the control immediately reflects the requested cycle
+      // even if event delivery is delayed.
       setSyncStatusValue("active");
     } catch {
-      setSyncStatusValue("failed");
       setSyncModalOpen(true);
     } finally {
       setForcingSync(false);
@@ -661,7 +661,7 @@ export function Shell({ account, onLocked }: ShellProps) {
           ) : null}
           <button
             type="button"
-            className={`sync-status-pill sync-status-${syncStatusValue ?? "disabled"}`}
+            className={`sync-status-pill sync-status-${syncStatusValue ?? "local_only"}`}
             aria-label={t("sync.open_button")}
             title={t("sync.open_button")}
             onClick={() => setSyncModalOpen(true)}
@@ -675,7 +675,7 @@ export function Shell({ account, onLocked }: ShellProps) {
             aria-label={t("sync.force_button")}
             title={t("sync.force_button")}
             aria-busy={forcingSync}
-            disabled={forcingSync || syncStatusValue === null || syncStatusValue === "disabled"}
+            disabled={forcingSync || syncStatusValue === null || syncStatusValue === "local_only"}
             onClick={() => void handleSyncNow()}
           >
             <span aria-hidden="true">↻</span>

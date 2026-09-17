@@ -1368,11 +1368,16 @@ li:hover > .tree-row-delete,
   background: #3a6b2a;
 }
 
-.sync-status-offline .sync-status-dot {
+.sync-status-pending .sync-status-dot {
+  background: #7d7469;
+}
+
+.sync-status-offline .sync-status-dot,
+.sync-status-retrying .sync-status-dot {
   background: #b36a20;
 }
 
-.sync-status-failed .sync-status-dot {
+.sync-status-action_required .sync-status-dot {
   background: #8a2c1f;
 }
 
@@ -1755,10 +1760,10 @@ li:hover > .tree-row-delete,
   background: #f1eee6;
 }
 
-.sync-error-detail {
+.sync-pending-count {
   margin: 0.5rem 0 0;
   overflow-wrap: anywhere;
-  color: #8b3327;
+  color: #7d7469;
   font-size: 0.85rem;
 }
 

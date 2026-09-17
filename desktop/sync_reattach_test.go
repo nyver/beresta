@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/beresta-app/beresta/core/presentation"
 )
 
 // TestSyncReattachesAutomaticallyAfterUnlockWhenAServerWasPreviouslyConfigured
@@ -67,10 +69,14 @@ func TestSyncReattachesAutomaticallyAfterUnlockWhenAServerWasPreviouslyConfigure
 
 	deadline = time.Now().Add(5 * time.Second)
 	for {
-		if status := a.SyncStatus(); status == "current" {
+		summary, err := a.SyncSummary()
+		if err != nil {
+			t.Fatalf("SyncSummary: %v", err)
+		}
+		if summary.State == presentation.SyncStateCurrent {
 			break
 		} else if time.Now().After(deadline) {
-			t.Fatalf("SyncStatus never reached %q after unlock, last was %q", "current", status)
+			t.Fatalf("SyncSummary.State never reached %q after unlock, last was %q", presentation.SyncStateCurrent, summary.State)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -103,8 +109,12 @@ func TestSyncStaysLocalOnlyAfterUnlockWithNoServerConfigured(t *testing.T) {
 	if coordinator != nil || httpTransport != nil {
 		t.Fatal("a sync coordinator or HTTP transport exists after unlocking an account that never had a server configured")
 	}
-	if status := a.SyncStatus(); status != "disabled" {
-		t.Fatalf("SyncStatus() = %q, want %q", status, "disabled")
+	summary, err := a.SyncSummary()
+	if err != nil {
+		t.Fatalf("SyncSummary: %v", err)
+	}
+	if summary.State != presentation.SyncStateLocalOnly {
+		t.Fatalf("SyncSummary().State = %q, want %q", summary.State, presentation.SyncStateLocalOnly)
 	}
 }
 

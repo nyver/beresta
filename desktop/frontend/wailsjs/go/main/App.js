@@ -290,16 +290,12 @@ export function SyncConnectionInfo() {
   return window['go']['main']['App']['SyncConnectionInfo']();
 }
 
-export function SyncError() {
-  return window['go']['main']['App']['SyncError']();
-}
-
 export function SyncNow() {
   return window['go']['main']['App']['SyncNow']();
 }
 
-export function SyncStatus() {
-  return window['go']['main']['App']['SyncStatus']();
+export function SyncSummary() {
+  return window['go']['main']['App']['SyncSummary']();
 }
 
 export function UnlockAccount(arg1) {

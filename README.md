@@ -54,7 +54,7 @@ JS bridge cannot carry Go `io.Reader`/`io.Writer` streams), backup/restore,
 import/export, garbage collection, desktop settings, and the English/Russian
 locale catalogs are all bound to the frontend as JSON-safe methods that never
 expose the raw database handle or key material, plus `account:unlocked`,
-`account:locked`, and `sync:status` events. Every bound method's failure is a
+`account:locked`, and `sync:summary` events. Every bound method's failure is a
 stable `{code, message}` pair (`desktop/errors.go`'s `AppError`, JSON-encoded
 because Wails only ever transmits an error's plain string across the JS
 bridge) so the frontend can localize and branch on `code` instead of
@@ -184,10 +184,12 @@ duplicate window, tray icon, and hotkey registration; launching again
 while Beresta is already running instead brings the existing main window
 to the foreground (or, if it is hidden to the tray, leaves it there - the
 tray icon is already the right way to reach it). A separate Synchronization
-entry now renders the shared disabled/offline/active/current/failed state
-model and listens for `sync:status` events without blocking local editing.
-In the current local-only phase it truthfully shows the active local device,
-an empty conflict/quarantine journal, and disabled server/device-management
+entry now renders the shared local_only/current/active/offline/pending/
+retrying/action_required state model (`core/syncsummary.Summarize`) and
+listens for payload-less `sync:summary` events, refetching the summary via
+the `SyncSummary` bound method, without blocking local editing. In the
+current local-only phase it truthfully shows the active local device, an
+empty conflict/quarantine journal, and disabled server/device-management
 controls rather than fabricating remote state. Windows packaging now produces
 a per-user NSIS installer with explicit preserve/delete-local-data uninstall
 choices, a branded application icon, and a fail-closed updater that verifies

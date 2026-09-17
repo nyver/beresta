@@ -16,13 +16,12 @@ import {
   setActiveWorkspace,
   shareWorkspace,
   syncConnectionInfo,
-  syncError,
-  syncStatus,
+  syncSummary,
   type QuarantineEntry,
   type ServerConnectionInfo,
   type ServerDiagnostics,
   type SyncDevice,
-  type SyncStatusValue,
+  type SyncState,
   type WorkspaceSummary,
   type WorkspaceMember,
   unwrapError,
@@ -30,14 +29,8 @@ import {
 import { useI18n } from "../i18n";
 import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
 
-const EVENT_SYNC_STATUS = "sync:status";
-const EVENT_SYNC_ERROR = "sync:error";
+const EVENT_SYNC_SUMMARY = "sync:summary";
 const EVENT_WORKSPACE_CHANGED = "workspace:changed";
-const KNOWN_STATUSES: readonly SyncStatusValue[] = ["disabled", "offline", "active", "current", "failed"];
-
-function isSyncStatus(value: unknown): value is SyncStatusValue {
-  return typeof value === "string" && KNOWN_STATUSES.includes(value as SyncStatusValue);
-}
 
 export interface SyncPanelProps {
   deviceId: string;
@@ -56,9 +49,9 @@ export interface SyncPanelProps {
 
 export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitch }: SyncPanelProps) {
   const { t, errorMessage } = useI18n();
-  const [status, setStatus] = useState<SyncStatusValue | null>(null);
+  const [status, setStatus] = useState<SyncState | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [syncErrorDetail, setSyncErrorDetail] = useState("");
   const [url, setUrl] = useState("");
   const [invite, setInvite] = useState("");
   const [fingerprint, setFingerprint] = useState("");
@@ -78,8 +71,8 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
   const [copied, setCopied] = useState<string | null>(null);
   const [sharingBusy, setSharingBusy] = useState(false);
 
-  const loadDetails = useCallback(async (nextStatus: SyncStatusValue) => {
-    if (nextStatus === "disabled") {
+  const loadDetails = useCallback(async (nextStatus: SyncState) => {
+    if (nextStatus === "local_only") {
       setDevices([]);
       setQuarantine([]);
       setDiagnostics(null);
@@ -115,8 +108,12 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
 
   const loadStatus = useCallback(() => {
     setError(null);
-    Promise.all([syncStatus(), syncError()])
-      .then(async ([next, detail]) => { setStatus(next); setSyncErrorDetail(detail); await loadDetails(next); })
+    syncSummary()
+      .then(async (summary) => {
+        setStatus(summary.state);
+        setPendingCount(summary.pending_count);
+        await loadDetails(summary.state);
+      })
       .catch((thrown: unknown) => setError(errorMessage(unwrapError(thrown))));
   }, [errorMessage, loadDetails]);
 
@@ -132,26 +129,17 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
   }, [errorMessage]);
 
   useEffect(() => {
-    EventsOn(EVENT_SYNC_STATUS, (next: unknown) => {
-      if (isSyncStatus(next)) {
-        setStatus(next);
-        setError(null);
-        void loadDetails(next).catch(() => undefined);
-      } else {
-        setError(errorMessage({ code: "internal", message: "unknown synchronization status" }));
-      }
-    });
-    EventsOn(EVENT_SYNC_ERROR, (detail: unknown) => {
-      if (typeof detail === "string") setSyncErrorDetail(detail);
-    });
+    // EventSyncSummary carries no payload; it signals a re-fetch instead
+    // of racing a value embedded in the event itself.
+    EventsOn(EVENT_SYNC_SUMMARY, loadStatus);
     EventsOn(EVENT_WORKSPACE_CHANGED, () => {
       loadStatus();
       onWorkspaceChanged?.();
     });
     loadStatus();
     loadConnection();
-    return () => { EventsOff(EVENT_SYNC_STATUS); EventsOff(EVENT_SYNC_ERROR); EventsOff(EVENT_WORKSPACE_CHANGED); };
-  }, [errorMessage, loadConnection, loadDetails, loadStatus, onWorkspaceChanged]);
+    return () => { EventsOff(EVENT_SYNC_SUMMARY); EventsOff(EVENT_WORKSPACE_CHANGED); };
+  }, [loadConnection, loadStatus, onWorkspaceChanged]);
 
   async function handleShareWorkspace() {
     setSharingBusy(true);
@@ -235,8 +223,8 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
     try {
       await disableServer();
       setConnection((current) => current ? { ...current, enabled: false } : current);
-      setStatus("disabled");
-      await loadDetails("disabled");
+      setStatus("local_only");
+      await loadDetails("local_only");
     } catch (thrown) { setError(errorMessage(unwrapError(thrown))); }
     finally { setBusy(false); }
   }
@@ -255,7 +243,15 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
         {error ? (
           <div className="sync-status-error"><p role="alert">{error}</p><button type="button" onClick={loadStatus}>{t("common.retry")}</button></div>
         ) : status === null ? <p>{t("common.loading")}</p> : (
-          <><div className={`sync-status-card sync-status-${status}`}><span className="sync-status-dot" aria-hidden="true" /><div><strong>{t(`sync.status_${status}`)}</strong><p>{t(`sync.status_${status}_description`)}</p></div></div>{syncErrorDetail ? <p className="sync-error-detail" role="status"><strong>{t("sync.error_details_label")}</strong> {syncErrorDetail}</p> : null}</>
+          <>
+            <div className={`sync-status-card sync-status-${status}`}>
+              <span className="sync-status-dot" aria-hidden="true" />
+              <div><strong>{t(`sync.status_${status}`)}</strong><p>{t(`sync.status_${status}_description`)}</p></div>
+            </div>
+            {pendingCount > 0 ? (
+              <p className="sync-pending-count" role="status"><strong>{t("sync.pending_count_label")}</strong> {pendingCount}</p>
+            ) : null}
+          </>
         )}
       </section>
 
@@ -311,10 +307,10 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
         {devices.filter((device) => device.device_id !== deviceId).map((device) => (
           <div className="sync-device-row" key={device.device_id}><div><strong>{device.display_name}</strong><code>{device.device_id}</code></div>{device.revoked_at ? <span>{t("sync.device_revoked_badge")}</span> : <button type="button" onClick={() => void revokeSyncDevice(device.device_id).then(loadStatus)}>{t("sync.revoke_device_button")}</button>}</div>
         ))}
-        {status === "disabled" && <p>{t("sync.devices_unavailable")}</p>}
+        {status === "local_only" && <p>{t("sync.devices_unavailable")}</p>}
       </section>
 
-      {status !== "disabled" && status !== null ? (
+      {status !== "local_only" && status !== null ? (
         <section aria-labelledby="sync-workspaces-title">
           <h3 id="sync-workspaces-title">{t("sync.workspaces_title")}</h3>
           {workspaces.map((workspace) => (

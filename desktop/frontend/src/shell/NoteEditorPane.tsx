@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-import { type SyncStatusValue } from "../api";
+import { type SyncState } from "../api";
 import { NoteEditor, type NoteEditorHandle, type NoteSaveState } from "../editor/NoteEditor";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
@@ -51,19 +51,19 @@ export interface NoteEditorPaneProps {
    * caller's tracked untouched draft (see Shell's draftNoteIdRef); a
    * no-op call for any other note is harmless. */
   onDraftTouched?: () => void;
-  /** Current workspace-wide synchronization status (see Shell's own
-   * "sync:status" subscription), rendered alongside the open note's local
+  /** Current workspace-wide synchronization state (see Shell's own
+   * "sync:summary" subscription), rendered alongside the open note's local
    * save state in the footer status line below. Null before the first
-   * status has loaded; defaults to null so callers that do not care about
+   * summary has loaded; defaults to null so callers that do not care about
    * synchronization (tests) need not pass it. */
-  syncStatus?: SyncStatusValue | null;
+  syncStatus?: SyncState | null;
   /** When syncStatus last became "current", so the status line can show a
    * static "synced at HH:MM" instead of nothing - see Shell's own doc
    * comment on why this is not a live-ticking relative time. */
   syncedAt?: number | null;
   /** Opens the Sync modal - the status line's sync fragment is clickable
-   * for exactly the cases (offline/failed) where there is something to look
-   * at there. */
+   * for exactly the cases (offline/retrying/action_required) where there
+   * is something to look at there. */
   onOpenSync?: () => void;
 }
 

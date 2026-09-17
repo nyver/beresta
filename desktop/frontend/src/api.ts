@@ -67,10 +67,9 @@ import {
   SetTagDeleted,
   ShareWorkspace,
   Status,
-  SyncError,
   SyncConnectionInfo,
   SyncNow,
-  SyncStatus,
+  SyncSummary,
   UnlockAccount,
   UpdateSavedSearch,
   UpdateSettings,
@@ -175,29 +174,66 @@ export async function lockAccount(): Promise<void> {
   return LockAccount();
 }
 
-export type SyncStatusValue = "disabled" | "offline" | "active" | "current" | "failed";
+/**
+ * SyncState is the TypeScript projection of core/presentation.SyncState:
+ * the closed seven-value synchronization state every client UI renders
+ * from, per specs/sync-engine's "Aggregated synchronization state"
+ * requirement.
+ */
+export type SyncState =
+  | "local_only"
+  | "current"
+  | "active"
+  | "offline"
+  | "pending"
+  | "retrying"
+  | "action_required";
+
+const KNOWN_SYNC_STATES: readonly SyncState[] = [
+  "local_only",
+  "current",
+  "active",
+  "offline",
+  "pending",
+  "retrying",
+  "action_required",
+];
+
+/** RecoveryAction is the TypeScript projection of core/presentation.RecoveryAction. */
+export type RecoveryAction =
+  | "none"
+  | "retry_now"
+  | "review_connection"
+  | "reconnect_device"
+  | "review_unsafe_change";
+
+/** SyncSummary is the TypeScript projection of core/presentation.SyncSummary. */
+export interface SyncSummary {
+  state: SyncState;
+  pending_count: number;
+  last_success_unix_ms: number;
+  retry_in_ms: number;
+  unsafe_count: number;
+  action_required: RecoveryAction;
+}
 
 /**
- * syncStatus returns the shared transport state used by every client UI.
- * Rejecting an unknown backend value keeps version skew visible instead
- * of silently presenting an unsafe or misleading state.
+ * syncSummary returns the shared, platform-neutral synchronization
+ * aggregate used by every client UI. Rejecting an unknown backend state
+ * keeps version skew visible instead of silently presenting an unsafe or
+ * misleading state.
  */
-export async function syncStatus(): Promise<SyncStatusValue> {
-  const status = await SyncStatus();
-  if (["disabled", "offline", "active", "current", "failed"].includes(status)) {
-    return status as SyncStatusValue;
+export async function syncSummary(): Promise<SyncSummary> {
+  const dto = await SyncSummary();
+  if (!KNOWN_SYNC_STATES.includes(dto.state as SyncState)) {
+    throw new Error(`unknown synchronization state: ${dto.state}`);
   }
-  throw new Error(`unknown synchronization status: ${status}`);
+  return dto as SyncSummary;
 }
 
 /** Starts a pull/push cycle for the active workspace immediately. */
 export async function syncNow(): Promise<void> {
   return SyncNow();
-}
-
-/** Returns the bounded diagnostic detail from the latest failed sync cycle. */
-export async function syncError(): Promise<string> {
-  return SyncError();
 }
 
 export interface ConnectServerRequest {

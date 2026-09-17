@@ -530,7 +530,7 @@ class FakeGateway implements CoreGateway {
   String createdNoteNotebookId = "";
   (String, String)? removedAttachment;
   List<Map<String, dynamic>> attachmentList = [];
-  String syncStatusValue = "disabled";
+  String syncStatusValue = "local_only";
   int syncNowCalls = 0;
   late List<Map<String, dynamic>> listedNotes = [note];
   final events = <Map<String, dynamic>>[];
@@ -722,9 +722,14 @@ class FakeGateway implements CoreGateway {
   @override
   Future<void> disconnectServer() async {}
   @override
-  Future<String> syncStatus() async => syncStatusValue;
-  @override
-  Future<String> syncError() async => "";
+  Future<Map<String, dynamic>> syncSummary() async => {
+    "state": syncStatusValue,
+    "pending_count": 0,
+    "last_success_unix_ms": 0,
+    "retry_in_ms": 0,
+    "unsafe_count": 0,
+    "action_required": "none",
+  };
   @override
   Future<Map<String, dynamic>> syncConnectionInfo() async => connectionInfo;
   @override

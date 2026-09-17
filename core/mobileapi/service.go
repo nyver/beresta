@@ -18,6 +18,7 @@ import (
 	"github.com/beresta-app/beresta/core/store"
 	coresync "github.com/beresta-app/beresta/core/sync"
 	"github.com/beresta-app/beresta/core/sync/yjsadapter"
+	"github.com/beresta-app/beresta/core/syncsummary"
 	"github.com/beresta-app/beresta/core/transport"
 )
 
@@ -43,10 +44,9 @@ type Service struct {
 	requests        map[string]context.CancelFunc
 	events          []mobileEvent
 	nextEvent       uint64
-	coordinator     *coresync.Coordinator
-	remote          *transport.HTTP
-	repository      *store.SyncRepository
-	syncErrorDetail string
+	coordinator *coresync.Coordinator
+	remote      *transport.HTTP
+	repository  *store.SyncRepository
 	// syncGeneration is bumped by DisconnectServer and Lock so a
 	// ConnectServer call already in flight (in particular
 	// reconnectSavedServer's background attempt after unlock) can detect
@@ -203,7 +203,7 @@ func (s *Service) activate(value *account.Account) (string, error) {
 	}
 	s.mu.Lock()
 	previous, coordinator := s.account, s.coordinator
-	s.account, s.workspaceID, s.coordinator, s.remote, s.repository, s.syncErrorDetail = value, activeWorkspace, nil, nil, nil, ""
+	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = value, activeWorkspace, nil, nil, nil
 	s.mu.Unlock()
 	if coordinator != nil {
 		coordinator.Detach()
@@ -238,7 +238,7 @@ func (s *Service) reconnectSavedServer(value *account.Account) {
 func (s *Service) Lock() error {
 	s.mu.Lock()
 	value, coordinator := s.account, s.coordinator
-	s.account, s.workspaceID, s.coordinator, s.remote, s.repository, s.syncErrorDetail = nil, model.Nil, nil, nil, nil, ""
+	s.account, s.workspaceID, s.coordinator, s.remote, s.repository = nil, model.Nil, nil, nil, nil
 	// A ConnectServer call already past accountState() (in particular
 	// reconnectSavedServer's background retry after unlock) has no other
 	// way to notice this lock happened mid-attempt; bumping the generation
@@ -1061,7 +1061,6 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 		return err
 	}
 	coordinator := coresync.NewCoordinator(s.root)
-	remote.BeginSync()
 	if err := coordinator.Attach(worker); err != nil {
 		return err
 	}
@@ -1204,24 +1203,17 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 			return nil
 		},
 		Progress: func(progress coresync.Progress) {
-			status := transport.StatusActive
-			switch progress.Phase {
-			case coresync.PhaseCurrent:
-				status = transport.StatusCurrent
-				remote.CompleteSync()
-				s.setSyncError("")
-			case coresync.PhaseBackoff:
-				status = transport.StatusOffline
-				remote.SyncOffline()
-				s.setSyncError(progress.ErrorDetail)
-			case coresync.PhaseQuarantine:
-				status = transport.StatusFailed
-				remote.SyncFailed()
-				s.setSyncError(progress.ErrorDetail)
-			default:
-				remote.BeginSync()
-			}
-			s.emit("sync_status", map[string]string{"status": string(status)})
+			// progress.ErrorDetail is bounded diagnostic text; it is not
+			// surfaced through SyncSummary today (specs/sync-engine's
+			// "Aggregated synchronization state" requirement deliberately
+			// keeps raw backend errors out of the shared summary) but will
+			// feed the sanitized technical diagnostics screen once that
+			// lands (specs/product-experience's "Layered privacy-preserving
+			// diagnostics" requirement).
+			//
+			// sync_progress already fires on every phase transition, so
+			// Dart's event poll uses it as the signal to re-fetch
+			// SyncSummary instead of a dedicated payload-less event.
 			s.emit("sync_progress", map[string]any{"workspace_id": progress.WorkspaceID.String(), "phase": progress.Phase, "pulled": progress.Pulled, "pushed": progress.Pushed, "cursor": progress.Cursor, "retry_ms": progress.RetryIn.Milliseconds(), "error_class": progress.ErrorClass, "error_detail": progress.ErrorDetail})
 			if progress.Phase == coresync.PhaseCurrent {
 				s.emit("workspace_synced", map[string]string{"workspace_id": progress.WorkspaceID.String()})
@@ -1232,13 +1224,6 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 		return nil, nil, err
 	}
 	return worker, repository, nil
-}
-
-func (s *Service) setSyncError(detail string) {
-	s.mu.Lock()
-	s.syncErrorDetail = detail
-	s.mu.Unlock()
-	s.emit("sync_error", map[string]string{"detail": detail})
 }
 
 // attachWorkspaceSync builds a sync worker for workspaceID and swaps it into
@@ -1262,7 +1247,6 @@ func (s *Service) attachWorkspaceSync(value *account.Account, workspaceID model.
 		return err
 	}
 	coordinator := coresync.NewCoordinator(s.root)
-	remote.BeginSync()
 	if err := coordinator.Attach(worker); err != nil {
 		return err
 	}
@@ -1313,14 +1297,14 @@ func (s *Service) SyncNow() error {
 			return errors.New("mobileapi: synchronization worker did not start")
 		}
 	}
-	// Set the transport state before waking the worker so callers can wait for
-	// this specific manually requested cycle instead of observing a stale
-	// "current" status from the previous one.
-	remote.BeginSync()
 	if !coordinator.Trigger() {
-		remote.SyncFailed()
 		const detail = "synchronization worker is not running"
-		s.setSyncError(detail)
+		// Same field shape as every other sync_progress emission (see the
+		// Progress hook in buildWorkspaceWorker) so a consumer decoding a
+		// fixed shape never has to special-case this one. phase is empty
+		// because this is not a real coresync.Phase - it is Trigger
+		// rejecting the request outright, before any cycle could start.
+		s.emit("sync_progress", map[string]any{"workspace_id": workspaceID.String(), "phase": "", "pulled": 0, "pushed": 0, "cursor": uint64(0), "retry_ms": int64(0), "error_class": "worker_not_running", "error_detail": detail})
 		return errors.New("mobileapi: " + detail)
 	}
 	return nil
@@ -1333,7 +1317,7 @@ func (s *Service) SyncNow() error {
 func (s *Service) DisconnectServer() error {
 	s.mu.Lock()
 	coordinator, value := s.coordinator, s.account
-	s.coordinator, s.remote, s.repository, s.syncErrorDetail = nil, nil, nil, ""
+	s.coordinator, s.remote, s.repository = nil, nil, nil
 	s.syncGeneration++
 	s.mu.Unlock()
 	if coordinator != nil {
@@ -1349,32 +1333,53 @@ func (s *Service) DisconnectServer() error {
 			return err
 		}
 	}
-	s.emit("sync_status", map[string]string{"status": string(transport.StatusDisabled)})
-	s.emit("sync_error", map[string]string{"detail": ""})
+	// Same field shape as every other sync_progress emission; see SyncNow's
+	// identical trigger-failure emission above for why phase is empty here.
+	s.emit("sync_progress", map[string]any{"workspace_id": "", "phase": "", "pulled": 0, "pushed": 0, "cursor": uint64(0), "retry_ms": int64(0), "error_class": "", "error_detail": ""})
 	return nil
 }
 
-// SyncStatus reports the current synchronization transport's status
-// (see core/transport.Status), without requiring an active request ID: it
-// only reads cached in-memory state. It reports "disabled" whenever no
-// server is currently attached, including while the account is locked.
-func (s *Service) SyncStatus() (string, error) {
+// SyncSummary returns the shared platform-neutral synchronization summary
+// (see core/syncsummary and specs/sync-engine's "Aggregated synchronization
+// state" requirement) for the active workspace as strict JSON, combining
+// live coordinator progress with durable pending and unsafe-operation
+// counts. It does not require an active request ID or an unlocked account -
+// like the SyncStatus it replaces, it reports local_only whenever no server
+// is currently attached, including while the account is locked (a locked
+// account always has s.repository nil, cleared together with s.account by
+// Lock, so the count queries below are simply skipped rather than erroring
+// a periodic Flutter poll that raced a lock action). It only reads cached
+// in-memory state plus, once unlocked and configured, two bounded count
+// queries. Flutter calls this on load, on an interval, and in response to
+// the "sync_progress" event instead of branching on raw transport status
+// strings.
+func (s *Service) SyncSummary() (string, error) {
 	s.mu.Lock()
-	remote := s.remote
+	coordinator, repository, workspaceID, configured := s.coordinator, s.repository, s.workspaceID, s.remote != nil
 	s.mu.Unlock()
-	if remote == nil {
-		return string(transport.StatusDisabled), nil
-	}
-	return string(remote.Status(s.root)), nil
-}
 
-// SyncError returns the diagnostic detail from the latest failed full sync
-// cycle. It is intentionally bounded by core/sync and contains no key or
-// operation payload material.
-func (s *Service) SyncError() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.syncErrorDetail
+	var progress coresync.CoordinatorProgress
+	if coordinator != nil {
+		progress = coordinator.Progress()
+	}
+	var pendingCount, unsafeCount int
+	if repository != nil {
+		var err error
+		if pendingCount, err = repository.CountPending(s.root, workspaceID); err != nil {
+			return "", err
+		}
+		if unsafeCount, err = repository.CountQuarantine(s.root, workspaceID); err != nil {
+			return "", err
+		}
+	}
+	summary := syncsummary.Summarize(syncsummary.Inputs{
+		Configured:   configured,
+		Progress:     progress,
+		PendingCount: pendingCount,
+		UnsafeCount:  unsafeCount,
+		Now:          time.Now(),
+	})
+	return MarshalSyncSummary(summary)
 }
 
 // SyncConnectionInfo returns the last server connection configured on this

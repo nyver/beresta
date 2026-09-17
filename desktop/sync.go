@@ -111,7 +111,6 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	}
 
 	coordinator := coresync.NewCoordinator(a.requestContext())
-	httpTransport.BeginSync()
 	if err := coordinator.Attach(worker); err != nil {
 		return ServerConnectionInfo{}, mapError(err)
 	}
@@ -282,16 +281,7 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 			// feed the sanitized technical diagnostics screen once that
 			// lands (specs/product-experience's "Layered privacy-preserving
 			// diagnostics" requirement).
-			switch progress.Phase {
-			case coresync.PhaseCurrent:
-				httpTransport.CompleteSync()
-			case coresync.PhaseBackoff:
-				httpTransport.SyncOffline()
-			case coresync.PhaseQuarantine:
-				httpTransport.SyncFailed()
-			default:
-				httpTransport.BeginSync()
-			}
+			//
 			// The frontend's shared SyncSummary combines this progress
 			// snapshot with durable pending/unsafe counts (see SyncSummary
 			// below); emitting only a signal here, instead of computing
@@ -314,28 +304,39 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 // calls this on load, on an interval, and in response to EventSyncSummary
 // instead of branching on raw transport status strings.
 func (a *App) SyncSummary() (SyncSummaryDTO, error) {
-	_, workspaceID, err := a.primaryWorkspace()
-	if err != nil {
-		return SyncSummaryDTO{}, mapError(err)
-	}
 	a.mu.Lock()
+	acc := a.account
 	coordinator := a.syncCoordinator
 	repository := a.syncRepository
 	configured := a.httpTransport != nil
+	preferred := a.settings.ActiveWorkspaceID
 	a.mu.Unlock()
 
 	var progress coresync.CoordinatorProgress
 	if coordinator != nil {
 		progress = coordinator.Progress()
 	}
+	// repository is only non-nil once unlocked and connected (lockAccount
+	// and DisableServer both clear it together with acc/coordinator), so
+	// this never needs to resolve a workspace - and never errors just
+	// because the account happens to be locked, matching the permissive
+	// contract the SyncStatus this replaces had - while locked or
+	// unconfigured.
 	var pendingCount, unsafeCount int
-	if repository != nil {
-		ctx := a.requestContext()
-		if pendingCount, err = repository.CountPending(ctx, workspaceID); err != nil {
+	if repository != nil && acc != nil {
+		ids, err := acc.Workspaces()
+		if err != nil {
 			return SyncSummaryDTO{}, mapError(err)
 		}
-		if unsafeCount, err = repository.CountQuarantine(ctx, workspaceID); err != nil {
-			return SyncSummaryDTO{}, mapError(err)
+		if len(ids) > 0 {
+			workspaceID := resolveActiveWorkspace(ids, preferred)
+			ctx := a.requestContext()
+			if pendingCount, err = repository.CountPending(ctx, workspaceID); err != nil {
+				return SyncSummaryDTO{}, mapError(err)
+			}
+			if unsafeCount, err = repository.CountQuarantine(ctx, workspaceID); err != nil {
+				return SyncSummaryDTO{}, mapError(err)
+			}
 		}
 	}
 	summary := syncsummary.Summarize(syncsummary.Inputs{
@@ -366,7 +367,6 @@ func (a *App) attachWorkspaceSync(acc *account.Account, workspaceID model.ID) er
 		return mapError(err)
 	}
 	coordinator := coresync.NewCoordinator(a.requestContext())
-	httpTransport.BeginSync()
 	if err := coordinator.Attach(worker); err != nil {
 		return mapError(err)
 	}
@@ -512,10 +512,8 @@ func (a *App) SyncNow() error {
 	if coordinator == nil || remote == nil {
 		return &AppError{Code: ErrCodeInvalidInput, Message: "server synchronization is disabled"}
 	}
-	remote.BeginSync()
 	a.emit(EventSyncSummary)
 	if !coordinator.Trigger() {
-		remote.SyncFailed()
 		a.emit(EventSyncSummary)
 		return &AppError{Code: ErrCodeInternal, Message: "synchronization worker is not running"}
 	}

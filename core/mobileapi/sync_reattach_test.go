@@ -2,10 +2,23 @@ package mobileapi
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
 )
+
+// syncState decodes the "state" field out of a SyncSummary() JSON result,
+// so tests can assert on it without depending on the full DTO shape.
+func syncState(t *testing.T, encoded string) string {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(encoded), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(%q): %v", encoded, err)
+	}
+	state, _ := decoded["state"].(string)
+	return state
+}
 
 // TestServiceReattachesAutomaticallyAfterUnlockWhenAServerWasPreviouslyConfigured
 // proves activate's reconnectSavedServer (core/mobileapi/service.go) actually
@@ -50,15 +63,14 @@ func TestServiceReattachesAutomaticallyAfterUnlockWhenAServerWasPreviouslyConfig
 
 	deadline = time.Now().Add(5 * time.Second)
 	for {
-		status, err := service.SyncStatus()
+		encoded, err := service.SyncSummary()
 		if err != nil {
-			t.Fatalf("SyncStatus: %v", err)
+			t.Fatalf("SyncSummary: %v", err)
 		}
-		if status == "current" {
+		if state := syncState(t, encoded); state == "current" {
 			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("SyncStatus never reached %q after unlock, last was %q", "current", status)
+		} else if time.Now().After(deadline) {
+			t.Fatalf("SyncSummary state never reached %q after unlock, last was %q", "current", state)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -98,12 +110,12 @@ func TestServiceSyncStaysLocalOnlyAfterUnlockWithNoServerConfigured(t *testing.T
 	if coordinator != nil || remote != nil {
 		t.Fatal("a sync coordinator or remote transport exists after unlocking an account that never had a server configured")
 	}
-	status, err := service.SyncStatus()
+	encoded, err := service.SyncSummary()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status != "disabled" {
-		t.Fatalf("SyncStatus() = %q, want %q", status, "disabled")
+	if state := syncState(t, encoded); state != "local_only" {
+		t.Fatalf("SyncSummary() state = %q, want %q", state, "local_only")
 	}
 }
 

@@ -87,8 +87,10 @@ bool containsQueryToken(String text) {
       );
 }
 
-/// Maps a core/transport.Status value ("disabled", "offline", "active",
-/// "current", "failed") to the icon shown next to it in the sync UI.
+/// Maps a core/presentation.SyncState value ("local_only", "current",
+/// "active", "offline", "pending", "retrying", "action_required") - the
+/// same seven-state model desktop renders (see core/syncsummary.Summarize)
+/// - to the icon shown next to it in the sync UI.
 IconData syncStatusIcon(String status) {
   switch (status) {
     case "current":
@@ -96,8 +98,11 @@ IconData syncStatusIcon(String status) {
     case "active":
       return Icons.cloud_sync_outlined;
     case "offline":
+    case "retrying":
       return Icons.cloud_off_outlined;
-    case "failed":
+    case "pending":
+      return Icons.cloud_upload_outlined;
+    case "action_required":
       return Icons.error_outline;
     default:
       return Icons.cloud_outlined;
@@ -112,8 +117,10 @@ Color syncStatusColor(BuildContext context, String status) {
     case "active":
       return scheme.primary;
     case "offline":
+    case "retrying":
+    case "pending":
       return Colors.orange;
-    case "failed":
+    case "action_required":
       return scheme.error;
     default:
       return scheme.onSurfaceVariant;
@@ -571,7 +578,7 @@ class _NotesShellState extends State<NotesShell> {
   String? selectedTag;
   String? error;
   Timer? searchDebounce;
-  String syncStatusValue = "disabled";
+  String syncStatusValue = "local_only";
   Timer? syncStatusTimer;
   Timer? syncEventsTimer;
   int eventCursor = 0;
@@ -583,10 +590,10 @@ class _NotesShellState extends State<NotesShell> {
     super.initState();
     refresh();
     requestCurrentWorkspaceSync(widget.gateway);
-    refreshSyncStatus();
+    refreshSyncSummary();
     syncStatusTimer = Timer.periodic(
       const Duration(seconds: 5),
-      (_) => refreshSyncStatus(),
+      (_) => refreshSyncSummary(),
     );
     pollEvents();
     syncEventsTimer = Timer.periodic(
@@ -595,10 +602,11 @@ class _NotesShellState extends State<NotesShell> {
     );
   }
 
-  Future<void> refreshSyncStatus() async {
+  Future<void> refreshSyncSummary() async {
     try {
-      final value = await widget.gateway.syncStatus();
-      if (mounted) setState(() => syncStatusValue = value);
+      final summary = await widget.gateway.syncSummary();
+      final state = summary["state"] as String? ?? "local_only";
+      if (mounted) setState(() => syncStatusValue = state);
     } catch (_) {
       // Sync may be disabled or the account context not ready yet; the
       // indicator simply keeps its last known value.
@@ -642,30 +650,29 @@ class _NotesShellState extends State<NotesShell> {
       await widget.gateway.syncNow();
       var synchronized = false;
       for (var attempt = 0; attempt < 30; attempt++) {
-        final status = await widget.gateway.syncStatus();
-        if (status == "current") {
+        final summary = await widget.gateway.syncSummary();
+        final state = summary["state"] as String? ?? "local_only";
+        if (state == "current") {
           synchronized = true;
           break;
         }
-        if (status == "offline" || status == "failed" || status == "disabled") {
-          break;
-        }
+        // "action_required" and "local_only" cannot resolve on their own -
+        // give up the wait immediately. Every other state (active, pending,
+        // offline, retrying) is a normal, automatically-recovering part of
+        // synchronization, never a blocking error: keep waiting for it to
+        // resolve within the attempt budget instead of surfacing it as a
+        // failure (the bug this replaces - offline used to abort the wait
+        // and show an error banner).
+        if (state == "action_required" || state == "local_only") break;
         await Future<void>.delayed(const Duration(seconds: 1));
       }
       if (!mounted) return;
       if (synchronized) {
         await refresh();
       } else {
-        final detail = await widget.gateway.syncError();
-        setState(
-          () =>
-              error =
-                  detail.isEmpty
-                      ? widget.strings("workspace_sync_pending")
-                      : "${widget.strings("sync_error_details")}: $detail",
-        );
+        setState(() => error = widget.strings("workspace_sync_pending"));
       }
-      await refreshSyncStatus();
+      await refreshSyncSummary();
     } catch (failure) {
       if (mounted) {
         setState(() => error = describeFailure(widget.strings, failure));
@@ -681,6 +688,7 @@ class _NotesShellState extends State<NotesShell> {
     try {
       final events = await widget.gateway.pollEvents(eventCursor);
       var refreshCollection = false;
+      var refreshSummary = false;
       for (final event in events) {
         final sequence = event["sequence"];
         if (sequence is num && sequence.toInt() > eventCursor) {
@@ -690,9 +698,13 @@ class _NotesShellState extends State<NotesShell> {
           case "workspace_changed":
           case "workspace_synced":
             refreshCollection = true;
+            refreshSummary = true;
+          case "sync_progress":
+            refreshSummary = true;
         }
       }
       if (refreshCollection && mounted) await refresh();
+      if (refreshSummary && mounted) await refreshSyncSummary();
     } catch (_) {
       // The next poll retries after transient method-channel or lock errors.
     } finally {
@@ -1050,7 +1062,7 @@ class _NotesShellState extends State<NotesShell> {
     // changes which notes/notebooks are visible, so refresh unconditionally
     // rather than trying to track whether that actually happened.
     await refresh();
-    await refreshSyncStatus();
+    await refreshSyncSummary();
   }
 
   List<Widget> notebookTree() {
@@ -1349,8 +1361,7 @@ class _ServerSheetState extends State<ServerSheet> {
   String grantCode = "";
   String? copied;
   bool sharingBusy = false;
-  String syncStatusValue = "disabled";
-  String syncErrorDetail = "";
+  String syncStatusValue = "local_only";
   bool connectionEnabled = false;
   String connectedURL = "";
   String connectedProtocol = "";
@@ -1389,25 +1400,21 @@ class _ServerSheetState extends State<ServerSheet> {
         .catchError((_) {
           // No account context yet - the form simply stays empty.
         });
-    refreshSyncStatus();
+    refreshSyncSummary();
     loadWorkspaces();
     syncStatusTimer = Timer.periodic(
       const Duration(seconds: 3),
-      (_) => refreshSyncStatus(),
+      (_) => refreshSyncSummary(),
     );
   }
 
-  Future<void> refreshSyncStatus() async {
+  Future<void> refreshSyncSummary() async {
     try {
-      final values = await Future.wait([
-        widget.gateway.syncStatus(),
-        widget.gateway.syncError(),
-      ]);
+      final summary = await widget.gateway.syncSummary();
       if (mounted) {
-        setState(() {
-          syncStatusValue = values[0];
-          syncErrorDetail = values[1];
-        });
+        setState(
+          () => syncStatusValue = summary["state"] as String? ?? "local_only",
+        );
       }
     } catch (_) {
       // Keep showing the last known status; the periodic timer retries.
@@ -1424,13 +1431,19 @@ class _ServerSheetState extends State<ServerSheet> {
     }
   }
 
+  /// Waits (up to a bounded budget) for the just-joined or just-switched
+  /// workspace's first synchronization cycle to complete. "action_required"
+  /// and "local_only" cannot resolve on their own and end the wait early;
+  /// every other state (active, pending, offline, retrying) is normal,
+  /// automatically-recovering synchronization, never a blocking error, so
+  /// the wait keeps polling for it to reach "current" within the budget
+  /// instead of surfacing it as a failure.
   Future<bool> waitForInitialWorkspaceSync() async {
     for (var attempt = 0; attempt < 30; attempt++) {
-      final status = await widget.gateway.syncStatus();
-      if (status == "current") return true;
-      if (status == "offline" || status == "failed" || status == "disabled") {
-        return false;
-      }
+      final summary = await widget.gateway.syncSummary();
+      final state = summary["state"] as String? ?? "local_only";
+      if (state == "current") return true;
+      if (state == "action_required" || state == "local_only") return false;
       await Future<void>.delayed(const Duration(seconds: 1));
     }
     return false;
@@ -1480,13 +1493,6 @@ class _ServerSheetState extends State<ServerSheet> {
               ),
             ],
           ),
-          if (syncErrorDetail.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            SelectableText(
-              "${widget.strings("sync_error_details")}: $syncErrorDetail",
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ],
           const SizedBox(height: 12),
           if (connectionEnabled && connectedURL.isNotEmpty)
             Card(

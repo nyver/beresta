@@ -57,8 +57,13 @@ abstract interface class CoreGateway {
   Future<void> syncNow();
   Future<void> connectServer(Map<String, dynamic> config);
   Future<void> disconnectServer();
-  Future<String> syncStatus();
-  Future<String> syncError();
+
+  /// Returns the shared, platform-neutral synchronization summary (state,
+  /// pending_count, last_success_unix_ms, retry_in_ms, unsafe_count,
+  /// action_required) matching core/presentation.SyncSummary one-for-one -
+  /// see core/mobileapi.Service.SyncSummary and desktop's identical
+  /// SyncSummaryDTO.
+  Future<Map<String, dynamic>> syncSummary();
   Future<Map<String, dynamic>> syncConnectionInfo();
   Future<String> exportIdentity();
   Future<String> shareWorkspace(String identityCode);
@@ -249,10 +254,8 @@ class MethodChannelCore implements CoreGateway {
   Future<void> disconnectServer() => _invoke("disconnectServer");
 
   @override
-  Future<String> syncStatus() async => await _invoke("syncStatus") as String;
-
-  @override
-  Future<String> syncError() async => await _invoke("syncError") as String;
+  Future<Map<String, dynamic>> syncSummary() async =>
+      _object(await _invoke("syncSummary"));
 
   @override
   Future<Map<String, dynamic>> syncConnectionInfo() async =>

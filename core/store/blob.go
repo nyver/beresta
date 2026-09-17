@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // BlobIDBytes is the length of a content-addressed blob identifier: the
@@ -224,4 +225,53 @@ func (s *BlobStore) Open(id BlobID) (*os.File, error) {
 		return nil, fmt.Errorf("store: blob path is not a regular file")
 	}
 	return f, nil
+}
+
+// PublishedBlob is one file ListPublished found under the content-addressed
+// tree, identified by its BlobID with the file's own last-modified time
+// (when Publish's rename made it visible).
+type PublishedBlob struct {
+	ID        BlobID
+	Modified  time.Time
+	SizeBytes uint64
+}
+
+// ListPublished walks the two-level content-addressed directory tree and
+// returns every published blob file it finds. It is a plain filesystem
+// listing, not part of Publish's crash-safety-critical write protocol, so
+// it talks to the OS directly rather than through blobFS. A malformed
+// entry (wrong name length, not a regular file) is skipped rather than
+// failing the whole walk: garbage collection should still make progress
+// around one unexpected file rather than never running at all.
+func (s *BlobStore) ListPublished() ([]PublishedBlob, error) {
+	var found []PublishedBlob
+	err := filepath.WalkDir(s.root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		raw, decodeErr := hex.DecodeString(entry.Name())
+		if decodeErr != nil {
+			return nil
+		}
+		id, parseErr := ParseBlobID(raw)
+		if parseErr != nil {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return nil
+		}
+		found = append(found, PublishedBlob{ID: id, Modified: info.ModTime(), SizeBytes: uint64(info.Size())})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: list published blobs: %w", err)
+	}
+	return found, nil
 }

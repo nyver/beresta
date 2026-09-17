@@ -476,6 +476,12 @@ func (s *Service) AddAttachmentData(requestID, noteID, displayName, mediaType st
 	if err != nil {
 		return err
 	}
+	if err := account.CheckAttachmentSize(uint64(len(contents))); err != nil {
+		return err
+	}
+	if err := value.CheckAttachmentCapacity(uint64(len(contents))); err != nil {
+		return err
+	}
 	attachment, err := value.AddAttachment(ctx, workspaceID, id, displayName, mediaType, bytes.NewReader(contents))
 	if err != nil {
 		return err

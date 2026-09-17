@@ -37,7 +37,70 @@ var (
 	// ErrAttachmentUnavailable reports an attachment reference whose encrypted
 	// manifest and content have not been received by this device yet.
 	ErrAttachmentUnavailable = errors.New("account: attachment content is not available on this device")
+	// ErrAttachmentTooLarge reports that a plaintext exceeds
+	// corecrypto.MaxAttachmentPlaintextBytes, checked before staging or
+	// encryption begins so an oversized file fails immediately instead of
+	// after copying it in full.
+	ErrAttachmentTooLarge = errors.New("account: attachment exceeds the maximum supported size")
+	// ErrInsufficientAttachmentCapacity reports that the local blob store's
+	// volume does not have enough free space to stage and publish an
+	// attachment of a known size. AddAttachment itself has no preflight of
+	// its own (an io.Reader does not generally know its length up front);
+	// callers that do know the size before reading (a file picker's
+	// os.Stat, a paste/drop's byte length) should call
+	// CheckAttachmentCapacity first so a predictable disk-full condition
+	// fails closed immediately rather than partway through staging or
+	// publishing.
+	ErrInsufficientAttachmentCapacity = errors.New("account: insufficient free space for attachment")
 )
+
+// attachmentCapacityMarginNumerator/Denominator pads the raw plaintext-size
+// estimate used for capacity preflight: AddAttachment briefly holds both a
+// staged plaintext copy and the published encrypted blob at once (the
+// staged file is only removed after publish succeeds), so peak usage is
+// roughly double the source size; the margin absorbs filesystem block
+// overhead and AEAD chunk framing beyond that estimate.
+const (
+	attachmentCapacityMarginNumerator   = 11
+	attachmentCapacityMarginDenominator = 5 // (2x peak usage) * (11/10 margin)
+)
+
+// CheckAttachmentSize fails closed with ErrAttachmentTooLarge if
+// sourceSizeBytes exceeds corecrypto.MaxAttachmentPlaintextBytes. Callers
+// that know a plaintext's size before reading it should call this and
+// CheckAttachmentCapacity before AddAttachment, so an oversized file or a
+// full disk is rejected immediately instead of after staging some or all
+// of it.
+func CheckAttachmentSize(sourceSizeBytes uint64) error {
+	if sourceSizeBytes > corecrypto.MaxAttachmentPlaintextBytes {
+		return ErrAttachmentTooLarge
+	}
+	return nil
+}
+
+// CheckAttachmentCapacity fails closed with ErrInsufficientAttachmentCapacity
+// if the account's blob store volume does not have enough free space to
+// stage and publish an attachment of sourceSizeBytes. See
+// attachmentCapacityMarginNumerator/Denominator for the estimate.
+func (a *Account) CheckAttachmentCapacity(sourceSizeBytes uint64) error {
+	estimated := sourceSizeBytes * attachmentCapacityMarginNumerator / attachmentCapacityMarginDenominator
+	// The staging directory is normally created lazily by stagePlaintext
+	// on first use; a free-space query on a path that does not exist yet
+	// fails on Windows (GetDiskFreeSpaceEx) rather than reporting the
+	// volume it would be created on, so ensure it exists first. This is
+	// the same directory and permissions stagePlaintext itself creates.
+	if err := os.MkdirAll(a.blobs.TempDir(), 0o700); err != nil {
+		return fmt.Errorf("account: create attachment staging directory: %w", err)
+	}
+	free, err := freeBytesAt(a.blobs.TempDir())
+	if err != nil {
+		return fmt.Errorf("account: check attachment destination capacity: %w", err)
+	}
+	if free < estimated {
+		return ErrInsufficientAttachmentCapacity
+	}
+	return nil
+}
 
 // AddAttachment encrypts and durably publishes plaintext as one attachment
 // in workspaceID and attaches it to noteID, recording the reference as a

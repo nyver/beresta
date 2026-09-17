@@ -27,7 +27,7 @@ home server, convergent client synchronization, and the Android application:
 - daily encrypted client backups (zstd-compressed, encrypted under a Root-Key-derived backup key, self-contained attachment blob sets, exact seven-day rotation, missed-day catch-up, startup/pre-restore verification with corruption classification, and capacity preflight);
 - backup catalog preview, a dry-run restore change plan, atomic whole-database restore (onto a freshly generated device key, with crash-safe rollback to the original database on failure), and selective restore as new local operations, always behind a mandatory pre-restore safety backup;
 - confirmed plaintext Markdown/attachment/`manifest.json` export, and import of both Beresta's own portable archives and Evernote `.enex` files, with a user-visible report of anything that could not be represented (rich text is flattened to plain text on import — see [ASSUMPTIONS.md](ASSUMPTIONS.md));
-- blob and tombstone garbage collection at the 30-day minimum retention floor, with dry-run reporting and backup-awareness (informational, never blocking: a backup set is self-contained);
+- blob and tombstone garbage collection at the 30-day minimum retention floor, with dry-run reporting and backup-awareness (informational, never blocking: a backup set is self-contained), including a published blob file left behind with no attachment row at all (a crash between publication and its database commit) since it can never be found by row-based orphan tracking alone;
 - a headless end-to-end suite covering the complete local-only lifecycle, including a real forced-termination (process-kill) recovery test and randomized local-operation/restore-convergence property tests;
 - schema-migration safety backups taken automatically before a pending migration runs, an FTS index rebuild primitive, and a tested backup/restore round trip as the forward-fix recovery path;
 - build-time validation for source English and Russian localization catalogs;
@@ -112,6 +112,10 @@ written to disk, matching the no-plaintext-attachment-cache rule below),
 clicking a thumbnail opens it enlarged in a lightbox `Modal` reusing that
 same already-decrypted preview, and "Save as…"/"Remove" now live behind
 each row's kebab menu, decrypting straight to a user-chosen destination.
+Every attachment path (file picker, paste, and drag/drop) preflights the
+source's size and the destination volume's free space before staging or
+encrypting any of it, so an oversized file or a full disk fails immediately
+with a distinct, localized message instead of after a partial copy.
 The note list's search box leads with a plain text field; the tag/date/
 include-deleted filter controls and saved-search management are collapsed
 behind a "Filters & saved searches" disclosure by default so they do not

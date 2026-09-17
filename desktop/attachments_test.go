@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	corecrypto "github.com/beresta-app/beresta/core/crypto"
 )
 
 func TestAttachmentAddSaveRemoveRoundTrip(t *testing.T) {
@@ -170,6 +172,61 @@ func TestReadAttachmentPreviewRejectsOversizedContent(t *testing.T) {
 
 	if _, err := a.ReadAttachmentPreview(added.BlobID); err == nil {
 		t.Fatal("ReadAttachmentPreview(oversized) error = nil, want error")
+	}
+}
+
+// TestAddAttachmentFromFileRejectsOversizedSourceBeforeReadingIt covers
+// task 5.1's preflight size check: AddAttachmentFromFile stats the source
+// before opening it, so an oversized file is rejected immediately with
+// the same user-facing message as the mid-stream limit
+// (corecrypto.ErrAttachmentResourceLimit), never opening or copying it.
+func TestAddAttachmentFromFileRejectsOversizedSourceBeforeReadingIt(t *testing.T) {
+	a := newTestApp(t)
+	if _, err := a.CreateAccount(CreateAccountRequest{DatabasePath: testDatabasePath(t, a), Passphrase: "correct horse battery staple"}); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	note, err := a.CreateNote("", "With oversized attachment")
+	if err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+
+	sourcePath := filepath.Join(t.TempDir(), "huge.bin")
+	f, err := os.Create(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A sparse file reports its logical size via Stat without actually
+	// writing (and needing) that many real bytes to disk.
+	if err := f.Truncate(int64(corecrypto.MaxAttachmentPlaintextBytes) + 1); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.AddAttachmentFromFile(note.ID, sourcePath); !isAppErrorCode(err, ErrCodeInvalidInput) {
+		t.Fatalf("AddAttachmentFromFile(oversized) error = %v, want ErrCodeInvalidInput", err)
+	}
+}
+
+// TestAddAttachmentFromBytesAcceptsAnOrdinarilySizedPayload proves the new
+// preflight checks (task 5.1) do not interfere with a normal-sized
+// paste/drop attachment - a regression guard alongside
+// TestMapErrorResultAlwaysEncodesAsJSON's direct check that the new
+// sentinel errors map to their own distinct, localized codes.
+func TestAddAttachmentFromBytesAcceptsAnOrdinarilySizedPayload(t *testing.T) {
+	a := newTestApp(t)
+	if _, err := a.CreateAccount(CreateAccountRequest{DatabasePath: testDatabasePath(t, a), Passphrase: "correct horse battery staple"}); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	note, err := a.CreateNote("", "With attachment")
+	if err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+	data := base64.StdEncoding.EncodeToString([]byte("small content"))
+	if _, err := a.AddAttachmentFromBytes(note.ID, "a.txt", "text/plain", data); err != nil {
+		t.Fatalf("AddAttachmentFromBytes with an ordinary size should still succeed: %v", err)
 	}
 }
 

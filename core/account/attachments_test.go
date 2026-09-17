@@ -221,6 +221,38 @@ func TestAddAttachmentRejectsInvalidMetadata(t *testing.T) {
 	}
 }
 
+// TestCheckAttachmentSizeRejectsOversizedPlaintext covers task 5.1's
+// preflight size check: a caller that knows a source's size up front (a
+// file picker's os.Stat, a paste/drop's byte length) can reject it before
+// staging or encrypting any of it, rather than discovering the same limit
+// only after copying up to corecrypto.MaxAttachmentPlaintextBytes to disk.
+func TestCheckAttachmentSizeRejectsOversizedPlaintext(t *testing.T) {
+	if err := CheckAttachmentSize(1024); err != nil {
+		t.Fatalf("CheckAttachmentSize(1024) = %v, want nil", err)
+	}
+	oversized := uint64(1) << 62
+	if err := CheckAttachmentSize(oversized); !errors.Is(err, ErrAttachmentTooLarge) {
+		t.Fatalf("CheckAttachmentSize(oversized) = %v, want ErrAttachmentTooLarge", err)
+	}
+}
+
+// TestCheckAttachmentCapacityRejectsWhenTheVolumeCannotFitIt covers task
+// 5.1's preflight disk-space check, using the same deterministic
+// technique TestCreateBackupRejectsInsufficientCapacity uses: an
+// absurdly large requested size guarantees the real free-space query
+// reports insufficient capacity without needing to actually fill a disk.
+func TestCheckAttachmentCapacityRejectsWhenTheVolumeCannotFitIt(t *testing.T) {
+	created := createTestAccount(t)
+
+	if err := created.CheckAttachmentCapacity(1024); err != nil {
+		t.Fatalf("CheckAttachmentCapacity(1024) = %v, want nil", err)
+	}
+	impossible := uint64(1) << 62
+	if err := created.CheckAttachmentCapacity(impossible); !errors.Is(err, ErrInsufficientAttachmentCapacity) {
+		t.Fatalf("CheckAttachmentCapacity(impossible) = %v, want ErrInsufficientAttachmentCapacity", err)
+	}
+}
+
 func TestAttachmentManifestEncodeDecodeRoundTrips(t *testing.T) {
 	payload := attachmentManifestPayload{
 		plaintextSize: 5_000_000,

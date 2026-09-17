@@ -43,3 +43,22 @@ func TestMapErrorResultAlwaysEncodesAsJSON(t *testing.T) {
 		}
 	}
 }
+
+// TestMapErrorReportsDistinctCodesForAttachmentPreflightFailures covers
+// task 5.1's preflight checks: an oversized source and an out-of-space
+// destination must map to their own distinct, localized AppError codes
+// rather than collapsing into the generic internal error.
+func TestMapErrorReportsDistinctCodesForAttachmentPreflightFailures(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{account.ErrAttachmentTooLarge, ErrCodeInvalidInput},
+		{account.ErrInsufficientAttachmentCapacity, ErrCodeInsufficientAttachmentSpace},
+	}
+	for _, tc := range cases {
+		if !isAppErrorCode(mapError(tc.err), tc.want) {
+			t.Errorf("mapError(%v).Code = %v, want %v", tc.err, mapError(tc.err), tc.want)
+		}
+	}
+}

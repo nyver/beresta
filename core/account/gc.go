@@ -84,6 +84,39 @@ func (a *Account) RunGarbageCollection(ctx context.Context, now time.Time, dryRu
 		report.BlobBytesReclaimed += att.SizeBytes
 	}
 
+	// A published blob file with no catalog row at all (never orphaned,
+	// because it was never referenced in the first place) means a prior
+	// AddAttachment crashed between BlobStore.Publish and committing this
+	// device's own attachments row - the only way that ordering can leave
+	// a gap (docs/architecture.md's publish-before-reference-commit
+	// contract). Its chunk nonces lived only in that crashed call's
+	// memory, so the content can never be completed into a valid
+	// manifest; the file is permanently dead weight, and unlike a normal
+	// orphaned attachment, ListOrphanedAttachments can never find it
+	// because it has no row to mark orphaned. The same retention window
+	// guards against reclaiming a blob whose commit is merely still in
+	// flight rather than lost for good.
+	knownBlobIDs, err := store.AllAttachmentBlobIDs(ctx, db)
+	if err != nil {
+		return GCReport{}, err
+	}
+	published, err := a.blobs.ListPublished()
+	if err != nil {
+		return GCReport{}, err
+	}
+	for _, blob := range published {
+		if knownBlobIDs[blob.ID] || blob.Modified.UnixMilli() > cutoff {
+			continue
+		}
+		report.Blobs = append(report.Blobs, GCBlobCandidate{
+			BlobID:         blob.ID,
+			SizeBytes:      blob.SizeBytes,
+			OrphanedUnixMS: blob.Modified.UnixMilli(),
+			InAnyBackup:    blobExistsInAnyBackup(blob.ID, backupLocations),
+		})
+		report.BlobBytesReclaimed += blob.SizeBytes
+	}
+
 	notes, err := store.ListNotes(ctx, db, workspaceID)
 	if err != nil {
 		return GCReport{}, err

@@ -256,6 +256,61 @@ func TestBlobStorePublishRetryAfterRenameRecoversWithoutDBCommit(t *testing.T) {
 	}
 }
 
+// TestBlobStoreListPublishedFindsEveryFileWithSizeAndModTime covers task
+// 5.1: garbage collection's file-only orphan scan (a published blob with
+// no attachments row) depends on ListPublished actually enumerating every
+// published file, with an accurate size and modification time to apply
+// its retention-window safety margin against.
+func TestBlobStoreListPublishedFindsEveryFileWithSizeAndModTime(t *testing.T) {
+	blobStore, _ := newTestBlobStore(t)
+	ctx := context.Background()
+	first, second := testBlobID(t, 20), testBlobID(t, 21)
+
+	for id, content := range map[BlobID][]byte{first: []byte("first-blob"), second: []byte("second-blob-content")} {
+		if _, err := blobStore.Publish(ctx, id, func(w io.Writer) error {
+			_, err := w.Write(content)
+			return err
+		}); err != nil {
+			t.Fatalf("Publish(%x): %v", id, err)
+		}
+	}
+
+	found, err := blobStore.ListPublished()
+	if err != nil {
+		t.Fatalf("ListPublished(): %v", err)
+	}
+	if len(found) != 2 {
+		t.Fatalf("ListPublished() = %+v, want 2 entries", found)
+	}
+	bySize := map[uint64]bool{}
+	for _, entry := range found {
+		if entry.ID != first && entry.ID != second {
+			t.Fatalf("ListPublished() returned an unexpected blob ID: %x", entry.ID)
+		}
+		if entry.Modified.IsZero() {
+			t.Fatalf("ListPublished() entry %x has a zero modification time", entry.ID)
+		}
+		bySize[entry.SizeBytes] = true
+	}
+	if !bySize[uint64(len("first-blob"))] || !bySize[uint64(len("second-blob-content"))] {
+		t.Fatalf("ListPublished() sizes = %v, want both published sizes present", bySize)
+	}
+}
+
+// TestBlobStoreListPublishedOnEmptyStoreReturnsNoEntries proves a fresh
+// account (no attachments ever published) does not fail the walk just
+// because the root directory does not exist yet.
+func TestBlobStoreListPublishedOnEmptyStoreReturnsNoEntries(t *testing.T) {
+	blobStore, _ := newTestBlobStore(t)
+	found, err := blobStore.ListPublished()
+	if err != nil {
+		t.Fatalf("ListPublished() on an empty store: %v", err)
+	}
+	if len(found) != 0 {
+		t.Fatalf("ListPublished() = %+v, want none", found)
+	}
+}
+
 func assertBlobNotPublished(t *testing.T, store *BlobStore, id BlobID) {
 	t.Helper()
 	exists, err := store.Exists(id)

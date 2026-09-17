@@ -123,6 +123,39 @@ func ListAttachments(ctx context.Context, exec Executor, workspaceID model.ID) (
 	return attachments, nil
 }
 
+// AllAttachmentBlobIDs returns every blob ID that has a catalog row in any
+// workspace, regardless of orphan status. Garbage collection uses this to
+// tell a published blob file that legitimately has no row yet (a publish
+// in flight, still inside its caller's publish-then-commit window) apart
+// from one that never will (the caller crashed between BlobStore.Publish
+// and creating this row, and can never reconstruct the manifest needed to
+// finish - see core/account's ErrAttachmentBlobOrphaned doc comment): the
+// former's blob ID is absent here only because the commit has not reached
+// this table yet, not because it never will.
+func AllAttachmentBlobIDs(ctx context.Context, exec Executor) (map[BlobID]bool, error) {
+	rows, err := exec.QueryContext(ctx, `SELECT blob_id FROM attachments`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list attachment blob ids: %w", err)
+	}
+	defer rows.Close()
+	ids := map[BlobID]bool{}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("store: scan attachment blob id: %w", err)
+		}
+		id, err := ParseBlobID(raw)
+		if err != nil {
+			return nil, fmt.Errorf("store: malformed attachment blob id: %w", err)
+		}
+		ids[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list attachment blob ids: %w", err)
+	}
+	return ids, nil
+}
+
 // ListOrphanedAttachments returns every attachment in a workspace that lost
 // its last note reference at or before orphanedAtOrBeforeUnixMS, i.e. every
 // attachment eligible for garbage collection once a caller-enforced

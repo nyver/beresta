@@ -258,6 +258,9 @@
   "errors.already_exists": "This device already holds a different key for this workspace.",
   "errors.workspace_not_held": "That workspace is not one this account holds.",
   "errors.share_not_found": "This workspace share was not found, or has already been revoked.",
+  "errors.backup_corrupt": "This backup failed verification and cannot be restored.",
+  "errors.insufficient_space": "Not enough free space at the backup destination.",
+  "errors.insufficient_attachment_space": "Not enough free space to add this attachment.",
   "errors.internal": "Something went wrong. Please try again.",
 
   "savestate.saving": "Saving…",

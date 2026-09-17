@@ -43,24 +43,25 @@ func (e *AppError) Error() string {
 // Known AppError codes. Frontend logic must switch on these, never on
 // Message text.
 const (
-	ErrCodeLocked               = "locked"
-	ErrCodeAccountExists        = "account_exists"
-	ErrCodeNoLocalAccount       = "no_local_account"
-	ErrCodeUnlockFailed         = "unlock_failed"
-	ErrCodeUnknownWorkspace     = "unknown_workspace"
-	ErrCodeNotFound             = "not_found"
-	ErrCodeWrongWorkspace       = "wrong_workspace"
-	ErrCodeInvalidInput         = "invalid_input"
-	ErrCodeKeystoreUnavailable  = "keystore_unavailable"
-	ErrCodeAuthenticationFailed = "authentication_failed"
-	ErrCodeCanceled             = "canceled"
-	ErrCodeKeyInvalidated       = "key_invalidated"
-	ErrCodeBackupCorrupt        = "backup_corrupt"
-	ErrCodeInsufficientSpace    = "insufficient_space"
-	ErrCodeAlreadyExists        = "already_exists"
-	ErrCodeWorkspaceNotHeld     = "workspace_not_held"
-	ErrCodeShareNotFound        = "share_not_found"
-	ErrCodeInternal             = "internal"
+	ErrCodeLocked                      = "locked"
+	ErrCodeAccountExists               = "account_exists"
+	ErrCodeNoLocalAccount              = "no_local_account"
+	ErrCodeUnlockFailed                = "unlock_failed"
+	ErrCodeUnknownWorkspace            = "unknown_workspace"
+	ErrCodeNotFound                    = "not_found"
+	ErrCodeWrongWorkspace              = "wrong_workspace"
+	ErrCodeInvalidInput                = "invalid_input"
+	ErrCodeKeystoreUnavailable         = "keystore_unavailable"
+	ErrCodeAuthenticationFailed        = "authentication_failed"
+	ErrCodeCanceled                    = "canceled"
+	ErrCodeKeyInvalidated              = "key_invalidated"
+	ErrCodeBackupCorrupt               = "backup_corrupt"
+	ErrCodeInsufficientSpace           = "insufficient_space"
+	ErrCodeInsufficientAttachmentSpace = "insufficient_attachment_space"
+	ErrCodeAlreadyExists               = "already_exists"
+	ErrCodeWorkspaceNotHeld            = "workspace_not_held"
+	ErrCodeShareNotFound               = "share_not_found"
+	ErrCodeInternal                    = "internal"
 )
 
 // ErrLocked reports that a bound method requiring an unlocked account was
@@ -110,10 +111,12 @@ func mapError(err error) error {
 		return &AppError{Code: ErrCodeInvalidInput, Message: err.Error()}
 	case errors.Is(err, account.ErrInvalidAttachmentMetadata), errors.Is(err, account.ErrAttachmentBlobOrphaned):
 		return &AppError{Code: ErrCodeInvalidInput, Message: err.Error()}
-	case errors.Is(err, corecrypto.ErrAttachmentResourceLimit):
+	case errors.Is(err, corecrypto.ErrAttachmentResourceLimit), errors.Is(err, account.ErrAttachmentTooLarge):
 		return &AppError{Code: ErrCodeInvalidInput, Message: "This file is too large to attach."}
 	case errors.Is(err, errAttachmentPreviewTooLarge):
 		return &AppError{Code: ErrCodeInvalidInput, Message: "This attachment is too large to preview."}
+	case errors.Is(err, account.ErrInsufficientAttachmentCapacity):
+		return &AppError{Code: ErrCodeInsufficientAttachmentSpace, Message: "Not enough free space to add this attachment."}
 	case errors.Is(err, keystore.ErrUnavailable):
 		return &AppError{Code: ErrCodeKeystoreUnavailable, Message: "Windows key protection is unavailable on this device."}
 	case errors.Is(err, keystore.ErrAuthentication):

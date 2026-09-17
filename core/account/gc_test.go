@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -163,6 +165,98 @@ func TestRunGarbageCollectionReportsBackupAwareness(t *testing.T) {
 	}
 	if len(report.Blobs) != 1 || !report.Blobs[0].InAnyBackup {
 		t.Fatalf("Blobs = %+v, want InAnyBackup=true", report.Blobs)
+	}
+}
+
+// TestRunGarbageCollectionReclaimsAPublishedBlobFileWithNoAttachmentRow
+// covers task 5.1's recovery-cleanup gap: a blob published (via
+// BlobStore.Publish) but never followed by a committed attachments row -
+// exactly what a crash between AddAttachment's Publish call and its
+// CreateAttachment call leaves behind - has no row for
+// ListOrphanedAttachments to ever find, so without this it would sit on
+// disk forever, unreachable and un-reclaimable (core/account's own
+// ErrAttachmentBlobOrphaned doc comment promises garbage collection will
+// eventually reclaim it, so this failing would make that promise false).
+func TestRunGarbageCollectionReclaimsAPublishedBlobFileWithNoAttachmentRow(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+
+	blobID := publishOrphanBlobFile(t, created, 0xAB, []byte("orphaned content"))
+	backdatePublishedBlob(t, created, blobID, time.Now().Add(-40*24*time.Hour))
+
+	report, err := created.RunGarbageCollection(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatalf("RunGarbageCollection: %v", err)
+	}
+	found := false
+	for _, candidate := range report.Blobs {
+		if candidate.BlobID == blobID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("report.Blobs = %+v, want the rowless blob included", report.Blobs)
+	}
+	if published, err := created.blobs.Exists(blobID); err != nil || published {
+		t.Fatalf("blob file still exists after collection: published=%v err=%v", published, err)
+	}
+}
+
+// TestRunGarbageCollectionKeepsARecentlyPublishedBlobFileWithNoRowYet is
+// the safety-margin half of the fix above: a blob published moments ago
+// with no row yet is indistinguishable, by file inspection alone, from a
+// legitimate AddAttachment call still inside its normal (sub-second)
+// publish-then-commit window. Collecting it immediately would delete
+// content out from under that in-flight call. Only the same retention
+// window ListOrphanedAttachments already uses makes it eligible.
+func TestRunGarbageCollectionKeepsARecentlyPublishedBlobFileWithNoRowYet(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+
+	blobID := publishOrphanBlobFile(t, created, 0xCD, []byte("still in flight"))
+
+	report, err := created.RunGarbageCollection(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatalf("RunGarbageCollection: %v", err)
+	}
+	for _, candidate := range report.Blobs {
+		if candidate.BlobID == blobID {
+			t.Fatalf("report.Blobs = %+v, want the recently published blob excluded", report.Blobs)
+		}
+	}
+	if published, err := created.blobs.Exists(blobID); err != nil || !published {
+		t.Fatalf("blob file should still exist: published=%v err=%v", published, err)
+	}
+}
+
+// publishOrphanBlobFile publishes content directly through the account's
+// BlobStore, bypassing AddAttachment entirely, to simulate the file-only
+// state a crash between Publish and CreateAttachment leaves behind: a
+// published blob with no attachments row at all.
+func publishOrphanBlobFile(t *testing.T, a *Account, seed byte, content []byte) store.BlobID {
+	t.Helper()
+	raw := bytes.Repeat([]byte{seed}, store.BlobIDBytes)
+	blobID, err := store.ParseBlobID(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.blobs.Publish(context.Background(), blobID, func(w io.Writer) error {
+		_, err := w.Write(content)
+		return err
+	}); err != nil {
+		t.Fatalf("publish orphan blob file: %v", err)
+	}
+	return blobID
+}
+
+// backdatePublishedBlob sets a published blob file's modification time,
+// standing in for RunGarbageCollection's real safety margin: only a file
+// old enough that it cannot be a call still inside its normal
+// publish-then-commit window is eligible for collection.
+func backdatePublishedBlob(t *testing.T, a *Account, blobID store.BlobID, modified time.Time) {
+	t.Helper()
+	if err := os.Chtimes(a.blobs.Path(blobID), modified, modified); err != nil {
+		t.Fatalf("backdate published blob: %v", err)
 	}
 }
 

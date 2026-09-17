@@ -88,6 +88,17 @@ func (a *App) AddAttachmentFromFile(noteID, sourcePath string) (AttachmentDTO, e
 	if err != nil {
 		return AttachmentDTO{}, mapError(err)
 	}
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return AttachmentDTO{}, mapError(fmt.Errorf("stat attachment source: %w", err))
+	}
+	if err := account.CheckAttachmentSize(uint64(info.Size())); err != nil {
+		return AttachmentDTO{}, mapError(err)
+	}
+	if err := acc.CheckAttachmentCapacity(uint64(info.Size())); err != nil {
+		return AttachmentDTO{}, mapError(err)
+	}
+
 	f, err := os.Open(sourcePath)
 	if err != nil {
 		return AttachmentDTO{}, mapError(fmt.Errorf("open attachment source: %w", err))
@@ -130,6 +141,12 @@ func (a *App) AddAttachmentFromBytes(noteID, displayName, mediaType, dataBase64 
 	}
 	data, err := decodeBase64(dataBase64)
 	if err != nil {
+		return AttachmentDTO{}, mapError(err)
+	}
+	if err := account.CheckAttachmentSize(uint64(len(data))); err != nil {
+		return AttachmentDTO{}, mapError(err)
+	}
+	if err := acc.CheckAttachmentCapacity(uint64(len(data))); err != nil {
 		return AttachmentDTO{}, mapError(err)
 	}
 

@@ -126,6 +126,19 @@ type BackupsConfig struct {
 type LoggingConfig struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
+	// Directory, when non-empty, writes structured logs to a bounded,
+	// rotated file under this directory (internal/logging.RotatingWriter)
+	// in addition to stderr. Defaults to <data_dir>/logs; set empty to
+	// disable file logging and keep stderr-only behavior, matching a
+	// deployment that already redirects/collects its process output
+	// itself.
+	Directory string `yaml:"directory"`
+	// MaxSizeMB bounds one log file's size, in mebibytes, before rotation.
+	// Zero uses internal/logging.DefaultMaxSizeBytes.
+	MaxSizeMB int `yaml:"max_size_mb"`
+	// MaxBackups bounds how many rotated files are retained beyond the
+	// active one. Zero uses internal/logging.DefaultMaxBackups.
+	MaxBackups int `yaml:"max_backups"`
 }
 
 type MetricsConfig struct {
@@ -172,7 +185,7 @@ func DefaultConfig() Config {
 			KeepDaily: 7,
 			DailyAt:   "02:00",
 		},
-		Logging: LoggingConfig{Level: "info", Format: "json"},
+		Logging: LoggingConfig{Level: "info", Format: "json", Directory: "./data/logs"},
 		Metrics: MetricsConfig{Listen: "127.0.0.1:9090"},
 	}
 }
@@ -208,6 +221,9 @@ func LoadConfig(path, dataOverride string) (Config, error) {
 		}
 		if cfg.TLS.ACME.CacheDir == "./data/acme" {
 			cfg.TLS.ACME.CacheDir = filepath.Join(dataOverride, "acme")
+		}
+		if cfg.Logging.Directory == "./data/logs" {
+			cfg.Logging.Directory = filepath.Join(dataOverride, "logs")
 		}
 		cfg.Server.DataDirectory = dataOverride
 	}
@@ -297,6 +313,12 @@ func (c Config) Validate() error {
 	case "json", "text":
 	default:
 		return fmt.Errorf("unsupported logging.format %q", c.Logging.Format)
+	}
+	if c.Logging.MaxSizeMB < 0 {
+		return errors.New("logging.max_size_mb must not be negative")
+	}
+	if c.Logging.MaxBackups < 0 {
+		return errors.New("logging.max_backups must not be negative")
 	}
 	if c.Metrics.Enabled {
 		if _, _, err := net.SplitHostPort(c.Metrics.Listen); err != nil {

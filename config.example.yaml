@@ -70,6 +70,18 @@ logging:
   level: "info"
   # JSON is recommended for structured content-free logs.
   format: "json"
+  # Directory for bounded, rotated log files, in addition to stderr.
+  # Defaults to <data_dir>/logs; set empty ("") to disable file logging and
+  # keep stderr-only output. Every log record already excludes note
+  # content, titles, search queries, passwords, keys, tokens, and invite
+  # codes (see TestStructuredLogsAndMetricsExcludeProtectedIdentifiersAndContent).
+  directory: "./data/logs"
+  # Rotates the active file once it would exceed this size. 0 uses the
+  # built-in default (10 MiB).
+  max_size_mb: 0
+  # How many rotated files to retain beyond the active one (beresta-server.log.1,
+  # .2, ...). 0 uses the built-in default (5).
+  max_backups: 0
 
 metrics:
   # Metrics are optional, aggregate-only, contain no resource labels, and are disabled by default.

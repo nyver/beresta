@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/beresta-app/beresta/internal/logging"
 	"github.com/beresta-app/beresta/server"
 )
 
@@ -45,7 +46,8 @@ func run(arguments []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	configureLogger(cfg.Logging)
+	closeLogger := configureLogger(cfg.Logging)
+	defer closeLogger()
 	runtime, err := server.Initialize(context.Background(), cfg)
 	if err != nil {
 		return err
@@ -193,7 +195,19 @@ func writeCommandJSON(writer io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
-func configureLogger(cfg server.LoggingConfig) {
+// configureLogger installs the default slog logger, writing to stderr and,
+// when cfg.Directory is set, additionally to a bounded, rotated file under
+// that directory (internal/logging.RotatingWriter) - specs/release-quality's
+// "Layered automated verification" requirement that logs stay bounded,
+// retained, and reviewable rather than an unbounded stream. A file that
+// cannot be opened (for example, an unwritable directory) is logged to
+// stderr as a warning and skipped rather than preventing startup: stderr
+// logging alone is still a fully functional deployment. The caller must
+// invoke the returned close function once logging is no longer needed
+// (run defers it) so the rotated file's handle does not outlive the
+// process - on Windows in particular, an open handle blocks removing its
+// directory, which matters for tests that clean up a temporary data root.
+func configureLogger(cfg server.LoggingConfig) func() {
 	level := slog.LevelInfo
 	switch cfg.Level {
 	case "debug":
@@ -203,10 +217,23 @@ func configureLogger(cfg server.LoggingConfig) {
 	case "error":
 		level = slog.LevelError
 	}
+	writer := io.Writer(os.Stderr)
+	closeLogger := func() {}
+	if cfg.Directory != "" {
+		maxSizeBytes := int64(cfg.MaxSizeMB) << 20
+		rotating, err := logging.New(cfg.Directory, "beresta-server.log", maxSizeBytes, cfg.MaxBackups)
+		if err != nil {
+			slog.Warn("bounded file logging unavailable; continuing with stderr only", "error_class", "log_file_unavailable")
+		} else {
+			writer = io.MultiWriter(os.Stderr, rotating)
+			closeLogger = func() { rotating.Close() }
+		}
+	}
 	options := &slog.HandlerOptions{Level: level}
-	var handler slog.Handler = slog.NewJSONHandler(os.Stderr, options)
+	var handler slog.Handler = slog.NewJSONHandler(writer, options)
 	if cfg.Format == "text" {
-		handler = slog.NewTextHandler(os.Stderr, options)
+		handler = slog.NewTextHandler(writer, options)
 	}
 	slog.SetDefault(slog.New(handler))
+	return closeLogger
 }

@@ -2,7 +2,7 @@ package main
 
 import (
 	"embed"
-	"log"
+	"log/slog"
 	"os"
 	"slices"
 
@@ -23,12 +23,15 @@ var assets embed.FS
 const autostartFlag = "--autostart"
 
 func main() {
+	closeLogging := configureLogging()
+	defer closeLogging()
+
 	// The single-instance check must run before anything else: once a
 	// second process starts registering its own tray icon and hotkey, or
 	// opens the same account database as the first, undoing that is much
 	// harder than never doing it.
 	if alreadyRunning, err := acquireSingleInstanceLock(); err != nil {
-		log.Printf("single-instance check unavailable: %v", err)
+		slog.Warn("single-instance check unavailable", "error_class", "single_instance_check_failed")
 	} else if alreadyRunning {
 		activateRunningInstance()
 		return
@@ -59,7 +62,7 @@ func main() {
 		OnQuit:       app.handleQuitTrigger,
 	}, mod, vk)
 	if trayErr != nil {
-		log.Printf("tray/hotkey integration unavailable: %v", trayErr)
+		slog.Warn("tray/hotkey integration unavailable", "error_class", "tray_unavailable")
 	}
 	if trayCtrl != nil {
 		app.shell = trayCtrl
@@ -96,6 +99,8 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("application window failed to start", "error_class", "wails_run_failed")
+		closeLogging()
+		os.Exit(1)
 	}
 }

@@ -28,6 +28,52 @@ func TestRunInitOnlyCreatesRequestedDataRoot(t *testing.T) {
 	}
 }
 
+// TestRunWritesStructuredLogFileAcrossRestarts covers task 4.5's wiring:
+// the default config enables bounded file logging under <data>/logs, a
+// restarted process (a second run against the same --data directory)
+// appends to it rather than erroring or clobbering it, and a config
+// override for max_size_mb/max_backups is accepted and reaches
+// configureLogger without failing startup. internal/logging's own tests
+// cover the rotation arithmetic itself at byte precision; this only
+// proves the CLI wires a real config through to a real file across
+// process lifetimes.
+func TestRunWritesStructuredLogFileAcrossRestarts(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "server-data")
+	configPath := filepath.Join(directory, "config.yaml")
+
+	if err := run([]string{"--data", directory, "--init-only"}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(directory, "logs", "beresta-server.log")
+	first, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file after first run: %v", err)
+	}
+	if !bytes.Contains(first, []byte("server initialized")) {
+		t.Fatalf("log file missing the startup record: %s", first)
+	}
+
+	// A tiny max_size_mb/max_backups override must be accepted (Validate
+	// only rejects negative values) and never fail startup, even though a
+	// single run's log volume will not actually cross a whole-megabyte
+	// bound.
+	if err := os.WriteFile(configPath, []byte("logging:\n  max_size_mb: 1\n  max_backups: 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := run([]string{"--data", directory, "--init-only"}, &bytes.Buffer{}); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	second, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file after restarts: %v", err)
+	}
+	if len(second) <= len(first) {
+		t.Fatalf("log file did not grow across restarts (len=%d, want > %d) - a restart must append, not truncate", len(second), len(first))
+	}
+}
+
 func TestRunRejectsUnexpectedArguments(t *testing.T) {
 	if err := run([]string{"unexpected"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("unexpected positional argument was accepted")

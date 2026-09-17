@@ -519,6 +519,20 @@ information. On first initialization the server creates `beresta.db`, `blobs/`,
 root. Record the printed SHA-256 fingerprint through a trusted channel before
 clients pin it.
 
+The server writes structured JSON logs to stderr and, by default, to a
+bounded, rotated file at `<data_dir>/logs/beresta-server.log` (configurable
+or disabled via `logging.directory` in `config.yaml`; see
+[config.example.yaml](config.example.yaml)). The active file rotates to
+`beresta-server.log.1`, `.2`, and so on once it exceeds `logging.max_size_mb`
+(10 MiB by default), retaining `logging.max_backups` rotated files (5 by
+default) before deleting the oldest. Every log record is limited to stable
+identifiers and classification codes - never note content, titles, search
+queries, passwords, keys, tokens, or invite codes - the same allowlist
+diagnostics and copy-diagnostics already enforce. The Windows desktop client
+writes the equivalent bounded, rotated JSON log to
+`%AppData%\Beresta\logs\beresta-desktop.log` (same default size/retention,
+not yet operator-configurable).
+
 Create the first single-use invite after initialization:
 
 ```powershell

@@ -260,6 +260,72 @@ func backdatePublishedBlob(t *testing.T, a *Account, blobID store.BlobID, modifi
 	}
 }
 
+// TestRunGarbageCollectionRecoversFromACrashBetweenDBDeleteAndFileRemoval
+// covers task 5.8's restart-safe GC maintenance: collectBlob deliberately
+// deletes an attachment's catalog row (in its own transaction) before
+// removing its published blob file, precisely so a process terminated in
+// between leaves only a harmless unreferenced file - never a dangling
+// database reference (gc.go's collectBlob doc comment). This proves that
+// leftover file is not permanently stranded: the next GC run (simulating
+// the next startup sweep) finds and reclaims it through the same
+// "published blob file with no catalog row" recovery path AddAttachment's
+// own crash case uses, without disturbing any other blob.
+func TestRunGarbageCollectionRecoversFromACrashBetweenDBDeleteAndFileRemoval(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Has an attachment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachment, err := created.AddAttachment(ctx, workspaceID, note.ID, "a.txt", "text/plain", bytes.NewReader([]byte("payload")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := created.RemoveAttachment(ctx, workspaceID, note.ID, attachment.BlobID); err != nil {
+		t.Fatal(err)
+	}
+	oldUnixMS := time.Now().Add(-31 * 24 * time.Hour).UnixMilli()
+	backdateAttachmentOrphan(t, created, attachment.BlobID, oldUnixMS)
+
+	// Simulate a crash between collectBlob's own DB delete and its file
+	// removal by performing exactly that DB delete directly, leaving the
+	// published file behind - then backdate the file itself, since the
+	// "published with no row" recovery path gates on the file's own
+	// modification time, not the (now-gone) row's orphaned_unix_ms.
+	if err := store.DeleteAttachment(ctx, created.db, attachment.BlobID); err != nil {
+		t.Fatal(err)
+	}
+	exists, err := created.blobs.Exists(attachment.BlobID)
+	if err != nil || !exists {
+		t.Fatalf("blob file should still exist before recovery: exists=%v err=%v", exists, err)
+	}
+	oldTime := time.UnixMilli(oldUnixMS)
+	if err := os.Chtimes(created.blobs.Path(attachment.BlobID), oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := created.RunGarbageCollection(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatalf("RunGarbageCollection: %v", err)
+	}
+	found := false
+	for _, b := range report.Blobs {
+		if b.BlobID == attachment.BlobID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("phantom blob file was not found for recovery: %v", report.Blobs)
+	}
+
+	exists, err = created.blobs.Exists(attachment.BlobID)
+	if err != nil || exists {
+		t.Fatalf("phantom blob file should be gone after recovery: exists=%v err=%v", exists, err)
+	}
+}
+
 func backdateAttachmentOrphan(t *testing.T, a *Account, blobID store.BlobID, unixMS int64) {
 	t.Helper()
 	if _, err := a.db.Exec(`UPDATE attachments SET orphaned_unix_ms = ? WHERE blob_id = ?`, unixMS, blobID.Bytes()); err != nil {

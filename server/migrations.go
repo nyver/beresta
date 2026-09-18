@@ -56,24 +56,37 @@ func applyMigrations(ctx context.Context, database *sql.DB) error {
 			return fmt.Errorf("inspect migration %d: %w", item.version, err)
 		}
 
-		transaction, err := database.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin migration %d: %w", item.version, err)
+		if err := applyOneMigration(ctx, database, item); err != nil {
+			return err
 		}
-		if _, err := transaction.ExecContext(ctx, item.sql); err != nil {
-			transaction.Rollback()
-			return fmt.Errorf("apply migration %s: %w", item.name, err)
-		}
-		if _, err := transaction.ExecContext(ctx,
-			"INSERT INTO server_schema_migrations(version, name, checksum, applied_at) VALUES (?, ?, ?, unixepoch())",
-			item.version, item.name, item.checksum,
-		); err != nil {
-			transaction.Rollback()
-			return fmt.Errorf("record migration %s: %w", item.name, err)
-		}
-		if err := transaction.Commit(); err != nil {
-			return fmt.Errorf("commit migration %s: %w", item.name, err)
-		}
+	}
+	return nil
+}
+
+// applyOneMigration runs one migration's SQL and its ledger row insert
+// inside a single transaction, so a mid-migration failure (a malformed
+// statement, a constraint violation) rolls back every schema change the
+// migration made along with the ledger row: the database is left exactly
+// as it was before this call, at the prior recorded version, ready for the
+// operator to fix and retry rather than stuck half-migrated.
+func applyOneMigration(ctx context.Context, database *sql.DB, item migration) error {
+	transaction, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migration %d: %w", item.version, err)
+	}
+	defer transaction.Rollback()
+
+	if _, err := transaction.ExecContext(ctx, item.sql); err != nil {
+		return fmt.Errorf("apply migration %s: %w", item.name, err)
+	}
+	if _, err := transaction.ExecContext(ctx,
+		"INSERT INTO server_schema_migrations(version, name, checksum, applied_at) VALUES (?, ?, ?, unixepoch())",
+		item.version, item.name, item.checksum,
+	); err != nil {
+		return fmt.Errorf("record migration %s: %w", item.name, err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit migration %s: %w", item.name, err)
 	}
 	return nil
 }

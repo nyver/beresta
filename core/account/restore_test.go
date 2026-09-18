@@ -650,3 +650,187 @@ func TestRestoreWholeEnvelopeWriteFaultLeavesAccountUsableAndSurvivesRestart(t *
 
 	assertRestoreRolledBackToOriginal(t, created, original.ID, "Diverged after backup")
 }
+
+// TestUnlockCleansStaleRestoreStagingDirectoryOnStartup covers task 5.8's
+// restart-safe temporary-file maintenance: a whole-restore staging
+// directory left behind by a process that terminated before RestoreWhole's
+// own deferred cleanup ran must be swept automatically the next time the
+// account is unlocked, so it never accumulates indefinitely
+// (specs/backup-and-recovery.md, "Restore is interrupted").
+func TestUnlockCleansStaleRestoreStagingDirectoryOnStartup(t *testing.T) {
+	ctx := context.Background()
+	path := tempDBPath(t)
+	wrapper := newFakeWrapper()
+	created, err := Create(ctx, CreateOptions{
+		DatabasePath: path,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+		KDFOptions:   fastKDF(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	workspaceID := defaultWorkspaceID(t, created)
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Survives a crashed restore")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a process that terminated mid-RestoreWhole, after
+	// os.MkdirTemp created its staging directory but before the deferred
+	// os.RemoveAll in RestoreWhole could run.
+	stalePath := filepath.Join(filepath.Dir(path), ".whole-restore-crashed")
+	if err := os.MkdirAll(stalePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(stalePath, "source.db")
+	if err := os.WriteFile(sourcePath, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Back-date the directory and its child file well past
+	// restoreStagingMinAge: CleanupRestoreStaging only sweeps directories
+	// whose most recent activity - including any child file's own mtime,
+	// not just the directory's own - is old enough that no concurrent
+	// RestoreWhole in another process could still own them, and a
+	// directory/file this test just created is otherwise indistinguishable
+	// from one still being actively written to.
+	oldEnough := time.Now().Add(-2 * restoreStagingMinAge)
+	if err := os.Chtimes(sourcePath, oldEnough, oldEnough); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(stalePath, oldEnough, oldEnough); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := created.Lock(); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	reopened, err := Unlock(ctx, UnlockOptions{
+		DatabasePath: path,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+	})
+	if err != nil {
+		t.Fatalf("Unlock (simulated restart): %v", err)
+	}
+	t.Cleanup(func() { reopened.Lock() })
+
+	// The sweep runs in a background goroutine off Unlock's critical path,
+	// so give it a bounded window to finish rather than asserting the
+	// instant Unlock returns.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(stalePath); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stale restore staging directory still exists after Unlock's background sweep deadline")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := reopened.GetNote(ctx, note.ID); err != nil {
+		t.Fatalf("GetNote after restart: %v", err)
+	}
+}
+
+func TestCleanupRestoreStagingOnMissingDirectoryIsANoOp(t *testing.T) {
+	if err := CleanupRestoreStaging(filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
+		t.Fatalf("CleanupRestoreStaging on a missing directory: %v", err)
+	}
+}
+
+// TestCleanupRestoreStagingReportsARemovalFailure proves the sweep's error
+// path (restore.go's errs-accumulation branch) is actually reachable and
+// reported rather than silently swallowed, by injecting a removal failure
+// through the same currentBackupFS seam CleanupBackupStaging's equivalent
+// path already exercises fault injection through.
+func TestCleanupRestoreStagingReportsARemovalFailure(t *testing.T) {
+	databaseDir := t.TempDir()
+	stalePath := filepath.Join(databaseDir, ".whole-restore-locked")
+	if err := os.MkdirAll(stalePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldEnough := time.Now().Add(-2 * restoreStagingMinAge)
+	if err := os.Chtimes(stalePath, oldEnough, oldEnough); err != nil {
+		t.Fatal(err)
+	}
+
+	wrapped := &os.PathError{Op: "remove", Path: stalePath, Err: syscall.EACCES}
+	fake := &injectingBackupFS{failRemoveAll: wrapped}
+	previous := currentBackupFS
+	currentBackupFS = fake
+	defer func() { currentBackupFS = previous }()
+
+	err := CleanupRestoreStaging(databaseDir)
+	if err == nil {
+		t.Fatal("CleanupRestoreStaging with an injected removal failure succeeded, want an error")
+	}
+	if !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("CleanupRestoreStaging error = %v, want it to wrap the injected EACCES", err)
+	}
+}
+
+// TestCleanupRestoreStagingLeavesARecentDirectoryAlone covers the other
+// half of restoreStagingMinAge's safety margin: nothing today stops a
+// second process from calling Unlock (and therefore this sweep) against
+// the same database directory while a first process is genuinely
+// mid-RestoreWhole, so the sweep must never remove a staging directory
+// young enough that it could still be in active use, only ones old enough
+// to be unambiguously abandoned.
+func TestCleanupRestoreStagingLeavesARecentDirectoryAlone(t *testing.T) {
+	databaseDir := t.TempDir()
+	recentPath := filepath.Join(databaseDir, ".whole-restore-inprogress")
+	if err := os.MkdirAll(recentPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CleanupRestoreStaging(databaseDir); err != nil {
+		t.Fatalf("CleanupRestoreStaging: %v", err)
+	}
+
+	if _, err := os.Stat(recentPath); err != nil {
+		t.Fatalf("a recently created restore staging directory must survive the sweep, stat err = %v", err)
+	}
+}
+
+// TestCleanupRestoreStagingLeavesADirectoryAloneWhenAChildFileIsStillFresh
+// covers a blind spot a directory's own ModTime alone would miss: it only
+// advances when an entry is added, renamed, or removed within it, not while
+// an existing child file is still being written to - exactly what
+// RestoreWhole spends most of its time doing (writing into source.db, then
+// restored.db) after the directory itself was created. A staging directory
+// old enough on its own ModTime must still survive the sweep if one of its
+// files was written to more recently.
+func TestCleanupRestoreStagingLeavesADirectoryAloneWhenAChildFileIsStillFresh(t *testing.T) {
+	databaseDir := t.TempDir()
+	stagingPath := filepath.Join(databaseDir, ".whole-restore-writing")
+	if err := os.MkdirAll(stagingPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldEnough := time.Now().Add(-2 * restoreStagingMinAge)
+	if err := os.Chtimes(stagingPath, oldEnough, oldEnough); err != nil {
+		t.Fatal(err)
+	}
+
+	// The child file itself was created long ago (so the directory's own
+	// entry-add didn't just happen) but is still actively being written to.
+	childPath := filepath.Join(stagingPath, "restored.db")
+	if err := os.WriteFile(childPath, []byte("in progress"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(stagingPath, oldEnough, oldEnough); err != nil {
+		t.Fatal(err) // writing the child also bumped the directory's own mtime; restore it.
+	}
+	recentWrite := time.Now()
+	if err := os.Chtimes(childPath, recentWrite, recentWrite); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CleanupRestoreStaging(databaseDir); err != nil {
+		t.Fatalf("CleanupRestoreStaging: %v", err)
+	}
+
+	if _, err := os.Stat(stagingPath); err != nil {
+		t.Fatalf("a staging directory with a recently written child file must survive the sweep, stat err = %v", err)
+	}
+}

@@ -196,6 +196,52 @@ func TestMigrateFTS5RoundTrip(t *testing.T) {
 	}
 }
 
+// TestApplyMigrationRollsBackFailedMigrationLeavingSchemaVersionUnchanged
+// covers task 5.8's transactional/recoverable client migration
+// requirement: a migration whose SQL fails partway through (a malformed
+// later statement) must leave neither a schema_migrations row nor any of
+// its earlier statements' schema changes behind, because applyMigration
+// runs the whole migration - SQL and ledger insert - inside one
+// transaction it rolls back on any error. A subsequent normal Migrate()
+// call must then still apply the real embedded migrations cleanly,
+// proving the failed attempt left nothing behind to block recovery.
+func TestApplyMigrationRollsBackFailedMigrationLeavingSchemaVersionUnchanged(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	if err := ensureSchemaMigrationsTable(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	broken := Migration{
+		Version: 999999,
+		Name:    "broken_migration_for_test",
+		SQL: `CREATE TABLE test_txn_rollback_marker (id INTEGER PRIMARY KEY);
+THIS IS NOT VALID SQL;`,
+	}
+	if err := applyMigration(ctx, db, broken); err == nil {
+		t.Fatal("applyMigration with malformed SQL succeeded, want an error")
+	}
+
+	version, err := schemaVersion(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 0 {
+		t.Fatalf("schema version after a failed migration = %d, want 0", version)
+	}
+	var name string
+	err = db.QueryRowContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'test_txn_rollback_marker'`,
+	).Scan(&name)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("a failed migration must not leave its earlier statements' schema changes behind: sqlite_master lookup err = %v", err)
+	}
+
+	if _, err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate() after a prior failed attempt: %v", err)
+	}
+}
+
 func TestMigrateEnforcesForeignKeys(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

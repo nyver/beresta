@@ -199,6 +199,80 @@ func TestEnsureDailyBackupCreatesOncePerDayAndRotates(t *testing.T) {
 	}
 }
 
+// TestVerifyAllBackupsRecoversFromACrashBetweenRotationsDiskRemovalAndCatalogDelete
+// covers task 5.8's restart-safe backup-rotation maintenance:
+// rotateDailyBackups deliberately removes a rotated backup's on-disk set
+// before its catalog row (backup.go's rotateDailyBackups doc comment), so a
+// process terminated in between leaves a catalog row whose on-disk location
+// no longer exists. This proves that phantom row self-heals at the next
+// startup verification sweep (VerifyAllBackups, called once at every
+// startup per the package doc) by being marked corrupt - never mistaken
+// for a usable backup, and never disrupting the surviving valid ones -
+// rather than making PreviewBackup/RestoreWhole fail on it with a raw
+// file-not-found error.
+func TestVerifyAllBackupsRecoversFromACrashBetweenRotationsDiskRemovalAndCatalogDelete(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	backupsRoot := t.TempDir()
+
+	day1 := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	if _, err := created.EnsureDailyBackup(ctx, backupsRoot, day1); err != nil {
+		t.Fatalf("EnsureDailyBackup (day 0): %v", err)
+	}
+	for i := 1; i < dailyBackupRetention; i++ {
+		if _, err := created.EnsureDailyBackup(ctx, backupsRoot, day1.AddDate(0, 0, i)); err != nil {
+			t.Fatalf("EnsureDailyBackup (day %d): %v", i, err)
+		}
+	}
+	survivors, err := store.ListValidBackups(ctx, created.db, store.BackupKindDaily)
+	if err != nil || len(survivors) != dailyBackupRetention {
+		t.Fatalf("ListValidBackups before rotation = %v, err = %v, want %d entries", survivors, err, dailyBackupRetention)
+	}
+
+	// One more day pushes rotation over the limit; simulate a crash right
+	// after rotateDailyBackups' os.RemoveAll succeeds for the oldest
+	// backup but before its store.DeleteBackup runs, by doing exactly that
+	// removal directly instead of going through EnsureDailyBackup/rotation.
+	oldest := survivors[len(survivors)-1]
+	if _, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindDaily, day1.AddDate(0, 0, dailyBackupRetention)); err != nil {
+		t.Fatalf("CreateBackup (crash-simulation day): %v", err)
+	}
+	if err := os.RemoveAll(oldest.Location); err != nil {
+		t.Fatal(err)
+	}
+
+	// A subsequent startup runs VerifyAllBackups over the whole catalog,
+	// exactly like both clients do once at every launch.
+	if err := created.VerifyAllBackups(ctx, day1.AddDate(0, 0, dailyBackupRetention+1)); err != nil {
+		t.Fatalf("VerifyAllBackups: %v", err)
+	}
+
+	afterVerify, err := store.GetBackup(ctx, created.db, oldest.ID)
+	if err != nil {
+		t.Fatalf("GetBackup (phantom row): %v", err)
+	}
+	if !afterVerify.Corrupt {
+		t.Fatal("a backup row whose on-disk set is gone must be marked corrupt by VerifyAllBackups, not left looking valid")
+	}
+
+	stillValid, err := store.ListValidBackups(ctx, created.db, store.BackupKindDaily)
+	if err != nil {
+		t.Fatalf("ListValidBackups after recovery: %v", err)
+	}
+	for _, b := range stillValid {
+		if b.ID == oldest.ID {
+			t.Fatal("the phantom (disk-removed) backup must not appear in ListValidBackups after recovery")
+		}
+	}
+
+	// Rotation itself must keep working normally afterward: it never
+	// panics or fails on the phantom corrupt row, since corrupt entries
+	// are excluded from ListValidBackups (backup.go's rotateDailyBackups).
+	if _, err := created.EnsureDailyBackup(ctx, backupsRoot, day1.AddDate(0, 0, dailyBackupRetention+2)); err != nil {
+		t.Fatalf("EnsureDailyBackup after recovery: %v", err)
+	}
+}
+
 func TestEnsureDailyBackupRejectsLockedAccount(t *testing.T) {
 	ctx := context.Background()
 	created := createTestAccount(t)
@@ -383,6 +457,7 @@ type injectingBackupFS struct {
 	failMkdirTemp             error
 	failSyncedWrite           error
 	failRename                error
+	failRemoveAll             error
 	corruptAfterManifestWrite func(stagingDir string) error
 }
 
@@ -411,6 +486,13 @@ func (f *injectingBackupFS) rename(oldpath, newpath string) error {
 		return f.failRename
 	}
 	return f.osBackupFS.rename(oldpath, newpath)
+}
+
+func (f *injectingBackupFS) removeAll(path string) error {
+	if f.failRemoveAll != nil {
+		return f.failRemoveAll
+	}
+	return f.osBackupFS.removeAll(path)
 }
 
 // TestCreateBackupStagingDirectoryFailurePreservesExistingValidBackups,

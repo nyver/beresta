@@ -780,6 +780,14 @@ func unlockAccountContent(ctx context.Context, db *sql.DB, opts UnlockOptions, a
 		return nil, err
 	}
 
+	// Best-effort and off the critical path: a leftover whole-restore
+	// staging directory from a process that terminated mid-RestoreWhole
+	// costs disk space but never causes incorrect behavior, so neither a
+	// sweep failure nor the directory listing itself may block or slow
+	// down unlocking the account (specs/backup-and-recovery.md, "Restore is
+	// interrupted").
+	go func() { _ = CleanupRestoreStaging(filepath.Dir(opts.DatabasePath)) }()
+
 	return &Account{
 		ID:                      accountRow.id,
 		DeviceID:                deviceRow.id,

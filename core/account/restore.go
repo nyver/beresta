@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,104 @@ import (
 // integrity classification": corrupt archives "SHALL be ineligible for
 // restore").
 var ErrBackupCorrupt = errors.New("account: backup is marked corrupt and cannot be restored")
+
+// restoreStagingPrefix names every whole-restore staging directory
+// RestoreWhole creates directly beside the live database file (mirroring
+// backupStagingPrefix's identical role in backup.go). It is never a
+// reference the live database holds: RestoreWhole only ever reads
+// databasePath and the catalog, never a path under a staging directory,
+// once it returns, so a leftover one - from a process terminated before
+// its own deferred os.RemoveAll ran - is always safe to remove wholesale.
+// CleanupRestoreStaging finds and removes it by this prefix alone.
+const restoreStagingPrefix = ".whole-restore-"
+
+// restoreStagingMinAge bounds CleanupRestoreStaging to directories old
+// enough that no RestoreWhole call still running in another process
+// against the same database directory could plausibly own them: nothing
+// today (no cross-process lock exists yet; single-instance enforcement is
+// separate, still-pending client work) stops a second process from calling
+// Unlock, and therefore this sweep, while a first process is mid-restore.
+// RestoreWhole's own staging work - a local file copy, migration, and
+// re-encryption - completes well within this margin under any realistic
+// database size, so it only ever excludes a directory a concurrent restore
+// could still be using, never a genuinely stale one.
+const restoreStagingMinAge = 10 * time.Minute
+
+// CleanupRestoreStaging removes every stale whole-restore staging
+// directory (restoreStagingPrefix) directly under databaseDir - the
+// leftover of a process that terminated during RestoreWhole after it
+// created one but before its own deferred cleanup ran
+// (specs/backup-and-recovery.md, "Restore is interrupted"). A missing
+// databaseDir is not an error. A directory younger than
+// restoreStagingMinAge is left alone, since it may still belong to a
+// RestoreWhole in progress.
+func CleanupRestoreStaging(databaseDir string) error {
+	entries, err := os.ReadDir(databaseDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("account: list database directory: %w", err)
+	}
+	cutoff := time.Now().Add(-restoreStagingMinAge)
+	var errs []error
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), restoreStagingPrefix) {
+			continue
+		}
+		lastActivity, err := latestModTime(filepath.Join(databaseDir, entry.Name()))
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			errs = append(errs, fmt.Errorf("account: stat restore staging directory %q: %w", entry.Name(), err))
+			continue
+		}
+		if lastActivity.After(cutoff) {
+			continue
+		}
+		// currentBackupFS is the same filesystem seam CleanupBackupStaging
+		// uses (backup.go): despite its name it is just a small os.* wrapper
+		// package-wide tests can fault-inject, not something backup-specific.
+		if err := currentBackupFS.removeAll(filepath.Join(databaseDir, entry.Name())); err != nil {
+			errs = append(errs, fmt.Errorf("account: remove stale restore staging directory %q: %w", entry.Name(), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// latestModTime returns the most recent modification time of path and its
+// direct children (non-recursive; a restore staging directory never nests
+// one). A directory's own ModTime only advances when an entry is added,
+// renamed, or removed within it - not while an existing child file (source.db,
+// restored.db) is still being written to - so checking the children too keeps
+// a directory with a RestoreWhole actively writing into it from ever looking
+// idle just because no new file has appeared for a while.
+func latestModTime(path string) (time.Time, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	latest := info.ModTime()
+
+	children, err := os.ReadDir(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	for _, child := range children {
+		childInfo, err := child.Info()
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return time.Time{}, err
+		}
+		if childInfo.ModTime().After(latest) {
+			latest = childInfo.ModTime()
+		}
+	}
+	return latest, nil
+}
 
 // BackupPreview summarizes one backup's content for the restore UI without
 // mutating current data.
@@ -463,7 +562,7 @@ func (a *Account) RestoreWhole(ctx context.Context, backupID model.ID, destRoot 
 		return RestoreResult{SafetyBackup: safetyBackup}, ErrAccountLocked
 	}
 
-	stagingDir, err := os.MkdirTemp(filepath.Dir(a.databasePath), ".whole-restore-*")
+	stagingDir, err := os.MkdirTemp(filepath.Dir(a.databasePath), restoreStagingPrefix+"*")
 	if err != nil {
 		return RestoreResult{SafetyBackup: safetyBackup}, fmt.Errorf("account: create restore staging directory: %w", err)
 	}

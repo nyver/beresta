@@ -5,6 +5,7 @@ import { QuillBinding } from "y-quill";
 
 import { useI18n } from "../i18n";
 import type { LocalSaveState } from "./commitTracker";
+import { stripUnsupportedFormats } from "./pasteFormat";
 import { useNoteDocument } from "./useNoteDocument";
 
 export interface NoteEditorHandle {
@@ -117,6 +118,12 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function
       modules: {
         toolbar: TOOLBAR_FORMATS,
         history: { userOnly: true },
+        // Registered after Quill's own built-in matchers (appended to
+        // them, not replacing them - see the Clipboard module), so it
+        // degrades every paste's attributes down to TOOLBAR_FORMATS'
+        // canonical set instead of only restricting what the toolbar
+        // offers to apply manually.
+        clipboard: { matchers: [[Node.ELEMENT_NODE, stripUnsupportedFormats]] },
       },
     });
     const binding = new QuillBinding(ydoc.getText(NOTE_BODY_ROOT), quill);

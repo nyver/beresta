@@ -11,6 +11,7 @@ import "package:flutter_quill/flutter_quill.dart";
 import "commit_tracker.dart";
 import "core_gateway.dart";
 import "markdown_delta.dart";
+import "paste_format.dart";
 import "strings.dart";
 
 /// appVersion is this Flutter app's display version, matching
@@ -2978,6 +2979,19 @@ class _EditorScreenState extends State<EditorScreen> {
       final quillBody = QuillController(
         document: Document.fromDelta(markdownToDelta(value["body"] as String)),
         selection: const TextSelection.collapsed(offset: 0),
+        // Degrades a rich-text paste's formatting to the canonical
+        // semantic format set (see paste_format.dart), matching desktop's
+        // own clipboard matcher in
+        // desktop/frontend/src/editor/NoteEditor.tsx: without this, a
+        // pasted heading level 4-6 or an unsupported attribute (underline,
+        // color, font, ...) would round-trip through the Document
+        // harmlessly but silently vanish only later, when this note's
+        // body is next saved as Markdown.
+        config: QuillControllerConfig(
+          clipboardConfig: QuillClipboardConfig(
+            onRichTextPaste: (delta, isExternal) async => stripUnsupportedFormats(delta),
+          ),
+        ),
       );
       quillBody.addListener(markDirty);
       setState(() {

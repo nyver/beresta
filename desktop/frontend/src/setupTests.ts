@@ -140,6 +140,13 @@ class ResizeObserverStub {
 Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, value: 800 });
 Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, value: 600 });
 
+// jsdom's Range has no getBoundingClientRect at all (throws "not a
+// function"): Quill's own Selection.getBounds calls it to scroll a
+// restored selection into view (core/selection.ts), which its history
+// module's undo/redo triggers even in tests that never touch layout.
+// Zero-box is fine - NoteEditor's undo/redo tests only assert on content.
+Range.prototype.getBoundingClientRect = () => new DOMRect();
+
 beforeEach(() => {
   for (const fn of Object.values(appMock)) {
     fn.mockReset();

@@ -15,7 +15,7 @@ packaged Windows application; the following phases added the optional opaque
 home server, convergent client synchronization, and the Android application:
 
 - a buildable Wails v2 Windows host with a React/TypeScript frontend;
-- a Flutter Android application with local onboarding/unlock, a nested notebook hierarchy (create/rename/delete, move notes between notebooks), tag management (create/delete, assign/unassign per note, filter the note list by tag), virtualized notes with per-note deletion, a `flutter_quill` WYSIWYG body editor toolbar-restricted to match desktop's own Quill formatting set (bold/italic/strike/inline code, H1-H3, ordered/bullet list, blockquote, code block, link) and round-tripped through the same canonical Markdown projection as `GetNote`/`SaveNote` (`mobile/lib/markdown_delta.dart`, a Dart port of `core/sync/yjsadapter`'s Markdown parser/renderer kept byte-identical to it), attachments with an inline thumbnail/preview strip and per-attachment deletion, a default new-note title that clears when its title field receives focus, search, revisions, secure lifecycle handling, background synchronization, encrypted SAF backups, share capture, and a private quick-note widget;
+- a Flutter Android application with local onboarding/unlock, a nested notebook hierarchy (create/rename/delete, move notes between notebooks), tag management (create/delete, assign/unassign per note, filter the note list by tag), virtualized notes with per-note deletion, a `flutter_quill` WYSIWYG body editor toolbar-restricted to match desktop's own Quill formatting set (bold/italic/strike/inline code, H1-H3, ordered/bullet list, blockquote, code block, link), a paste handler (`mobile/lib/paste_format.dart`, mirroring desktop's `pasteFormat.ts`) that degrades a pasted format outside that set down to plain text instead of silently dropping it later at export, and round-tripped through the same canonical Markdown projection as `GetNote`/`SaveNote` (`mobile/lib/markdown_delta.dart`, a Dart port of `core/sync/yjsadapter`'s Markdown parser/renderer kept byte-identical to it), attachments with an inline thumbnail/preview strip and per-attachment deletion, a default new-note title that clears when its title field receives focus, search, revisions, secure lifecycle handling, background synchronization, encrypted SAF backups, share capture, and a private quick-note widget;
 - a Yjs V1/V2 adapter plus a SQLCipher 4.14 encrypted-database probe whose Android AAR is produced by `gomobile bind`;
 - owned mutable secret buffers, device-bounded Argon2id, domain-separated HKDF, X25519/Ed25519 identities, XChaCha20-Poly1305 keybag/object/attachment/backup encryption, and the shared Windows DPAPI and Android Keystore/biometric key-wrapping contract (phase 2A);
 - validated UUIDv7 identifiers, Hybrid Logical Clock persistence, and deterministic last-writer-wins registers with device-ID and logical-counter tie breaks;
@@ -96,7 +96,12 @@ Quill 2 bound to the
 note's Yjs `Y.Text` through `y-quill` - matching `core/sync/yjsadapter`'s
 own Quill-Delta-compatible document model exactly, so the toolbar is
 deliberately restricted to the formatting marks the Go core's canonical
-Markdown projection understands. Local edits are captured as incremental
+Markdown projection understands. A clipboard matcher
+(`editor/pasteFormat.ts`) degrades a paste to that same set at paste time -
+an unsupported mark (underline, color, font, alignment, a checklist, a
+heading below H1-H3, ...) is dropped and the text kept, visibly and
+predictably, instead of silently vanishing only later, at export. Local
+edits are captured as incremental
 Yjs updates, debounced, merged, and committed through `CommitNoteBody`;
 they flush immediately (not debounced) when a note closes or the account
 locks, and a failed commit is retried rather than dropped. Attachments are

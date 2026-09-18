@@ -184,3 +184,76 @@ func TestExportNotesSanitizesUnsafeCharacters(t *testing.T) {
 		t.Fatalf("sanitized export file missing: %v", err)
 	}
 }
+
+// canonicalFormatFixture exercises every format in the semantic set desktop
+// and Android editor toolbars expose (specs/notes-management/spec.md:
+// "Windows and Android SHALL expose the same semantic formatting set")
+// through the canonical Markdown syntax core/sync/yjsadapter/markdown.go
+// renders it as: bold, italic, strike, inline code, a link, headings one
+// through three, a blockquote, both list kinds, and a code block. Both
+// desktop's pasteFormat.ts and mobile's paste_format.dart degrade a paste
+// down to exactly this set - see task 5.8's/6.1's round-trip fixtures on
+// each client.
+const canonicalFormatFixture = "# Heading one\n" +
+	"## Heading two\n" +
+	"### Heading three\n" +
+	"**bold** *italic* ~~strike~~ `code` [a link](https://example.com)\n" +
+	"> a quote\n" +
+	"- bullet one\n" +
+	"- bullet two\n" +
+	"1. ordered one\n" +
+	"2. ordered two\n" +
+	"```\n" +
+	"a code block\n" +
+	"```"
+
+// TestExportNotesRoundTripsTheCanonicalFormatFixture covers task 6.1's
+// cross-platform export round-trip fixture: a note body written through the
+// exact same ReplaceMarkdown+CommitNoteBody path core/mobileapi's SaveNote
+// uses (so this exercises the real commit pipeline, not just the isolated
+// yjsadapter parser/renderer already covered by markdown_test.go) must
+// export byte-identical canonical Markdown for every format either
+// client's editor toolbar can produce - proving the shared round-trip
+// document model, not just its renderer in isolation, preserves the whole
+// canonical set end to end.
+func TestExportNotesRoundTripsTheCanonicalFormatFixture(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Every format")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := loadNoteDocument(ctx, created.db, created, workspaceID, note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.ReplaceMarkdown(noteBodyRoot, canonicalFormatFixture); err != nil {
+		doc.Close()
+		t.Fatalf("ReplaceMarkdown: %v", err)
+	}
+	update, err := doc.EncodeStateAsUpdate(noteSnapshotFormat)
+	doc.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := created.CommitNoteBody(ctx, NoteBodyCommand{
+		WorkspaceID: workspaceID, NoteID: note.ID, Update: update, UpdateFormat: noteSnapshotFormat,
+	}); err != nil {
+		t.Fatalf("CommitNoteBody: %v", err)
+	}
+
+	destDir := filepath.Join(t.TempDir(), "canonical-format-export")
+	manifest, err := created.ExportNotes(ctx, workspaceID, destDir, []model.ID{note.ID}, time.Now())
+	if err != nil {
+		t.Fatalf("ExportNotes: %v", err)
+	}
+	exported, err := os.ReadFile(filepath.Join(destDir, manifest.Notes[0].MarkdownPath))
+	if err != nil {
+		t.Fatalf("read exported markdown: %v", err)
+	}
+	if string(exported) != canonicalFormatFixture {
+		t.Fatalf("exported markdown = %q, want the fixture unchanged:\n%q", exported, canonicalFormatFixture)
+	}
+}

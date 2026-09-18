@@ -1122,6 +1122,38 @@ li:hover > .tree-row-delete,
   font-weight: 600;
 }
 
+.backup-status-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.5rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.backup-status-summary div {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.backup-status-summary dt {
+  color: #5a5148;
+}
+
+.backup-status-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.backup-status-health-corrupt {
+  color: #8a2c1f;
+  font-weight: 600;
+}
+
+.backup-status-health-warning {
+  color: #8a5a1f;
+  font-weight: 600;
+}
+
 .backup-preview {
   display: flex;
   flex-direction: column;

@@ -86,6 +86,14 @@ abstract interface class CoreGateway {
   Future<bool> selectBackupDestination();
   Future<void> createBackup();
   Future<List<Map<String, dynamic>>> listBackups();
+
+  /// Returns the backup catalog's current health, last verified time, and
+  /// storage location, matching desktop's identical BackupStatusDTO - see
+  /// core/mobileapi.Service.BackupStatus. Shown under Data settings,
+  /// independent of the full diagnosticSummary, per
+  /// specs/backup-and-recovery.md's "Understandable verified backup status"
+  /// requirement.
+  Future<Map<String, dynamic>> backupStatus();
   Future<Map<String, dynamic>> previewBackup(String backupId);
   Future<void> restoreBackup(String backupId);
   Future<int> importBackups();
@@ -335,6 +343,10 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<List<Map<String, dynamic>>> listBackups() async =>
       _list(await _invoke("listBackups"));
+
+  @override
+  Future<Map<String, dynamic>> backupStatus() async =>
+      _object(await _invoke("backupStatus"));
 
   @override
   Future<Map<String, dynamic>> previewBackup(String backupId) async =>

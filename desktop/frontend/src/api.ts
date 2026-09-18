@@ -3,6 +3,7 @@ import {
   AddAttachmentFromBytes,
   AddAttachmentFromFile,
   AutostartStatus,
+  BackupStatus as BackupStatusBridge,
   Catalog,
   CommitNoteBody,
   ConnectServer,
@@ -366,6 +367,17 @@ export interface TechnicalDiagnostics {
   transport_security_mode: string;
   transport_url: string;
   migration_version: number;
+}
+
+/**
+ * backupStatus reports the current backup catalog status (health, last
+ * verified time, and location) for display under Data settings, per
+ * specs/backup-and-recovery.md's "Understandable verified backup status"
+ * requirement - independent of the full DiagnosticSummary, so the Backups
+ * panel does not need to open Diagnostics to show it.
+ */
+export async function backupStatus(): Promise<BackupStatus> {
+  return BackupStatusBridge() as unknown as Promise<BackupStatus>;
 }
 
 export async function diagnosticSummary(): Promise<DiagnosticSummary> {

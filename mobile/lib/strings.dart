@@ -168,6 +168,10 @@ class Strings {
       "backup_health_warning": "Needs attention",
       "backup_health_corrupt": "Corrupt",
       "backup_health_unknown": "Not yet checked",
+      "backup_last_verified": "Last verified",
+      "backup_location": "Location",
+      "backup_corrupt_explanation":
+          "This backup failed verification and cannot be restored.",
       "database_health_ok": "Healthy",
       "database_health_degraded": "Needs attention",
       "database_health_unknown": "Not yet checked",
@@ -345,6 +349,10 @@ class Strings {
       "backup_health_warning": "Требует внимания",
       "backup_health_corrupt": "Повреждена",
       "backup_health_unknown": "Ещё не проверена",
+      "backup_last_verified": "Последняя проверка",
+      "backup_location": "Хранилище",
+      "backup_corrupt_explanation":
+          "Эта копия не прошла проверку и не может быть восстановлена.",
       "database_health_ok": "В порядке",
       "database_health_degraded": "Требует внимания",
       "database_health_unknown": "Ещё не проверена",

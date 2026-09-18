@@ -313,6 +313,7 @@ class MainActivity : FlutterFragmentActivity() {
             "pollEvents" -> service.pollEvents((call.argument<Number>("afterSequence")?.toLong() ?: 0L), 64L)
             "createBackup" -> BackupDestination.createManual(this, service, requestId)
             "listBackups" -> service.listBackups(requestId)
+            "backupStatus" -> service.backupStatus()
             "previewBackup" -> service.previewBackup(requestId, required(call, "backupId"))
             "restoreBackup" -> BackupDestination.restore(this, service, requestId, required(call, "backupId"))
             "importBackups" -> BackupDestination.importSelected(this, service, requestId)

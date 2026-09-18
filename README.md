@@ -144,7 +144,11 @@ just-restored content when the editor remounts afterward. A "Backups &
 Data" dialog off the shell's topbar covers the rest of task 5.7: the
 external backup directory setting (with a native folder picker,
 defaulting under the app data directory but movable to any external
-location), a manual "back up now" action, a catalog tabbed by kind
+location), a backup status summary (health, last verified time, and
+storage location for the most recent daily or manual backup, with a
+plain-language explanation when it is corrupt - `BackupStatus` on desktop,
+`backupStatus` on Android, both backed by `core/backupsummary`), a manual
+"back up now" action, a catalog tabbed by kind
 (daily/manual/pre-restore/pre-migration) with per-backup verify and
 preview, and a dry-run restore plan listing each note's classification
 (new/updated/unchanged) before committing to either "restore selected as

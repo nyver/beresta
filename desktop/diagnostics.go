@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/beresta-app/beresta/core/account"
+	"github.com/beresta-app/beresta/core/backupsummary"
 	"github.com/beresta-app/beresta/core/model"
 	"github.com/beresta-app/beresta/core/presentation"
 	"github.com/beresta-app/beresta/core/store"
@@ -86,7 +87,7 @@ func (a *App) collectDiagnosticSummary() (presentation.DiagnosticSummary, error)
 		Configured: configured, Progress: progress, PendingCount: pendingCount, UnsafeCount: unsafeCount, Now: time.Now(),
 	})
 
-	backupStatus, err := latestBackupStatus(ctx, acc)
+	backupStatus, err := a.backupStatus(ctx, acc)
 	if err != nil {
 		return presentation.DiagnosticSummary{}, err
 	}
@@ -185,29 +186,36 @@ func countPendingAndUnsafe(ctx context.Context, repository *store.SyncRepository
 	return pendingCount, unsafeCount, nil
 }
 
-// latestBackupStatus derives a presentation.BackupStatus from the newest
-// daily backup catalog entry. It reports BackupHealthUnknown, never a
-// fabricated health, when no backup has run yet.
-func latestBackupStatus(ctx context.Context, acc *account.Account) (presentation.BackupStatus, error) {
-	backups, err := acc.ListBackups(ctx, store.BackupKindDaily)
+// backupStatus derives a presentation.BackupStatus (see
+// core/backupsummary.Summarize) from the newest daily or manual backup
+// catalog entry, for both the diagnostics summary and the dedicated
+// BackupStatus bridge method the Data settings backup panel calls directly.
+func (a *App) backupStatus(ctx context.Context, acc *account.Account) (presentation.BackupStatus, error) {
+	daily, err := acc.ListBackups(ctx, store.BackupKindDaily)
 	if err != nil {
 		return presentation.BackupStatus{}, err
 	}
-	if len(backups) == 0 {
-		return presentation.BackupStatus{Health: presentation.BackupHealthUnknown}, nil
+	manual, err := acc.ListBackups(ctx, store.BackupKindManual)
+	if err != nil {
+		return presentation.BackupStatus{}, err
 	}
-	latest := backups[0]
-	status := presentation.BackupStatus{Location: latest.Location}
-	switch {
-	case latest.Corrupt:
-		status.Health = presentation.BackupHealthCorrupt
-	case latest.VerifiedUnixMS != nil:
-		status.Health = presentation.BackupHealthHealthy
-		status.LastVerified = time.UnixMilli(*latest.VerifiedUnixMS)
-	default:
-		status.Health = presentation.BackupHealthUnknown
+	return backupsummary.Summarize(daily, manual), nil
+}
+
+// BackupStatus reports the current presentation.BackupStatus (last verified
+// time, storage location, and health) for display under Data settings, per
+// specs/backup-and-recovery.md's "Understandable verified backup status"
+// requirement.
+func (a *App) BackupStatus() (BackupStatusDTO, error) {
+	acc, _, err := a.primaryWorkspace()
+	if err != nil {
+		return BackupStatusDTO{}, mapError(err)
 	}
-	return status, nil
+	status, err := a.backupStatus(a.requestContext(), acc)
+	if err != nil {
+		return BackupStatusDTO{}, mapError(err)
+	}
+	return newBackupStatusDTO(status), nil
 }
 
 // storageUsageBytes sums the local database file (and its WAL/SHM

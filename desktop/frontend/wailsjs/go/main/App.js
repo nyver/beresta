@@ -18,6 +18,10 @@ export function AutostartStatus() {
   return window['go']['main']['App']['AutostartStatus']();
 }
 
+export function BackupStatus() {
+  return window['go']['main']['App']['BackupStatus']();
+}
+
 export function Catalog(arg1) {
   return window['go']['main']['App']['Catalog'](arg1);
 }

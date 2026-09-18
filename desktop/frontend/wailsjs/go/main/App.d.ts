@@ -11,6 +11,8 @@ export function AddAttachmentFromFile(arg1:string,arg2:string):Promise<main.Atta
 
 export function AutostartStatus():Promise<main.AutostartStatusDTO>;
 
+export function BackupStatus():Promise<main.BackupStatusDTO>;
+
 export function Catalog(arg1:string):Promise<main.LocaleCatalog>;
 
 export function CommitNoteBody(arg1:main.CommitNoteBodyRequest):Promise<void>;

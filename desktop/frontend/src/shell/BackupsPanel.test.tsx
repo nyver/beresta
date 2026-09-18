@@ -19,10 +19,20 @@ function fakeBackup(overrides: Partial<main.BackupDTO> = {}): main.BackupDTO {
   };
 }
 
+function fakeBackupStatus(overrides: Partial<main.BackupStatusDTO> = {}): main.BackupStatusDTO {
+  return {
+    health: "unknown",
+    last_verified_unix_ms: 0,
+    location: "",
+    ...overrides,
+  };
+}
+
 function renderPanel(initialBackups: main.BackupDTO[] = []) {
   mockLocaleCatalog();
   mockSettings({ backup_directory: "C:\\backups" });
   appMock.ListBackups.mockResolvedValue(initialBackups);
+  appMock.BackupStatus.mockResolvedValue(fakeBackupStatus());
   const onRestored = vi.fn();
   render(
     <I18nProvider>
@@ -33,6 +43,36 @@ function renderPanel(initialBackups: main.BackupDTO[] = []) {
 }
 
 describe("BackupsPanel", () => {
+  it("shows the backup catalog's health, last verified time, and location", async () => {
+    renderPanel();
+    appMock.BackupStatus.mockResolvedValue(
+      fakeBackupStatus({ health: "healthy", last_verified_unix_ms: Date.UTC(2026, 0, 1), location: "C:\\backups\\daily\\backup-1" }),
+    );
+
+    expect(await screen.findByText("backups.health_healthy")).toBeInTheDocument();
+    expect(screen.getByText("C:\\backups\\daily\\backup-1")).toBeInTheDocument();
+  });
+
+  it("explains a corrupt backup catalog status in plain language", async () => {
+    renderPanel();
+    appMock.BackupStatus.mockResolvedValue(fakeBackupStatus({ health: "corrupt" }));
+
+    expect(await screen.findByText("backups.health_corrupt")).toBeInTheDocument();
+    expect(screen.getByText("errors.backup_corrupt")).toBeInTheDocument();
+  });
+
+  it("refreshes the backup status after creating a manual backup", async () => {
+    renderPanel();
+    const user = userEvent.setup();
+    appMock.CreateManualBackup.mockResolvedValue(fakeBackup({ kind: "manual" }));
+
+    await screen.findByText("C:\\backups");
+    appMock.BackupStatus.mockClear();
+    await user.click(screen.getByRole("button", { name: "backups.create_manual_button" }));
+
+    await waitFor(() => expect(appMock.BackupStatus).toHaveBeenCalled());
+  });
+
   it("shows the configured backup directory and the empty state for the default kind", async () => {
     renderPanel();
 

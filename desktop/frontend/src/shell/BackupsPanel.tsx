@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  backupStatus,
   createManualBackup,
   getSettings,
   listBackups,
@@ -12,8 +13,9 @@ import {
   unwrapError,
   updateSettings,
   verifyBackup,
+  type BackupStatus,
 } from "../api";
-import { formatBytes } from "../format";
+import { formatBytes, formatClockTime } from "../format";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 
@@ -48,6 +50,9 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
   const [directoryError, setDirectoryError] = useState<string | null>(null);
   const [changingDirectory, setChangingDirectory] = useState(false);
 
+  const [status, setStatus] = useState<BackupStatus | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
   const [kind, setKind] = useState<BackupKind>("daily");
   const [backups, setBackups] = useState<main.BackupDTO[]>([]);
   const [listError, setListError] = useState<string | null>(null);
@@ -81,12 +86,25 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
       .catch((thrown: unknown) => setListError(errorMessage(unwrapError(thrown))));
   }, [kind, errorMessage]);
 
+  const refreshStatus = useCallback(() => {
+    backupStatus()
+      .then(setStatus)
+      .catch((thrown: unknown) => setStatusError(errorMessage(unwrapError(thrown))));
+  }, [errorMessage]);
+
   useEffect(() => {
     if (!ready) return;
     setListError(null);
     refreshBackups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, kind]);
+
+  useEffect(() => {
+    if (!ready) return;
+    setStatusError(null);
+    refreshStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   async function handleChangeDirectory() {
     setDirectoryError(null);
@@ -117,6 +135,7 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
     try {
       await createManualBackup(directory);
       if (kind === "manual") refreshBackups();
+      refreshStatus();
     } catch (thrown: unknown) {
       setManualError(errorMessage(unwrapError(thrown)));
     } finally {
@@ -148,6 +167,7 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
     try {
       await verifyBackup(backupId);
       refreshBackups();
+      refreshStatus();
     } catch (thrown: unknown) {
       setListError(errorMessage(unwrapError(thrown)));
     }
@@ -221,6 +241,36 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
   return (
     <section className="backups-panel" aria-label={t("backups.title")}>
       <h3>{t("backups.title")}</h3>
+
+      {statusError ? (
+        <p className="error" role="alert">
+          {statusError}
+        </p>
+      ) : status ? (
+        <dl className="backup-status-summary">
+          <div>
+            <dt>{t("diagnostics.backup_title")}</dt>
+            <dd className={`backup-status-health backup-status-health-${status.health}`}>
+              {t(`backups.health_${status.health}`)}
+            </dd>
+          </div>
+          <div>
+            <dt>{t("backups.last_verified_label")}</dt>
+            <dd>{status.last_verified_unix_ms ? formatClockTime(status.last_verified_unix_ms) : t("diagnostics.never_label")}</dd>
+          </div>
+          {status.location ? (
+            <div>
+              <dt>{t("backups.location_label")}</dt>
+              <dd>{status.location}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+      {status?.health === "corrupt" ? (
+        <p className="error" role="alert">
+          {t("errors.backup_corrupt")}
+        </p>
+      ) : null}
 
       <div className="backup-directory-row">
         <span className="backup-directory-label">{t("backups.directory_label")}</span>

@@ -464,6 +464,51 @@ void main() {
     expect(gateway.connectedConfig?["security_mode"], "trusted");
   });
 
+  testWidgets(
+    "backup sheet shows the catalog's health, last verified time, and location",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..backupStatusValue = {
+              "health": "healthy",
+              "last_verified_unix_ms": DateTime.utc(2026, 1, 1).millisecondsSinceEpoch,
+              "location": "/backups/daily-1",
+            };
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.backup_outlined));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Healthy"), findsOneWidget);
+      expect(find.text("/backups/daily-1"), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    "backup sheet explains a corrupt backup catalog status in plain language",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..backupStatusValue = {
+              "health": "corrupt",
+              "last_verified_unix_ms": 0,
+              "location": "",
+            };
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.backup_outlined));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Corrupt"), findsOneWidget);
+      expect(
+        find.text("This backup failed verification and cannot be restored."),
+        findsOneWidget,
+      );
+    },
+  );
+
   testWidgets("refreshes notes after the selected workspace finishes syncing", (
     tester,
   ) async {
@@ -773,6 +818,13 @@ class FakeGateway implements CoreGateway {
   Future<void> createBackup() async {}
   @override
   Future<List<Map<String, dynamic>>> listBackups() async => [];
+  Map<String, dynamic> backupStatusValue = {
+    "health": "unknown",
+    "last_verified_unix_ms": 0,
+    "location": "",
+  };
+  @override
+  Future<Map<String, dynamic>> backupStatus() async => backupStatusValue;
   @override
   Future<Map<String, dynamic>> previewBackup(String backupId) async => {};
   @override

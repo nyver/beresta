@@ -2402,16 +2402,73 @@ class BackupSheet extends StatefulWidget {
 class _BackupSheetState extends State<BackupSheet> {
   late Future<List<Map<String, dynamic>>> backups =
       widget.gateway.listBackups();
+  late Future<Map<String, dynamic>> status = widget.gateway.backupStatus();
   String? error;
 
   void reload() => setState(() {
     backups = widget.gateway.listBackups();
+    status = widget.gateway.backupStatus();
   });
+
+  // _backupStatusSummary covers task 5.4's Data settings backup status
+  // surface: the catalog's health, last verified time, and location -
+  // specs/backup-and-recovery.md's "Understandable verified backup status"
+  // requirement - shown above the catalog list itself rather than only
+  // inside the separate Diagnostics screen.
+  Widget _backupStatusSummary() => FutureBuilder<Map<String, dynamic>>(
+    future: status,
+    builder: (context, snapshot) {
+      final value = snapshot.data;
+      if (value == null) return const SizedBox.shrink();
+      final health = value["health"] as String? ?? "unknown";
+      final lastVerifiedMS = (value["last_verified_unix_ms"] as num?)?.toInt() ?? 0;
+      final location = value["location"] as String? ?? "";
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _diagnosticsRow(
+              widget.strings("diagnostics_backup"),
+              widget.strings("backup_health_$health"),
+            ),
+            _diagnosticsRow(
+              widget.strings("backup_last_verified"),
+              lastVerifiedMS > 0
+                  ? DateTime.fromMillisecondsSinceEpoch(
+                    lastVerifiedMS,
+                  ).toLocal().toString()
+                  : widget.strings("diagnostics_never"),
+            ),
+            if (location.isNotEmpty)
+              _diagnosticsRow(widget.strings("backup_location"), location),
+            if (health == "corrupt")
+              Text(
+                widget.strings("backup_corrupt_explanation"),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+
+  Widget _diagnosticsRow(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(width: 140, child: Text(label)),
+        Expanded(child: SelectableText(value)),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
+        _backupStatusSummary(),
         Wrap(
           spacing: 8,
           children: [

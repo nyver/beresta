@@ -2376,17 +2376,17 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
       ],
     ),
   );
+}
 
-  String _formatBytes(int bytes) {
-    const units = ["B", "KB", "MB", "GB"];
-    double value = bytes.toDouble();
-    var unitIndex = 0;
-    while (value >= 1024 && unitIndex < units.length - 1) {
-      value /= 1024;
-      unitIndex++;
-    }
-    return "${value.toStringAsFixed(unitIndex == 0 ? 0 : 1)} ${units[unitIndex]}";
+String _formatBytes(int bytes) {
+  const units = ["B", "KB", "MB", "GB"];
+  double value = bytes.toDouble();
+  var unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
   }
+  return "${value.toStringAsFixed(unitIndex == 0 ? 0 : 1)} ${units[unitIndex]}";
 }
 
 class BackupSheet extends StatefulWidget {
@@ -2545,7 +2545,7 @@ class _BackupSheetState extends State<BackupSheet> {
                       ).toLocal().toString(),
                     ),
                     trailing: TextButton(
-                      onPressed: () => confirmRestore(backup["id"] as String),
+                      onPressed: () => openRestoreOptions(backup["id"] as String),
                       child: Text(widget.strings("restore")),
                     ),
                   );
@@ -2558,9 +2558,113 @@ class _BackupSheetState extends State<BackupSheet> {
     );
   }
 
-  Future<void> confirmRestore(String backupId) async {
-    await widget.gateway.previewBackup(backupId);
-    if (!mounted) return;
+  // openRestoreOptions covers task 5.5's restore planner: a read-only
+  // preview of the backup's notes, a dry-run plan classifying each note as
+  // new/updated/unchanged before committing to the non-destructive
+  // "restore selected as new notes" (RestoreSelective, mirroring desktop's
+  // BackupsPanel), or the separately confirmed, destructive "replace
+  // everything" (RestoreWhole) - both already take a mandatory pre-restore
+  // safety backup in core/account, so this sheet only needs to surface the
+  // choice and the result.
+  void openRestoreOptions(String backupId) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder:
+          (sheetContext) => _RestoreOptionsSheet(
+            gateway: widget.gateway,
+            strings: widget.strings,
+            backupId: backupId,
+            onRestored: () {
+              Navigator.of(sheetContext).pop();
+              reload();
+            },
+          ),
+    );
+  }
+}
+
+class _RestoreOptionsSheet extends StatefulWidget {
+  const _RestoreOptionsSheet({
+    required this.gateway,
+    required this.strings,
+    required this.backupId,
+    required this.onRestored,
+  });
+
+  final CoreGateway gateway;
+  final Strings strings;
+  final String backupId;
+  final VoidCallback onRestored;
+
+  @override
+  State<_RestoreOptionsSheet> createState() => _RestoreOptionsSheetState();
+}
+
+class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
+  late Future<Map<String, dynamic>> preview = widget.gateway.previewBackup(
+    widget.backupId,
+  );
+  Map<String, dynamic>? plan;
+  Set<String> selected = {};
+  bool planning = false;
+  bool restoring = false;
+  String? error;
+
+  Future<void> loadPlan() async {
+    setState(() {
+      planning = true;
+      error = null;
+    });
+    try {
+      final result = await widget.gateway.planRestore(widget.backupId, const []);
+      final entries =
+          (result["entries"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+      if (!mounted) return;
+      setState(() {
+        plan = result;
+        selected =
+            entries
+                .where((entry) => entry["kind"] != "unchanged")
+                .map((entry) => entry["note_id"] as String)
+                .toSet();
+      });
+    } catch (failure) {
+      if (mounted) setState(() => error = describeFailure(widget.strings, failure));
+    } finally {
+      if (mounted) setState(() => planning = false);
+    }
+  }
+
+  Future<void> restoreSelected() async {
+    if (selected.isEmpty) return;
+    setState(() {
+      restoring = true;
+      error = null;
+    });
+    try {
+      final result = await widget.gateway.restoreSelective(
+        widget.backupId,
+        selected.toList(),
+      );
+      final newNoteIds = result["new_note_ids"] as List<dynamic>? ?? [];
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "${widget.strings("restore_selected_success")}: ${newNoteIds.length}",
+          ),
+        ),
+      );
+      widget.onRestored();
+    } catch (failure) {
+      if (mounted) setState(() => error = describeFailure(widget.strings, failure));
+    } finally {
+      if (mounted) setState(() => restoring = false);
+    }
+  }
+
+  Future<void> confirmWholeRestore() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder:
@@ -2579,10 +2683,140 @@ class _BackupSheetState extends State<BackupSheet> {
             ],
           ),
     );
-    if (confirmed == true) {
-      await widget.gateway.restoreBackup(backupId);
-      reload();
+    if (confirmed != true) return;
+    setState(() {
+      restoring = true;
+      error = null;
+    });
+    try {
+      await widget.gateway.restoreBackup(widget.backupId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(widget.strings("restore_success"))));
+      widget.onRestored();
+    } catch (failure) {
+      if (mounted) setState(() => error = describeFailure(widget.strings, failure));
+    } finally {
+      if (mounted) setState(() => restoring = false);
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.75,
+      builder:
+          (context, scrollController) => Padding(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            ),
+            child: ListView(
+              controller: scrollController,
+              children: [
+                Text(
+                  widget.strings("restore_preview_title"),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                FutureBuilder<Map<String, dynamic>>(
+                  future: preview,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    final titles =
+                        (snapshot.data!["note_titles"] as List<dynamic>? ?? [])
+                            .cast<String>();
+                    if (titles.isEmpty) {
+                      return Text(widget.strings("restore_preview_empty"));
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: titles.map(Text.new).toList(),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                if (error != null)
+                  Text(
+                    error!,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                if (plan == null)
+                  FilledButton(
+                    onPressed: planning ? null : loadPlan,
+                    child:
+                        planning
+                            ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                            : Text(widget.strings("restore_selected_button")),
+                  )
+                else ...[
+                  Text(
+                    widget.strings("restore_plan_title"),
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  Text(
+                    "${widget.strings("restore_required_storage")}: "
+                    "${_formatBytes((plan!["required_storage_bytes"] as num?)?.toInt() ?? 0)}",
+                  ),
+                  ...((plan!["entries"] as List<dynamic>? ?? [])
+                      .cast<Map<String, dynamic>>()
+                      .map((entry) {
+                        final noteId = entry["note_id"] as String;
+                        final kind = entry["kind"] as String? ?? "unchanged";
+                        final title = entry["title"] as String? ?? "";
+                        return CheckboxListTile(
+                          value: selected.contains(noteId),
+                          onChanged:
+                              (value) => setState(() {
+                                if (value == true) {
+                                  selected.add(noteId);
+                                } else {
+                                  selected.remove(noteId);
+                                }
+                              }),
+                          title: Text(title.isNotEmpty ? title : widget.strings("title")),
+                          subtitle: Text(widget.strings("restore_kind_$kind")),
+                        );
+                      })),
+                  FilledButton(
+                    onPressed: restoring || selected.isEmpty ? null : restoreSelected,
+                    child:
+                        restoring
+                            ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                            : Text(widget.strings("restore_selected_button")),
+                  ),
+                ],
+                const Divider(height: 32),
+                OutlinedButton(
+                  onPressed: restoring ? null : confirmWholeRestore,
+                  child: Text(widget.strings("replace_restore")),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(widget.strings("close")),
+                ),
+              ],
+            ),
+          ),
+    );
   }
 }
 

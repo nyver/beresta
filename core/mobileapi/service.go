@@ -939,7 +939,7 @@ func (s *Service) ListBackups(requestID string) (string, error) {
 	sort.Slice(rows, func(i, j int) bool { return rows[i].CreatedUnixMS > rows[j].CreatedUnixMS })
 	result := make([]map[string]any, len(rows))
 	for i, row := range rows {
-		result[i] = map[string]any{"id": row.ID.String(), "kind": row.Kind, "location": row.Location, "created_unix_ms": row.CreatedUnixMS, "corrupt": row.Corrupt}
+		result[i] = backupDTO(row)
 	}
 	return marshal(result)
 }
@@ -979,7 +979,142 @@ func (s *Service) PreviewBackup(requestID, backupID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return marshal(preview)
+	return marshal(map[string]any{"backup": backupDTO(preview.Backup), "note_titles": preview.NoteTitles})
+}
+
+// restoreChangeKindNames maps account.RestoreChangeKind to its JS/Dart-facing
+// name, matching desktop's identical restoreChangeKindNames.
+var restoreChangeKindNames = map[account.RestoreChangeKind]string{
+	account.RestoreChangeAddition:  "addition",
+	account.RestoreChangeUpdate:    "update",
+	account.RestoreChangeUnchanged: "unchanged",
+}
+
+// backupDTO renders one backup catalog entry as the same snake_case JSON
+// shape desktop's BackupDTO exposes.
+func backupDTO(b store.Backup) map[string]any {
+	dto := map[string]any{
+		"id":              b.ID.String(),
+		"kind":            b.Kind,
+		"location":        b.Location,
+		"created_unix_ms": b.CreatedUnixMS,
+		"corrupt":         b.Corrupt,
+	}
+	if b.VerifiedUnixMS != nil {
+		dto["verified_unix_ms"] = *b.VerifiedUnixMS
+	}
+	if b.NoteCount != nil {
+		dto["note_count"] = *b.NoteCount
+	}
+	if b.SizeBytes != nil {
+		dto["size_bytes"] = *b.SizeBytes
+	}
+	return dto
+}
+
+// restorePlanDTO renders account.RestorePlan as the same snake_case JSON
+// shape desktop's RestorePlanDTO exposes.
+func restorePlanDTO(plan account.RestorePlan) map[string]any {
+	entries := make([]map[string]any, len(plan.Entries))
+	for i, e := range plan.Entries {
+		entries[i] = map[string]any{"note_id": e.NoteID.String(), "title": e.Title, "kind": restoreChangeKindNames[e.Kind]}
+	}
+	return map[string]any{"entries": entries, "required_storage_bytes": plan.RequiredStorageBytes}
+}
+
+// restoreResultDTO renders account.RestoreResult as the same snake_case JSON
+// shape desktop's RestoreResultDTO exposes.
+func restoreResultDTO(result account.RestoreResult) map[string]any {
+	newNoteIDs := make([]string, len(result.NewNoteIDs))
+	for i, id := range result.NewNoteIDs {
+		newNoteIDs[i] = id.String()
+	}
+	return map[string]any{"safety_backup": backupDTO(result.SafetyBackup), "new_note_ids": newNoteIDs}
+}
+
+// parseIDs parses every value in values as a model.ID, matching desktop's
+// identical parseIDs.
+func parseIDs(values []string) ([]model.ID, error) {
+	ids := make([]model.ID, len(values))
+	for i, v := range values {
+		id, err := parseID(v)
+		if err != nil {
+			return nil, err
+		}
+		ids[i] = id
+	}
+	return ids, nil
+}
+
+// PlanRestore computes, without mutating current data, what restoring
+// noteIDsJSON (a JSON array of note IDs, or "[]"/"" for the whole backup)
+// from backupID would do - see core/account.Account.PlanRestore.
+func (s *Service) PlanRestore(requestID, backupID, noteIDsJSON string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	id, err := parseID(backupID)
+	if err != nil {
+		return "", err
+	}
+	noteIDs, err := decodeNoteIDs(noteIDsJSON)
+	if err != nil {
+		return "", err
+	}
+	value, _, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	plan, err := value.PlanRestore(ctx, id, noteIDs)
+	if err != nil {
+		return "", err
+	}
+	return marshal(restorePlanDTO(plan))
+}
+
+// RestoreSelective imports noteIDsJSON (a JSON array of note IDs) from
+// backupID as new local notes, always taking a mandatory pre-restore safety
+// backup under destination first - see
+// core/account.Account.RestoreSelective.
+func (s *Service) RestoreSelective(requestID, backupID, noteIDsJSON, destination string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	id, err := parseID(backupID)
+	if err != nil {
+		return "", err
+	}
+	noteIDs, err := decodeNoteIDs(noteIDsJSON)
+	if err != nil {
+		return "", err
+	}
+	value, _, err := s.accountState()
+	if err != nil {
+		return "", err
+	}
+	result, err := value.RestoreSelective(ctx, id, noteIDs, destination, time.Now())
+	if err != nil {
+		return "", err
+	}
+	s.emit("notes_restored", map[string]string{"backup_id": backupID})
+	return marshal(restoreResultDTO(result))
+}
+
+// decodeNoteIDs decodes noteIDsJSON (a JSON array of note ID strings) into
+// model.IDs, treating an empty string the same as an empty array.
+func decodeNoteIDs(noteIDsJSON string) ([]model.ID, error) {
+	if noteIDsJSON == "" {
+		return nil, nil
+	}
+	var raw []string
+	if err := strictJSON(noteIDsJSON, &raw); err != nil {
+		return nil, err
+	}
+	return parseIDs(raw)
 }
 
 func (s *Service) RestoreWholeBackup(requestID, backupID, destination string) (string, error) {
@@ -1001,7 +1136,7 @@ func (s *Service) RestoreWholeBackup(requestID, backupID, destination string) (s
 		return "", err
 	}
 	s.emit("collection_restored", map[string]string{"backup_id": backupID})
-	return marshal(result)
+	return marshal(restoreResultDTO(result))
 }
 
 func (s *Service) ImportBackupSet(requestID, location string, kind int) (string, error) {

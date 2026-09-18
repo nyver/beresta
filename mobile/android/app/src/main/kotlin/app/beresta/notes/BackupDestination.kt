@@ -44,6 +44,14 @@ internal object BackupDestination {
     fun restore(context: Context, service: Service, requestId: String, backupId: String): String =
         service.restoreWholeBackup(requestId, backupId, localRoot(context).absolutePath)
 
+    fun restoreSelective(
+        context: Context,
+        service: Service,
+        requestId: String,
+        backupId: String,
+        noteIdsJSON: String,
+    ): String = service.restoreSelective(requestId, backupId, noteIdsJSON, localRoot(context).absolutePath)
+
     fun importSelected(context: Context, service: Service, requestId: String): Int {
         val uri = selected(context) ?: error("no backup destination is selected")
         val sourceRoot = requireNotNull(DocumentFile.fromTreeUri(context, uri))

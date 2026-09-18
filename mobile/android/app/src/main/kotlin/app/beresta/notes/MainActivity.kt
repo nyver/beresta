@@ -315,6 +315,14 @@ class MainActivity : FlutterFragmentActivity() {
             "listBackups" -> service.listBackups(requestId)
             "backupStatus" -> service.backupStatus()
             "previewBackup" -> service.previewBackup(requestId, required(call, "backupId"))
+            "planRestore" -> service.planRestore(requestId, required(call, "backupId"), call.argument<String>("noteIds") ?: "")
+            "restoreSelective" -> BackupDestination.restoreSelective(
+                this,
+                service,
+                requestId,
+                required(call, "backupId"),
+                call.argument<String>("noteIds") ?: "",
+            )
             "restoreBackup" -> BackupDestination.restore(this, service, requestId, required(call, "backupId"))
             "importBackups" -> BackupDestination.importSelected(this, service, requestId)
             "getSettings" -> service.getSettings(requestId)

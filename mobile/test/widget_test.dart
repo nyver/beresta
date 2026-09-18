@@ -509,6 +509,94 @@ void main() {
     },
   );
 
+  testWidgets(
+    "restore options sheet plans a dry run and restores only the addition/update notes as new",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..backupsValue = [
+              {"id": "backup-1", "kind": 1, "created_unix_ms": 0, "corrupt": false},
+            ]
+            ..previewBackupValue = {
+              "note_titles": ["Note A", "Note B"],
+            }
+            ..planRestoreValue = {
+              "entries": [
+                {"note_id": "note-a", "title": "Note A", "kind": "addition"},
+                {"note_id": "note-b", "title": "Note B", "kind": "unchanged"},
+              ],
+              "required_storage_bytes": 2048,
+            }
+            ..restoreSelectiveValue = {
+              "safety_backup": <String, dynamic>{},
+              "new_note_ids": ["note-a"],
+            };
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.backup_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, "Restore"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Note A"), findsOneWidget);
+      expect(find.text("Note B"), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(FilledButton, "Restore selected as new notes"));
+      await tester.pumpAndSettle();
+
+      // "unchanged" is not pre-selected, only "addition" is.
+      final checkboxes = tester.widgetList<CheckboxListTile>(
+        find.byType(CheckboxListTile),
+      );
+      expect(checkboxes.where((c) => c.value == true).length, 1);
+
+      await tester.tap(
+        find.widgetWithText(FilledButton, "Restore selected as new notes"),
+      );
+      await tester.pumpAndSettle();
+
+      expect(gateway.lastRestoreSelectiveNoteIds, ["note-a"]);
+      expect(find.text("Notes restored: 1"), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    "restore options sheet requires an extra confirmation before replacing everything",
+    (tester) async {
+      var restoredBackupId = "";
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..backupsValue = [
+              {"id": "backup-1", "kind": 1, "created_unix_ms": 0, "corrupt": false},
+            ];
+      gateway.onRestoreBackup = (id) => restoredBackupId = id;
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.backup_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, "Restore"));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(OutlinedButton, "Replace from backup"));
+      await tester.pumpAndSettle();
+
+      expect(restoredBackupId, "");
+      expect(
+        find.text(
+          "This verifies the backup, creates a safety backup, and replaces the local collection.",
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.widgetWithText(FilledButton, "Restore"));
+      await tester.pumpAndSettle();
+
+      expect(restoredBackupId, "backup-1");
+      expect(find.text("Restore complete."), findsOneWidget);
+    },
+  );
+
   testWidgets("refreshes notes after the selected workspace finishes syncing", (
     tester,
   ) async {
@@ -816,8 +904,9 @@ class FakeGateway implements CoreGateway {
   Future<bool> selectBackupDestination() async => false;
   @override
   Future<void> createBackup() async {}
+  List<Map<String, dynamic>> backupsValue = [];
   @override
-  Future<List<Map<String, dynamic>>> listBackups() async => [];
+  Future<List<Map<String, dynamic>>> listBackups() async => backupsValue;
   Map<String, dynamic> backupStatusValue = {
     "health": "unknown",
     "last_verified_unix_ms": 0,
@@ -825,10 +914,43 @@ class FakeGateway implements CoreGateway {
   };
   @override
   Future<Map<String, dynamic>> backupStatus() async => backupStatusValue;
+  Map<String, dynamic> previewBackupValue = {"note_titles": <String>[]};
   @override
-  Future<Map<String, dynamic>> previewBackup(String backupId) async => {};
+  Future<Map<String, dynamic>> previewBackup(String backupId) async =>
+      previewBackupValue;
+  Map<String, dynamic> planRestoreValue = {
+    "entries": <Map<String, dynamic>>[],
+    "required_storage_bytes": 0,
+  };
+  List<String>? lastPlanRestoreNoteIds;
   @override
-  Future<void> restoreBackup(String backupId) async {}
+  Future<Map<String, dynamic>> planRestore(
+    String backupId,
+    List<String> noteIds,
+  ) async {
+    lastPlanRestoreNoteIds = noteIds;
+    return planRestoreValue;
+  }
+
+  Map<String, dynamic> restoreSelectiveValue = {
+    "safety_backup": <String, dynamic>{},
+    "new_note_ids": <String>[],
+  };
+  List<String>? lastRestoreSelectiveNoteIds;
+  @override
+  Future<Map<String, dynamic>> restoreSelective(
+    String backupId,
+    List<String> noteIds,
+  ) async {
+    lastRestoreSelectiveNoteIds = noteIds;
+    return restoreSelectiveValue;
+  }
+
+  void Function(String backupId)? onRestoreBackup;
+  @override
+  Future<void> restoreBackup(String backupId) async {
+    onRestoreBackup?.call(backupId);
+  }
   @override
   Future<int> importBackups() async => 0;
   @override

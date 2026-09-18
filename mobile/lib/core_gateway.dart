@@ -95,6 +95,24 @@ abstract interface class CoreGateway {
   /// requirement.
   Future<Map<String, dynamic>> backupStatus();
   Future<Map<String, dynamic>> previewBackup(String backupId);
+
+  /// Computes, without mutating current data, what restoring [noteIds] (or
+  /// every note in the backup when [noteIds] is empty) from [backupId]
+  /// would do - each entry classified "addition", "update", or "unchanged" -
+  /// plus the additional local storage it would need. See
+  /// core/mobileapi.Service.PlanRestore.
+  Future<Map<String, dynamic>> planRestore(String backupId, List<String> noteIds);
+
+  /// Imports [noteIds] from [backupId] as new local notes, always taking a
+  /// mandatory pre-restore safety backup under the app's own local backup
+  /// root first (the same internal destination [createBackup] and
+  /// [restoreBackup] already use - unlike desktop, Android does not ask the
+  /// caller for one). Returns the safety backup and the freshly assigned
+  /// note IDs. See core/mobileapi.Service.RestoreSelective.
+  Future<Map<String, dynamic>> restoreSelective(
+    String backupId,
+    List<String> noteIds,
+  );
   Future<void> restoreBackup(String backupId);
   Future<int> importBackups();
   Future<Map<String, dynamic>> getSettings();
@@ -351,6 +369,28 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<Map<String, dynamic>> previewBackup(String backupId) async =>
       _object(await _invoke("previewBackup", {"backupId": backupId}));
+
+  @override
+  Future<Map<String, dynamic>> planRestore(
+    String backupId,
+    List<String> noteIds,
+  ) async => _object(
+    await _invoke("planRestore", {
+      "backupId": backupId,
+      "noteIds": jsonEncode(noteIds),
+    }),
+  );
+
+  @override
+  Future<Map<String, dynamic>> restoreSelective(
+    String backupId,
+    List<String> noteIds,
+  ) async => _object(
+    await _invoke("restoreSelective", {
+      "backupId": backupId,
+      "noteIds": jsonEncode(noteIds),
+    }),
+  );
 
   @override
   Future<void> restoreBackup(String backupId) =>

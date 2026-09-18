@@ -614,15 +614,39 @@ func (a *Account) verifyBackupForRestore(ctx context.Context, db store.Executor,
 	return nil
 }
 
+// restoreSwapFS abstracts the rename and file-write calls
+// restoreDatabaseFile sequences across its move-aside, publish, and
+// key-envelope boundaries, so tests can inject a failure at each one (see
+// backupFS's identical role for CreateBackup) to prove that a fault at any
+// single boundary always still exposes either the complete original
+// database or the complete restored one - never a mix, and never a live
+// account left without a usable database connection at all (see
+// specs/backup-and-recovery.md, "Restore is interrupted"). Production code
+// always uses the default osRestoreFS{}.
+type restoreSwapFS interface {
+	rename(oldpath, newpath string) error
+	writeFile(path string, data []byte, perm os.FileMode) error
+}
+
+type osRestoreFS struct{}
+
+func (osRestoreFS) rename(oldpath, newpath string) error { return os.Rename(oldpath, newpath) }
+func (osRestoreFS) writeFile(path string, data []byte, perm os.FileMode) error {
+	return os.WriteFile(path, data, perm)
+}
+
+var currentRestoreFS restoreSwapFS = osRestoreFS{}
+
 // restoreDatabaseFile atomically replaces the live database file at
 // databasePath with preparedPath (already a complete valid SQLCipher
 // database encrypted under freshKey) and updates the on-disk key envelope
-// to match. On any failure it restores the original file and envelope and
-// reopens the original database with the original key, so the account
-// remains fully usable with its pre-restore data even though the restore
-// did not complete; the returned error in that case still reports the
-// failure. The caller must have already closed its live *sql.DB
-// connection.
+// to match. On any failure - including one while moving the current
+// database aside, before the swap itself begins - it restores the original
+// file and envelope and reopens the original database with the original
+// key, so the account remains fully usable with its pre-restore data even
+// though the restore did not complete; the returned error in that case
+// still reports the failure. The caller must have already closed its live
+// *sql.DB connection.
 func restoreDatabaseFile(ctx context.Context, databasePath, preparedPath string, wrapper keystore.Wrapper, freshKey *corecrypto.Secret, envelope []byte) (db *sql.DB, err error) {
 	envelopeFile := envelopePath(databasePath)
 	oldEnvelope, err := os.ReadFile(envelopeFile)
@@ -632,29 +656,29 @@ func restoreDatabaseFile(ctx context.Context, databasePath, preparedPath string,
 
 	suffix := fmt.Sprintf(".pre-restore-rollback-%d", time.Now().UnixMilli())
 	var movedAside []string
-	for _, ext := range []string{"", "-wal", "-shm"} {
-		src := databasePath + ext
-		if _, statErr := os.Stat(src); statErr != nil {
-			continue
-		}
-		dst := src + suffix
-		if renameErr := os.Rename(src, dst); renameErr != nil {
-			for _, moved := range movedAside {
-				os.Rename(moved, strings.TrimSuffix(moved, suffix))
-			}
-			return nil, fmt.Errorf("account: move current database aside: %w", renameErr)
-		}
-		movedAside = append(movedAside, dst)
-	}
+	// preparedSwapped is set only once preparedPath has actually been
+	// renamed to databasePath below. Until then, databasePath (and any
+	// -wal/-shm beside it) is either still the untouched original database
+	// or does not exist yet (already moved aside), so rollback must never
+	// remove it; removing it unconditionally would delete the original,
+	// pre-restore database on a failure inside the move-aside loop itself.
+	preparedSwapped := false
 
+	// rollback undoes every step taken so far - whichever boundary cause
+	// came from, including one inside the move-aside loop below - and
+	// always attempts to reopen the pre-restore database, so a caller
+	// never observes a live account stuck with no database connection
+	// after a failed restore.
 	rollback := func(cause error) (*sql.DB, error) {
-		os.Remove(databasePath)
-		os.Remove(databasePath + "-wal")
-		os.Remove(databasePath + "-shm")
-		for _, moved := range movedAside {
-			os.Rename(moved, strings.TrimSuffix(moved, suffix))
+		if preparedSwapped {
+			os.Remove(databasePath)
+			os.Remove(databasePath + "-wal")
+			os.Remove(databasePath + "-shm")
 		}
-		if writeErr := os.WriteFile(envelopeFile, oldEnvelope, 0o600); writeErr != nil {
+		for _, moved := range movedAside {
+			currentRestoreFS.rename(moved, strings.TrimSuffix(moved, suffix))
+		}
+		if writeErr := currentRestoreFS.writeFile(envelopeFile, oldEnvelope, 0o600); writeErr != nil {
 			return nil, fmt.Errorf("%w (additionally failed to restore the key envelope: %v)", cause, writeErr)
 		}
 		oldKey, _, unwrapErr := store.LoadOrCreateDatabaseKey(ctx, wrapper, localDeviceKeyID, oldEnvelope)
@@ -669,10 +693,23 @@ func restoreDatabaseFile(ctx context.Context, databasePath, preparedPath string,
 		return reopened, cause
 	}
 
-	if err := os.Rename(preparedPath, databasePath); err != nil {
+	for _, ext := range []string{"", "-wal", "-shm"} {
+		src := databasePath + ext
+		if _, statErr := os.Stat(src); statErr != nil {
+			continue
+		}
+		dst := src + suffix
+		if renameErr := currentRestoreFS.rename(src, dst); renameErr != nil {
+			return rollback(fmt.Errorf("account: move current database aside: %w", renameErr))
+		}
+		movedAside = append(movedAside, dst)
+	}
+
+	if err := currentRestoreFS.rename(preparedPath, databasePath); err != nil {
 		return rollback(fmt.Errorf("account: move restored database into place: %w", err))
 	}
-	if err := os.WriteFile(envelopeFile, envelope, 0o600); err != nil {
+	preparedSwapped = true
+	if err := currentRestoreFS.writeFile(envelopeFile, envelope, 0o600); err != nil {
 		return rollback(fmt.Errorf("account: write restored key envelope: %w", err))
 	}
 	newDB, _, err := store.Open(ctx, databasePath, freshKey)

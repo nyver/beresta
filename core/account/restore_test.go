@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -247,6 +248,32 @@ func TestRestoreWholeReplacesLiveDatabaseAndKeepsSafetyBackup(t *testing.T) {
 	if !found {
 		t.Fatal("pre-restore safety backup should contain the state that existed immediately before the restore")
 	}
+
+	// A successful whole restore must survive a restart too: reopening
+	// from disk must expose the restored collection, not silently revert
+	// to the pre-restore state or some mix of the two
+	// (specs/backup-and-recovery.md, "Successful whole restore").
+	databasePath := created.databasePath
+	wrapper := created.wrapper
+	if err := created.Lock(); err != nil {
+		t.Fatalf("Lock before simulated restart: %v", err)
+	}
+	reopened, err := Unlock(ctx, UnlockOptions{
+		DatabasePath: databasePath,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+	})
+	if err != nil {
+		t.Fatalf("Unlock (simulated restart): %v", err)
+	}
+	t.Cleanup(func() { reopened.Lock() })
+
+	if _, err := reopened.GetNote(ctx, original.ID); err != nil {
+		t.Fatalf("original note missing after restart: %v", err)
+	}
+	if _, err := reopened.GetNote(ctx, afterBackup.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("post-backup note error after restart = %v, want ErrNotFound", err)
+	}
 }
 
 func TestRestoreWholeRejectsCorruptBackupAndLeavesDataUnchanged(t *testing.T) {
@@ -415,4 +442,211 @@ func TestRestoreWholeRepublishesABlobMissingFromTheLiveStore(t *testing.T) {
 	if _, _, err := created.ReadAttachment(ctx, workspaceID, attachment.BlobID, &out); err != nil || out.String() != "payload" {
 		t.Fatalf("ReadAttachment after republish: content=%q err=%v", out.String(), err)
 	}
+}
+
+// restoreFaultFS is a restoreSwapFS that fails the first rename or writeFile
+// call its match predicate accepts, then falls through to the real
+// filesystem for every call after (including rollback's own undo calls),
+// so a test can inject exactly one fault at a chosen swap/key-envelope
+// boundary without also breaking the rollback path that must recover from
+// it.
+type restoreFaultFS struct {
+	renameMatch func(oldpath, newpath string) bool
+	renameErr   error
+	renameFired bool
+
+	writeFileMatch func(path string) bool
+	writeFileErr   error
+	writeFileFired bool
+}
+
+func (f *restoreFaultFS) rename(oldpath, newpath string) error {
+	if !f.renameFired && f.renameMatch != nil && f.renameMatch(oldpath, newpath) {
+		f.renameFired = true
+		return f.renameErr
+	}
+	return os.Rename(oldpath, newpath)
+}
+
+func (f *restoreFaultFS) writeFile(path string, data []byte, perm os.FileMode) error {
+	if !f.writeFileFired && f.writeFileMatch != nil && f.writeFileMatch(path) {
+		f.writeFileFired = true
+		return f.writeFileErr
+	}
+	return os.WriteFile(path, data, perm)
+}
+
+// assertRestoreRolledBackToOriginal proves a failed RestoreWhole leaves
+// created immediately usable with its pre-restore data, and that a
+// simulated restart (Lock then Unlock from the same on-disk path and
+// wrapper, exactly like TestNotesNotebooksTagsAndAttachmentsSurviveRestart)
+// exposes that same original data - never a mix of old and restored
+// content, and never an account stuck without a usable database connection
+// (specs/backup-and-recovery.md, "Restore is interrupted").
+func assertRestoreRolledBackToOriginal(t *testing.T, created *Account, originalNoteID model.ID, divergedTitle string) {
+	t.Helper()
+	ctx := context.Background()
+
+	if _, err := created.GetNote(ctx, originalNoteID); err != nil {
+		t.Fatalf("original note missing immediately after a rolled-back restore: %v", err)
+	}
+	if _, err := created.CreateNote(ctx, defaultWorkspaceID(t, created), model.Nil, "Still works"); err != nil {
+		t.Fatalf("CreateNote immediately after a rolled-back restore: %v", err)
+	}
+
+	databasePath := created.databasePath
+	wrapper := created.wrapper
+	if err := created.Lock(); err != nil {
+		t.Fatalf("Lock before simulated restart: %v", err)
+	}
+	reopened, err := Unlock(ctx, UnlockOptions{
+		DatabasePath: databasePath,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+	})
+	if err != nil {
+		t.Fatalf("Unlock (simulated restart): %v", err)
+	}
+	t.Cleanup(func() { reopened.Lock() })
+
+	notes, err := reopened.ListNotes(ctx, defaultWorkspaceID(t, reopened))
+	if err != nil {
+		t.Fatalf("ListNotes after simulated restart: %v", err)
+	}
+	var titles []string
+	for _, n := range notes {
+		titles = append(titles, n.Title.Value)
+	}
+	for _, want := range []string{divergedTitle, "Still works"} {
+		found := false
+		for _, title := range titles {
+			if title == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected %q among notes after simulated restart, got %v", want, titles)
+		}
+	}
+}
+
+// TestRestoreWholeMoveAsideFaultLeavesAccountUsableAndSurvivesRestart covers
+// task 5.6: a failure while moving the current database aside - the very
+// first swap boundary, before any prepared content has touched
+// databasePath - must not delete the still-untouched original database nor
+// leave the live Account without a database connection (regression test for
+// a bug where this boundary's failure path returned (nil, err) directly
+// instead of reopening the original database like every other failure path
+// here does).
+func TestRestoreWholeMoveAsideFaultLeavesAccountUsableAndSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+	original, err := created.CreateNote(ctx, workspaceID, model.Nil, "Before backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupsRoot := t.TempDir()
+	backup, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+	if _, err := created.CreateNote(ctx, workspaceID, model.Nil, "Diverged after backup"); err != nil {
+		t.Fatal(err)
+	}
+
+	databasePath := created.databasePath
+	fault := &restoreFaultFS{
+		renameMatch: func(oldpath, _ string) bool { return oldpath == databasePath },
+		renameErr:   &os.LinkError{Op: "rename", Err: syscall.EACCES},
+	}
+	currentRestoreFS = fault
+	defer func() { currentRestoreFS = osRestoreFS{} }()
+
+	if _, err := created.RestoreWhole(ctx, backup.ID, backupsRoot, time.Now()); err == nil {
+		t.Fatal("expected RestoreWhole to fail when moving the current database aside fails")
+	}
+	if !fault.renameFired {
+		t.Fatal("test did not actually exercise the move-aside fault")
+	}
+
+	assertRestoreRolledBackToOriginal(t, created, original.ID, "Diverged after backup")
+}
+
+// TestRestoreWholeSwapFaultLeavesAccountUsableAndSurvivesRestart covers the
+// second swap boundary: the prepared (restored) database's rename into
+// databasePath itself failing, after the original has already been moved
+// aside.
+func TestRestoreWholeSwapFaultLeavesAccountUsableAndSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+	original, err := created.CreateNote(ctx, workspaceID, model.Nil, "Before backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupsRoot := t.TempDir()
+	backup, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+	if _, err := created.CreateNote(ctx, workspaceID, model.Nil, "Diverged after backup"); err != nil {
+		t.Fatal(err)
+	}
+
+	databasePath := created.databasePath
+	fault := &restoreFaultFS{
+		renameMatch: func(_, newpath string) bool { return newpath == databasePath },
+		renameErr:   &os.LinkError{Op: "rename", Err: syscall.ENOSPC},
+	}
+	currentRestoreFS = fault
+	defer func() { currentRestoreFS = osRestoreFS{} }()
+
+	if _, err := created.RestoreWhole(ctx, backup.ID, backupsRoot, time.Now()); err == nil {
+		t.Fatal("expected RestoreWhole to fail when swapping the restored database into place fails")
+	}
+	if !fault.renameFired {
+		t.Fatal("test did not actually exercise the swap fault")
+	}
+
+	assertRestoreRolledBackToOriginal(t, created, original.ID, "Diverged after backup")
+}
+
+// TestRestoreWholeEnvelopeWriteFaultLeavesAccountUsableAndSurvivesRestart
+// covers the key-envelope boundary: writing the restored database's new key
+// envelope failing after the database file itself has already been
+// swapped in.
+func TestRestoreWholeEnvelopeWriteFaultLeavesAccountUsableAndSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+	original, err := created.CreateNote(ctx, workspaceID, model.Nil, "Before backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupsRoot := t.TempDir()
+	backup, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+	if _, err := created.CreateNote(ctx, workspaceID, model.Nil, "Diverged after backup"); err != nil {
+		t.Fatal(err)
+	}
+
+	envelopeFile := envelopePath(created.databasePath)
+	fault := &restoreFaultFS{
+		writeFileMatch: func(path string) bool { return path == envelopeFile },
+		writeFileErr:   &os.PathError{Op: "write", Path: envelopeFile, Err: syscall.ENOSPC},
+	}
+	currentRestoreFS = fault
+	defer func() { currentRestoreFS = osRestoreFS{} }()
+
+	if _, err := created.RestoreWhole(ctx, backup.ID, backupsRoot, time.Now()); err == nil {
+		t.Fatal("expected RestoreWhole to fail when writing the restored key envelope fails")
+	}
+	if !fault.writeFileFired {
+		t.Fatal("test did not actually exercise the key-envelope write fault")
+	}
+
+	assertRestoreRolledBackToOriginal(t, created, original.ID, "Diverged after backup")
 }

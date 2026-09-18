@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 
+	corecrypto "github.com/beresta-app/beresta/core/crypto"
 	"github.com/beresta-app/beresta/core/model"
 	"github.com/beresta-app/beresta/core/store"
 )
@@ -286,5 +289,169 @@ func TestAttachmentManifestEncodeDecodeRoundTrips(t *testing.T) {
 		if decoded.chunks[i] != payload.chunks[i] {
 			t.Fatalf("chunk %d = %+v, want %+v", i, decoded.chunks[i], payload.chunks[i])
 		}
+	}
+}
+
+// failingReaderAfter returns the bytes in remaining, then err on every
+// subsequent read, simulating a source that fails partway through (a
+// disk-full or permission-revoked condition on the volume the source file
+// itself lives on, or a removable/network device failing mid-read).
+type failingReaderAfter struct {
+	remaining []byte
+	err       error
+}
+
+func (r *failingReaderAfter) Read(p []byte) (int, error) {
+	if len(r.remaining) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.remaining)
+	r.remaining = r.remaining[n:]
+	return n, nil
+}
+
+// TestAddAttachmentSourceReadFailureDiskFullLeavesNoRowOrBlob and
+// TestAddAttachmentSourceReadFailurePermissionDeniedLeavesNoRowOrBlob cover
+// task 5.2's "before encryption" boundary: stagePlaintext buffers the
+// entire source into a staging temp file before AddAttachment ever computes
+// a content address or seals a chunk, so a read failure partway through
+// that copy must fail closed before any row, blob, or leftover staging file
+// exists — and the caller must see the underlying OS condition, not a
+// generic error.
+func TestAddAttachmentSourceReadFailureDiskFullLeavesNoRowOrBlob(t *testing.T) {
+	testAddAttachmentSourceReadFailureLeavesNoRowOrBlob(t, syscall.ENOSPC)
+}
+
+func TestAddAttachmentSourceReadFailurePermissionDeniedLeavesNoRowOrBlob(t *testing.T) {
+	testAddAttachmentSourceReadFailureLeavesNoRowOrBlob(t, syscall.EACCES)
+}
+
+func testAddAttachmentSourceReadFailureLeavesNoRowOrBlob(t *testing.T, cause error) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Untitled")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := &failingReaderAfter{
+		remaining: []byte("partial content read before the fault"),
+		err:       &os.PathError{Op: "read", Path: "source", Err: cause},
+	}
+	if _, err := created.AddAttachment(ctx, workspaceID, note.ID, "notes.txt", "text/plain", source); !errors.Is(err, cause) {
+		t.Fatalf("AddAttachment() error = %v, want it to wrap %v", err, cause)
+	}
+
+	var attachmentRows int
+	if err := created.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM attachments`).Scan(&attachmentRows); err != nil {
+		t.Fatal(err)
+	}
+	if attachmentRows != 0 {
+		t.Fatalf("attachment rows = %d, want 0 after a staging read failure", attachmentRows)
+	}
+	ids, err := store.NoteAttachmentBlobIDs(ctx, created.db, note.ID)
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("NoteAttachmentBlobIDs = %v, err = %v, want none", ids, err)
+	}
+	published, err := created.blobs.ListPublished()
+	if err != nil || len(published) != 0 {
+		t.Fatalf("ListPublished() = %v, err = %v, want none", published, err)
+	}
+	entries, err := os.ReadDir(created.blobs.TempDir())
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read staging directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("staging directory has %d leftover entries after a failed stage, want 0", len(entries))
+	}
+}
+
+// TestAddAttachmentCrashBetweenPublishAndNoteReferenceCommitRecoversOnRetry
+// covers task 5.2's database-reference-commit boundary. AddAttachment
+// durably publishes the blob and commits its attachments row
+// (publishAndRecordAttachment) before committing the note's separate
+// reference to it (commitNoteMetadata), as two different local
+// transactions. A crash between the two leaves a fully valid,
+// non-placeholder attachment row that no note references yet. This test
+// reproduces exactly that state by calling the same unexported publish step
+// AddAttachment itself uses and stopping there (standing in for the
+// process dying before commitNoteMetadata ever runs), then proves the
+// documented recovery path: a retried AddAttachment call with the same
+// content and note finds the already-published, already-recorded blob by
+// its content address and only needs to complete the missing note
+// reference, without re-publishing or re-encrypting.
+func TestAddAttachmentCrashBetweenPublishAndNoteReferenceCommitRecoversOnRetry(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Untitled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("crash between publish and note reference commit")
+
+	db, entry, _, _, err := created.workspaceSession(workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged, err := created.stagePlaintext(bytes.NewReader(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		staged.Close()
+		os.Remove(staged.Name())
+	}()
+	blobIDBytes, totalSize, err := corecrypto.ComputeBlobID(ctx, corecrypto.CryptoProfileV1, entry.Key, workspaceID.Bytes(), staged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobID, err := store.ParseBlobID(blobIDBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := created.publishAndRecordAttachment(ctx, db, entry, workspaceID, blobID, staged, totalSize, "notes.txt", "text/plain"); err != nil {
+		t.Fatalf("publishAndRecordAttachment: %v", err)
+	}
+
+	// The row and blob exist, but the note does not reference it yet - the
+	// simulated crash window.
+	row, err := store.GetAttachment(ctx, created.db, blobID)
+	if err != nil {
+		t.Fatalf("GetAttachment after simulated crash: %v", err)
+	}
+	if row.IsPlaceholder() {
+		t.Fatal("attachment row should have a full manifest, not a placeholder")
+	}
+	ids, err := store.NoteAttachmentBlobIDs(ctx, created.db, note.ID)
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("NoteAttachmentBlobIDs before retry = %v, err = %v, want none", ids, err)
+	}
+
+	// The retried call (same note, content, and metadata a UI retry would
+	// resend) must recover cleanly: dedup finds the existing published,
+	// recorded blob and only completes the missing note reference.
+	attachment, err := created.AddAttachment(ctx, workspaceID, note.ID, "notes.txt", "text/plain", bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("AddAttachment retry after simulated crash: %v", err)
+	}
+	if attachment.BlobID != blobID {
+		t.Fatalf("retried AddAttachment BlobID = %x, want %x", attachment.BlobID, blobID)
+	}
+	ids, err = store.NoteAttachmentBlobIDs(ctx, created.db, note.ID)
+	if err != nil || len(ids) != 1 || ids[0] != blobID {
+		t.Fatalf("NoteAttachmentBlobIDs after retry = %v, err = %v, want [%x]", ids, err, blobID)
+	}
+
+	var out bytes.Buffer
+	if _, _, err := created.ReadAttachment(ctx, workspaceID, blobID, &out); err != nil {
+		t.Fatalf("ReadAttachment after recovered commit: %v", err)
+	}
+	if !bytes.Equal(out.Bytes(), content) {
+		t.Fatal("recovered attachment content does not match what was staged before the simulated crash")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -20,6 +21,9 @@ type injectingFile struct {
 }
 
 func (f *injectingFile) Write(p []byte) (int, error) {
+	if f.fs.writeErr != nil {
+		return 0, f.fs.writeErr
+	}
 	if f.fs.failWrite {
 		return 0, errors.New("injected write failure")
 	}
@@ -27,6 +31,9 @@ func (f *injectingFile) Write(p []byte) (int, error) {
 }
 
 func (f *injectingFile) Sync() error {
+	if f.fs.syncErr != nil {
+		return f.fs.syncErr
+	}
 	if f.fs.failSync {
 		return errors.New("injected fsync failure")
 	}
@@ -35,12 +42,20 @@ func (f *injectingFile) Sync() error {
 
 // injectingFS lets a test simulate termination at each durability boundary
 // Publish sequences: mid-write, at fsync (after data is written but before
-// it is durable), and at the atomic rename (after data is durable but
-// before it is visible at the blob's content-addressed path).
+// it is durable), at the atomic rename (after data is durable but before it
+// is visible at the blob's content-addressed path), and at the final
+// directory creation the rename depends on. writeErr/syncErr/renameErr let a
+// test inject a specific OS-flavored error (disk-full, permission-revoked)
+// instead of the generic failWrite/failSync/failRename sentinels, so
+// assertions can also check the caller sees that condition surfaced rather
+// than swallowed.
 type injectingFS struct {
 	osBlobFS
 	failWrite, failSync, failRename bool
+	writeErr, syncErr, renameErr    error
+	mkdirFinalErr                   error
 	renameCalled                    bool
+	mkdirAllCalls                   int
 }
 
 func (f *injectingFS) createTemp(dir, pattern string) (blobFile, error) {
@@ -53,10 +68,25 @@ func (f *injectingFS) createTemp(dir, pattern string) (blobFile, error) {
 
 func (f *injectingFS) rename(oldpath, newpath string) error {
 	f.renameCalled = true
+	if f.renameErr != nil {
+		return f.renameErr
+	}
 	if f.failRename {
 		return errors.New("injected rename failure")
 	}
 	return f.osBlobFS.rename(oldpath, newpath)
+}
+
+// mkdirAll fails only the second call Publish makes (creating the final
+// blob directory, immediately before the rename): the first call (the
+// shared staging/tmp directory) must keep succeeding so every test can
+// still create its temp file and reach the boundary under test.
+func (f *injectingFS) mkdirAll(path string) error {
+	f.mkdirAllCalls++
+	if f.mkdirAllCalls > 1 && f.mkdirFinalErr != nil {
+		return f.mkdirFinalErr
+	}
+	return f.osBlobFS.mkdirAll(path)
 }
 
 func newTestBlobStore(t *testing.T) (*BlobStore, *injectingFS) {
@@ -203,6 +233,103 @@ func TestBlobStorePublishTerminatedAtRenameLeavesNoVisibleBlob(t *testing.T) {
 	}
 	if !fs.renameCalled {
 		t.Fatal("rename was never attempted; test did not exercise the intended boundary")
+	}
+	assertBlobNotPublished(t, store, id)
+}
+
+// The following four tests cover task 5.2: the same three durability
+// boundaries above, but with the specific OS-flavored conditions attachment
+// publication must survive in practice rather than a generic injected
+// error — a full destination volume (disk-full) encountered while writing
+// or fsyncing the ciphertext, and a revoked ACL/permission (permission-
+// denied) encountered while writing or while creating the destination
+// directory just before the atomic rename. Every case must leave the same
+// postcondition as the generic boundary tests: no visible blob, no leftover
+// temp file, and the caller sees the underlying OS condition rather than a
+// swallowed or generic error.
+func TestBlobStorePublishTerminatedDuringWriteDiskFullLeavesNoVisibleBlob(t *testing.T) {
+	store, fs := newTestBlobStore(t)
+	fs.writeErr = &os.PathError{Op: "write", Path: "blob-tmp", Err: syscall.ENOSPC}
+	id := testBlobID(t, 22)
+
+	_, err := store.Publish(context.Background(), id, func(w io.Writer) error {
+		_, werr := w.Write([]byte("ciphertext-chunk"))
+		return werr
+	})
+	if !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("Publish() error = %v, want it to wrap syscall.ENOSPC", err)
+	}
+	assertBlobNotPublished(t, store, id)
+}
+
+func TestBlobStorePublishTerminatedAtFsyncDiskFullLeavesNoVisibleBlob(t *testing.T) {
+	store, fs := newTestBlobStore(t)
+	fs.syncErr = &os.PathError{Op: "fsync", Path: "blob-tmp", Err: syscall.ENOSPC}
+	id := testBlobID(t, 23)
+
+	_, err := store.Publish(context.Background(), id, func(w io.Writer) error {
+		_, werr := w.Write([]byte("ciphertext-durable-pending"))
+		return werr
+	})
+	if !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("Publish() error = %v, want it to wrap syscall.ENOSPC", err)
+	}
+	assertBlobNotPublished(t, store, id)
+}
+
+func TestBlobStorePublishTerminatedDuringWritePermissionDeniedLeavesNoVisibleBlob(t *testing.T) {
+	store, fs := newTestBlobStore(t)
+	fs.writeErr = &os.PathError{Op: "write", Path: "blob-tmp", Err: syscall.EACCES}
+	id := testBlobID(t, 24)
+
+	_, err := store.Publish(context.Background(), id, func(w io.Writer) error {
+		_, werr := w.Write([]byte("ciphertext-chunk"))
+		return werr
+	})
+	if !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("Publish() error = %v, want it to wrap syscall.EACCES", err)
+	}
+	assertBlobNotPublished(t, store, id)
+}
+
+func TestBlobStorePublishTerminatedAtRenamePermissionDeniedLeavesNoVisibleBlob(t *testing.T) {
+	store, fs := newTestBlobStore(t)
+	fs.renameErr = &os.LinkError{Op: "rename", Err: syscall.EACCES}
+	id := testBlobID(t, 25)
+
+	_, err := store.Publish(context.Background(), id, func(w io.Writer) error {
+		_, werr := w.Write([]byte("ciphertext-fsynced-but-not-renamed"))
+		return werr
+	})
+	if !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("Publish() error = %v, want it to wrap syscall.EACCES", err)
+	}
+	if !fs.renameCalled {
+		t.Fatal("rename was never attempted; test did not exercise the intended boundary")
+	}
+	assertBlobNotPublished(t, store, id)
+}
+
+// TestBlobStorePublishTerminatedAtFinalDirectoryCreationPermissionDeniedLeavesNoVisibleBlob
+// covers the mkdirAll step Publish runs immediately before its rename (the
+// two-level content-addressed fan-out directory, created lazily on first
+// use): a revoked ACL on the blob store's root can fail here instead of at
+// the rename call itself, and must produce the identical no-partial-publish
+// postcondition.
+func TestBlobStorePublishTerminatedAtFinalDirectoryCreationPermissionDeniedLeavesNoVisibleBlob(t *testing.T) {
+	store, fs := newTestBlobStore(t)
+	fs.mkdirFinalErr = &os.PathError{Op: "mkdirall", Path: "blob-root", Err: syscall.EACCES}
+	id := testBlobID(t, 26)
+
+	_, err := store.Publish(context.Background(), id, func(w io.Writer) error {
+		_, werr := w.Write([]byte("ciphertext"))
+		return werr
+	})
+	if !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("Publish() error = %v, want it to wrap syscall.EACCES", err)
+	}
+	if fs.renameCalled {
+		t.Fatal("rename was attempted despite the final directory failing to be created")
 	}
 	assertBlobNotPublished(t, store, id)
 }

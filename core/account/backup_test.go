@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -328,6 +330,251 @@ func TestCreateBackupRejectsInsufficientCapacity(t *testing.T) {
 
 	if _, err := created.CreateBackup(ctx, t.TempDir(), store.BackupKindManual, time.Now()); err != ErrInsufficientBackupCapacity {
 		t.Fatalf("CreateBackup error = %v, want ErrInsufficientBackupCapacity", err)
+	}
+}
+
+// injectingBackupFS lets a test fail CreateBackup at a single new
+// staging/publish boundary (staging directory creation, manifest write, or
+// the publish rename) while every other call runs against the real
+// filesystem, or corrupt a staged file immediately after the manifest is
+// durably written to simulate CreateBackup's own pre-publish candidate
+// validation finding a mismatch. It mirrors core/store's injectingFS.
+type injectingBackupFS struct {
+	osBackupFS
+	failMkdirTemp             error
+	failSyncedWrite           error
+	failRename                error
+	corruptAfterManifestWrite func(stagingDir string) error
+}
+
+func (f *injectingBackupFS) mkdirTemp(dir, pattern string) (string, error) {
+	if f.failMkdirTemp != nil {
+		return "", f.failMkdirTemp
+	}
+	return f.osBackupFS.mkdirTemp(dir, pattern)
+}
+
+func (f *injectingBackupFS) syncedWrite(path string, data []byte, perm os.FileMode) error {
+	if f.failSyncedWrite != nil {
+		return f.failSyncedWrite
+	}
+	if err := f.osBackupFS.syncedWrite(path, data, perm); err != nil {
+		return err
+	}
+	if f.corruptAfterManifestWrite != nil {
+		return f.corruptAfterManifestWrite(filepath.Dir(path))
+	}
+	return nil
+}
+
+func (f *injectingBackupFS) rename(oldpath, newpath string) error {
+	if f.failRename != nil {
+		return f.failRename
+	}
+	return f.osBackupFS.rename(oldpath, newpath)
+}
+
+// TestCreateBackupStagingDirectoryFailurePreservesExistingValidBackups,
+// TestCreateBackupManifestWriteFailurePreservesExistingValidBackups, and
+// TestCreateBackupPublishRenameFailurePreservesExistingValidBackups cover
+// task 5.3's crash-safe publication boundaries: a disk-full or
+// permission-revoked fault at staging directory creation, the manifest's
+// durable write, or the atomic publish rename must fail the new backup
+// attempt closed and leave every previously published, valid backup exactly
+// as it was (specs/backup-and-recovery.md, "Process ends during backup" and
+// "Backup destination loses permission").
+func TestCreateBackupStagingDirectoryFailurePreservesExistingValidBackups(t *testing.T) {
+	testCreateBackupBoundaryFailurePreservesExistingValidBackups(t, syscall.ENOSPC, func(fake *injectingBackupFS, cause error) {
+		fake.failMkdirTemp = cause
+	})
+}
+
+func TestCreateBackupManifestWriteFailurePreservesExistingValidBackups(t *testing.T) {
+	testCreateBackupBoundaryFailurePreservesExistingValidBackups(t, syscall.EACCES, func(fake *injectingBackupFS, cause error) {
+		fake.failSyncedWrite = cause
+	})
+}
+
+func TestCreateBackupPublishRenameFailurePreservesExistingValidBackups(t *testing.T) {
+	testCreateBackupBoundaryFailurePreservesExistingValidBackups(t, syscall.ENOSPC, func(fake *injectingBackupFS, cause error) {
+		fake.failRename = cause
+	})
+}
+
+func testCreateBackupBoundaryFailurePreservesExistingValidBackups(t *testing.T, cause syscall.Errno, configure func(*injectingBackupFS, error)) {
+	t.Helper()
+	ctx := context.Background()
+	created := createTestAccount(t)
+	backupsRoot := t.TempDir()
+
+	existing, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatalf("CreateBackup (existing): %v", err)
+	}
+
+	wrapped := &os.PathError{Op: "write", Path: "backup", Err: cause}
+	fake := &injectingBackupFS{}
+	configure(fake, wrapped)
+	previous := currentBackupFS
+	currentBackupFS = fake
+	defer func() { currentBackupFS = previous }()
+
+	if _, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, time.Now()); !errors.Is(err, cause) {
+		t.Fatalf("CreateBackup (fault-injected) error = %v, want it to wrap %v", err, cause)
+	}
+
+	all, err := store.ListValidBackups(ctx, created.db, store.BackupKindManual)
+	if err != nil || len(all) != 1 || all[0].ID != existing.ID {
+		t.Fatalf("ListValidBackups after fault-injected CreateBackup = %v, err = %v, want only %v", all, err, existing.ID)
+	}
+	if err := created.VerifyBackup(ctx, existing.ID, time.Now()); err != nil {
+		t.Fatalf("VerifyBackup (pre-existing backup) after fault-injected CreateBackup: %v", err)
+	}
+	entries, err := os.ReadDir(backupsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("backup destination has %d entries after a fault-injected CreateBackup, want exactly the one pre-existing valid backup set: %v", len(entries), entries)
+	}
+}
+
+// TestCreateBackupCandidateValidationFailureLeavesNoPublishedSetAndPreservesExistingValidBackups
+// covers the candidate-validation boundary
+// (specs/backup-and-recovery.md, "Crash-safe backup publication": "write to
+// staging, validate the complete candidate, and publish it atomically").
+// Corrupting a staged file immediately after the manifest is durably
+// written, before CreateBackup's own pre-publish VerifyManifest pass,
+// simulates the candidate failing that validation: CreateBackup must not
+// publish, must not record a catalog entry, and must not report success,
+// while any previously published valid backup remains untouched.
+func TestCreateBackupCandidateValidationFailureLeavesNoPublishedSetAndPreservesExistingValidBackups(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	backupsRoot := t.TempDir()
+
+	existing, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatalf("CreateBackup (existing): %v", err)
+	}
+
+	fake := &injectingBackupFS{
+		corruptAfterManifestWrite: func(stagingDir string) error {
+			return os.WriteFile(filepath.Join(stagingDir, backupSnapshotFile), []byte("corrupted before validation"), 0o600)
+		},
+	}
+	previous := currentBackupFS
+	currentBackupFS = fake
+	defer func() { currentBackupFS = previous }()
+
+	if _, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, time.Now()); err == nil {
+		t.Fatal("CreateBackup should fail when candidate validation detects a mismatch")
+	}
+
+	all, err := store.ListBackups(ctx, created.db, store.BackupKindManual)
+	if err != nil || len(all) != 1 || all[0].ID != existing.ID {
+		t.Fatalf("ListBackups after failed candidate validation = %v, err = %v, want only %v", all, err, existing.ID)
+	}
+	entries, err := os.ReadDir(backupsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("backup destination has %d entries after failed candidate validation, want exactly the one pre-existing valid backup set: %v", len(entries), entries)
+	}
+	if err := created.VerifyBackup(ctx, existing.ID, time.Now()); err != nil {
+		t.Fatalf("VerifyBackup (pre-existing backup) after failed candidate validation: %v", err)
+	}
+}
+
+// TestCreateBackupReportsSuccessOnlyAfterPublicationAndVerification covers
+// the success path of the same requirement: a fresh backup's own returned
+// record, and its catalog row, must already carry a verified timestamp
+// without waiting for a separate startup VerifyBackup sweep.
+func TestCreateBackupReportsSuccessOnlyAfterPublicationAndVerification(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	now := time.Now()
+
+	backup, err := created.CreateBackup(ctx, t.TempDir(), store.BackupKindManual, now)
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+	if backup.VerifiedUnixMS == nil || *backup.VerifiedUnixMS != now.UnixMilli() {
+		t.Fatalf("CreateBackup returned record VerifiedUnixMS = %v, want %d", backup.VerifiedUnixMS, now.UnixMilli())
+	}
+	stored, err := store.GetBackup(ctx, created.db, backup.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Corrupt || stored.VerifiedUnixMS == nil {
+		t.Fatalf("stored backup = %+v, want Corrupt=false and VerifiedUnixMS set", stored)
+	}
+}
+
+// TestCleanupBackupStagingRemovesStaleDirectoriesAndPreservesValidBackups
+// and TestEnsureDailyBackupCleansStaleStagingDirectoryOnStartup cover task
+// 5.3's restart cleanup requirement: a staging directory left behind by a
+// process that terminated before CreateBackup's publish rename ran is never
+// a valid backup and must be reclaimed on the next startup without
+// disturbing any already-published backup set
+// (specs/backup-and-recovery.md, "Process ends during backup").
+func TestCleanupBackupStagingRemovesStaleDirectoriesAndPreservesValidBackups(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	backupsRoot := t.TempDir()
+
+	valid, err := created.CreateBackup(ctx, backupsRoot, store.BackupKindManual, time.Now())
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	stalePath := filepath.Join(backupsRoot, ".staging-crashed")
+	if err := os.MkdirAll(filepath.Join(stalePath, "blobs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stalePath, backupManifestFile), []byte("incomplete"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CleanupBackupStaging(backupsRoot); err != nil {
+		t.Fatalf("CleanupBackupStaging: %v", err)
+	}
+
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("stale backup staging directory still exists after CleanupBackupStaging, stat err = %v", err)
+	}
+	if _, err := os.Stat(valid.Location); err != nil {
+		t.Fatalf("CleanupBackupStaging removed a valid backup set: %v", err)
+	}
+	all, err := store.ListValidBackups(ctx, created.db, store.BackupKindManual)
+	if err != nil || len(all) != 1 || all[0].ID != valid.ID {
+		t.Fatalf("ListValidBackups after CleanupBackupStaging = %v, err = %v, want only %v", all, err, valid.ID)
+	}
+}
+
+func TestCleanupBackupStagingOnMissingDestinationIsANoOp(t *testing.T) {
+	if err := CleanupBackupStaging(filepath.Join(t.TempDir(), "does-not-exist")); err != nil {
+		t.Fatalf("CleanupBackupStaging on a missing destination: %v", err)
+	}
+}
+
+func TestEnsureDailyBackupCleansStaleStagingDirectoryOnStartup(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	backupsRoot := t.TempDir()
+
+	stalePath := filepath.Join(backupsRoot, ".staging-crashed")
+	if err := os.MkdirAll(stalePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := created.EnsureDailyBackup(ctx, backupsRoot, time.Now()); err != nil {
+		t.Fatalf("EnsureDailyBackup: %v", err)
+	}
+
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("EnsureDailyBackup left a stale backup staging directory behind, stat err = %v", err)
 	}
 }
 

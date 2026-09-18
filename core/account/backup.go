@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -52,6 +54,71 @@ const (
 	backupCapacityMarginNumerator   = 11
 	backupCapacityMarginDenominator = 10
 )
+
+// backupStagingPrefix names every backup staging directory CreateBackup
+// creates under a destination root (os.MkdirTemp's pattern below expands
+// this into e.g. ".staging-3982017"). It is never a valid backup: the
+// catalog only ever records finalDir, whose name is a bare backup ID, so
+// ListBackups/ListValidBackups never see a staging directory. A process that
+// terminates before CreateBackup's publish rename runs leaves one of these
+// behind; CleanupBackupStaging finds and removes it by this prefix alone,
+// without needing any marker file.
+const backupStagingPrefix = ".staging-"
+
+// backupFS abstracts the filesystem calls CreateBackup sequences at its
+// staging, flush, and publish boundaries, so tests can inject a failure at
+// each step (staging directory creation, manifest durability, atomic
+// publish rename) to prove that a crash or fault at any one of them never
+// damages the current dataset or any already-published, previously valid
+// backup (specs/backup-and-recovery.md, "Crash-safe backup publication").
+type backupFS interface {
+	mkdirAll(path string) error
+	mkdirTemp(dir, pattern string) (string, error)
+	syncedWrite(path string, data []byte, perm os.FileMode) error
+	rename(oldpath, newpath string) error
+	removeAll(path string) error
+}
+
+type osBackupFS struct{}
+
+func (osBackupFS) mkdirAll(path string) error { return os.MkdirAll(path, 0o700) }
+
+func (osBackupFS) mkdirTemp(dir, pattern string) (string, error) { return os.MkdirTemp(dir, pattern) }
+
+// syncedWrite writes data to a new file at path and fsyncs it before
+// returning, so a crash immediately afterward can never leave path
+// containing a partial or buffered-but-unflushed write. Unlike
+// writeBackupFile's snapshot container, callers of syncedWrite (the backup
+// manifest) write directly to their final path inside the staging directory
+// rather than through a separate temp-then-rename step: the staging
+// directory itself is not visible at its final, catalog-recorded location
+// until CreateBackup's own publish rename succeeds, so an interrupted
+// syncedWrite can only ever be observed as part of a staging directory that
+// CleanupBackupStaging removes wholesale, never as a corrupt published file.
+func (osBackupFS) syncedWrite(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+func (osBackupFS) rename(oldpath, newpath string) error { return os.Rename(oldpath, newpath) }
+func (osBackupFS) removeAll(path string) error          { return os.RemoveAll(path) }
+
+// currentBackupFS is the filesystem seam CreateBackup and
+// CleanupBackupStaging use for their durability boundaries. Tests in this
+// package may temporarily replace it with a fake to inject a failure at a
+// chosen step; production code always uses the default osBackupFS{}.
+var currentBackupFS backupFS = osBackupFS{}
 
 // ErrInsufficientBackupCapacity reports that a backup destination did not
 // have enough free space for the estimated backup size. CreateBackup
@@ -143,20 +210,20 @@ func (a *Account) CreateBackup(ctx context.Context, destRoot string, kind int, n
 	}
 	backupID := backupIDModel.Bytes()
 
-	if err := os.MkdirAll(destRoot, 0o700); err != nil {
+	if err := currentBackupFS.mkdirAll(destRoot); err != nil {
 		return store.Backup{}, fmt.Errorf("account: create backup destination: %w", err)
 	}
 	if err := checkBackupCapacity(ctx, db, destRoot); err != nil {
 		return store.Backup{}, err
 	}
-	stagingDir, err := os.MkdirTemp(destRoot, ".staging-*")
+	stagingDir, err := currentBackupFS.mkdirTemp(destRoot, backupStagingPrefix+"*")
 	if err != nil {
 		return store.Backup{}, fmt.Errorf("account: create backup staging directory: %w", err)
 	}
 	cleanupStaging := true
 	defer func() {
 		if cleanupStaging {
-			os.RemoveAll(stagingDir)
+			_ = currentBackupFS.removeAll(stagingDir)
 		}
 	}()
 
@@ -217,7 +284,7 @@ func (a *Account) CreateBackup(ctx context.Context, destRoot string, kind int, n
 	if err != nil {
 		return store.Backup{}, fmt.Errorf("account: encode backup manifest: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(stagingDir, backupManifestFile), manifestBytes, 0o600); err != nil {
+	if err := currentBackupFS.syncedWrite(filepath.Join(stagingDir, backupManifestFile), manifestBytes, 0o600); err != nil {
 		return store.Backup{}, fmt.Errorf("account: write backup manifest: %w", err)
 	}
 	manifestHash := sha256.Sum256(manifestBytes)
@@ -227,31 +294,84 @@ func (a *Account) CreateBackup(ctx context.Context, destRoot string, kind int, n
 		sizeBytes += int64(entry.Size)
 	}
 
+	// Validate the complete staged candidate against its own manifest before
+	// crossing the publish boundary (specs/backup-and-recovery.md,
+	// "Crash-safe backup publication": "write to staging, validate the
+	// complete candidate, and publish it atomically"). A failure here leaves
+	// the candidate in stagingDir, which the deferred cleanup above removes;
+	// no already-published backup is touched. This is also what lets
+	// CreateBackup satisfy "Understandable verified backup status" ("A
+	// manual backup SHALL report success only after publication and
+	// integrity verification complete") without a third full content-hash
+	// pass after the rename below: stagingDir was created directly under
+	// destRoot (currentBackupFS.mkdirTemp), so the publish rename is
+	// guaranteed same-volume and moves the directory entry only, never its
+	// bytes. Verifying before that rename and verifying after it would
+	// re-hash byte-identical content for every backup, doubling this
+	// function's I/O for no additional coverage of the documented failure
+	// modes (process termination, disk-full, permission-revoked).
+	if err := corebackup.VerifyManifest(ctx, stagingDir, manifest); err != nil {
+		return store.Backup{}, fmt.Errorf("account: validate staged backup candidate: %w", err)
+	}
+	verifiedUnixMS := int64(nowUnixMS)
+
 	finalDir := filepath.Join(destRoot, backupIDModel.String())
-	if err := os.Rename(stagingDir, finalDir); err != nil {
+	if err := currentBackupFS.rename(stagingDir, finalDir); err != nil {
 		return store.Backup{}, fmt.Errorf("account: publish backup set: %w", err)
 	}
 	cleanupStaging = false
 
 	record := store.Backup{
-		ID:            backupIDModel,
-		Kind:          kind,
-		Location:      finalDir,
-		ManifestHash:  manifestHash[:],
-		NoteCount:     &noteCount,
-		SizeBytes:     &sizeBytes,
-		CreatedUnixMS: int64(nowUnixMS),
+		ID:             backupIDModel,
+		Kind:           kind,
+		Location:       finalDir,
+		ManifestHash:   manifestHash[:],
+		VerifiedUnixMS: &verifiedUnixMS,
+		NoteCount:      &noteCount,
+		SizeBytes:      &sizeBytes,
+		CreatedUnixMS:  int64(nowUnixMS),
 	}
-	// A failure here (the backup set is already published, but its catalog
-	// row is not) leaves an orphaned backup set directory: unlike blobs,
-	// there is no garbage-collection sweep for those. This is accepted as a
-	// rare residual risk, not fixed by reordering: publishing the catalog
-	// row before the set exists would let a restore or rotation reference a
-	// set that is not actually there yet.
+	// A failure here (the backup set is already published and verified, but
+	// its catalog row is not) leaves an orphaned backup set directory:
+	// unlike blobs, there is no garbage-collection sweep for those. This is
+	// accepted as a rare residual risk, not fixed by reordering: publishing
+	// the catalog row before the set exists would let a restore or rotation
+	// reference a set that is not actually there yet.
 	if err := store.InsertBackup(ctx, db, record); err != nil {
 		return store.Backup{}, fmt.Errorf("account: record backup catalog entry: %w", err)
 	}
 	return record, nil
+}
+
+// CleanupBackupStaging removes every stale backup staging directory
+// (backupStagingPrefix) directly under destRoot: the leftover of a process
+// that terminated after CreateBackup created one but before its publish
+// rename ran. A staging directory is never recorded in the catalog and
+// never satisfies corebackup.VerifyManifest as a published set, so removing
+// it only reclaims disk space; it never touches a published backup set,
+// whose directory name is always a bare backup ID with no staging prefix
+// (specs/backup-and-recovery.md, "Process ends during backup": "the
+// incomplete candidate is not listed as valid and all previously valid
+// backups remain usable"). A missing destRoot is not an error: there is
+// nothing to clean up before any backup has ever been created there.
+func CleanupBackupStaging(destRoot string) error {
+	entries, err := os.ReadDir(destRoot)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("account: list backup destination: %w", err)
+	}
+	var errs []error
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), backupStagingPrefix) {
+			continue
+		}
+		if err := currentBackupFS.removeAll(filepath.Join(destRoot, entry.Name())); err != nil {
+			errs = append(errs, fmt.Errorf("account: remove stale backup staging directory %q: %w", entry.Name(), err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // EnsureDailyBackup creates today's (in now's local timezone) daily backup
@@ -260,7 +380,11 @@ func (a *Account) CreateBackup(ctx context.Context, destRoot string, kind int, n
 // requirement and the "device was powered off" missed-day requirement: a
 // client that calls this once at every startup, before normal mutation
 // work proceeds, always has a backup for the current day and never more
-// than dailyBackupRetention of them.
+// than dailyBackupRetention of them. It also sweeps destRoot for stale
+// backup staging directories left by a prior process that terminated before
+// CreateBackup's publish rename ran (CleanupBackupStaging); that sweep is
+// best-effort and never blocks daily backup creation, since a leftover
+// staging directory costs disk space but never causes incorrect behavior.
 func (a *Account) EnsureDailyBackup(ctx context.Context, destRoot string, now time.Time) (created bool, err error) {
 	a.mu.Lock()
 	if a.locked {
@@ -269,6 +393,8 @@ func (a *Account) EnsureDailyBackup(ctx context.Context, destRoot string, now ti
 	}
 	db := a.db
 	a.mu.Unlock()
+
+	_ = CleanupBackupStaging(destRoot)
 
 	existing, err := store.ListValidBackups(ctx, db, store.BackupKindDaily)
 	if err != nil {

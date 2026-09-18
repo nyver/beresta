@@ -22,6 +22,7 @@ import {
   DisableServer,
   DiffRevisions,
   EnsureDailyBackup,
+  EstimateBackupSize,
   ExportIdentity,
   ExportNotes,
   GetNoteDocument,
@@ -685,6 +686,13 @@ export async function listBackups(kind: string): Promise<main.BackupDTO[]> {
 
 export async function createManualBackup(destRoot: string): Promise<main.BackupDTO> {
   return CreateManualBackup(destRoot);
+}
+
+/** estimateBackupSize reports the estimated number of bytes a new manual
+ * backup would currently need, for a storage-pressure estimate shown
+ * before the user commits to a backup. */
+export async function estimateBackupSize(): Promise<number> {
+  return EstimateBackupSize();
 }
 
 /** ensureDailyBackup creates today's daily backup under destRoot if one

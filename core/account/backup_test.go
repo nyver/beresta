@@ -333,6 +333,45 @@ func TestCreateBackupRejectsInsufficientCapacity(t *testing.T) {
 	}
 }
 
+// TestEstimateBackupSizeReflectsAttachedContent covers task 5.7's
+// storage-pressure estimate: it must grow when an attachment is added
+// (specs/backup-and-recovery.md, "Crash-safe backup publication and
+// storage pressure": "clients SHALL estimate required capacity where
+// possible"), and it must fail closed while the account is locked, exactly
+// like every other account-session method.
+func TestEstimateBackupSizeReflectsAttachedContent(t *testing.T) {
+	ctx := context.Background()
+	created := createTestAccount(t)
+	workspaceID := defaultWorkspaceID(t, created)
+	note, err := created.CreateNote(ctx, workspaceID, model.Nil, "Untitled")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := created.EstimateBackupSize(ctx)
+	if err != nil {
+		t.Fatalf("EstimateBackupSize (before attachment): %v", err)
+	}
+
+	if _, err := created.AddAttachment(ctx, workspaceID, note.ID, "a.txt", "text/plain", bytes.NewReader([]byte("payload bytes"))); err != nil {
+		t.Fatal(err)
+	}
+	after, err := created.EstimateBackupSize(ctx)
+	if err != nil {
+		t.Fatalf("EstimateBackupSize (after attachment): %v", err)
+	}
+	if after <= before {
+		t.Fatalf("EstimateBackupSize after attaching a file = %d, want > %d (before)", after, before)
+	}
+
+	if err := created.Lock(); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	if _, err := created.EstimateBackupSize(ctx); !errors.Is(err, ErrAccountLocked) {
+		t.Fatalf("EstimateBackupSize while locked error = %v, want ErrAccountLocked", err)
+	}
+}
+
 // injectingBackupFS lets a test fail CreateBackup at a single new
 // staging/publish boundary (staging directory creation, manifest write, or
 // the publish rename) while every other call runs against the real

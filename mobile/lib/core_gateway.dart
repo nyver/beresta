@@ -85,6 +85,11 @@ abstract interface class CoreGateway {
   Future<void> capturePhoto(String noteId);
   Future<bool> selectBackupDestination();
   Future<void> createBackup();
+
+  /// Returns the estimated number of bytes a new manual backup would
+  /// currently need, for a storage-pressure estimate shown before the user
+  /// commits to a backup - see core/mobileapi.Service.EstimateBackupSize.
+  Future<int> estimateBackupSize();
   Future<List<Map<String, dynamic>>> listBackups();
 
   /// Returns the backup catalog's current health, last verified time, and
@@ -357,6 +362,10 @@ class MethodChannelCore implements CoreGateway {
 
   @override
   Future<void> createBackup() => _invoke("createBackup");
+
+  @override
+  Future<int> estimateBackupSize() async =>
+      await _invoke("estimateBackupSize") as int;
 
   @override
   Future<List<Map<String, dynamic>>> listBackups() async =>

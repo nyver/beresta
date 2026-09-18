@@ -77,6 +77,7 @@ export const appMock = {
   ListBackups: vi.fn(),
   BackupStatus: vi.fn(),
   CreateManualBackup: vi.fn(),
+  EstimateBackupSize: vi.fn(),
   EnsureDailyBackup: vi.fn(),
   VerifyAllBackups: vi.fn(),
   VerifyBackup: vi.fn(),

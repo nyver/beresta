@@ -26,6 +26,21 @@ func (a *App) PickBackupDirectory() (string, error) {
 	return path, nil
 }
 
+// EstimateBackupSize reports the estimated number of bytes a new manual
+// backup would currently need, for a storage-pressure estimate shown
+// before the user commits to a backup.
+func (a *App) EstimateBackupSize() (int64, error) {
+	acc, err := a.currentAccount()
+	if err != nil {
+		return 0, mapError(err)
+	}
+	estimated, err := acc.EstimateBackupSize(a.requestContext())
+	if err != nil {
+		return 0, mapError(err)
+	}
+	return int64(estimated), nil
+}
+
 // backupKindNames maps store.BackupKind* constants to their JS-facing
 // names.
 var backupKindNames = map[int]string{

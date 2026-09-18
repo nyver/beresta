@@ -144,6 +144,7 @@ class Strings {
       "cache_limit": "Cache limit (MiB)",
       "backup_capacity":
           "Not enough free space. Existing backups were not changed.",
+      "backup_estimated_size": "Estimated size",
       "diagnostics_title": "Diagnostics",
       "diagnostics_app_version": "App version",
       "diagnostics_platform": "Platform",
@@ -336,6 +337,7 @@ class Strings {
       "cache_limit": "Лимит кэша (МиБ)",
       "backup_capacity":
           "Недостаточно свободного места. Существующие копии не изменены.",
+      "backup_estimated_size": "Примерный размер",
       "diagnostics_title": "Диагностика",
       "diagnostics_app_version": "Версия приложения",
       "diagnostics_platform": "Платформа",

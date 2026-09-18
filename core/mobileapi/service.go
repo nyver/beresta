@@ -961,6 +961,22 @@ func (s *Service) EnsureDailyBackup(requestID, destination string) (bool, error)
 	return created, err
 }
 
+// EstimateBackupSize reports the estimated number of bytes a new manual
+// backup would currently need, for a storage-pressure estimate shown
+// before the user commits to a backup - see
+// core/account.Account.EstimateBackupSize.
+func (s *Service) EstimateBackupSize() (int64, error) {
+	value, _, err := s.accountState()
+	if err != nil {
+		return 0, err
+	}
+	estimated, err := value.EstimateBackupSize(s.root)
+	if err != nil {
+		return 0, err
+	}
+	return int64(estimated), nil
+}
+
 func (s *Service) PreviewBackup(requestID, backupID string) (string, error) {
 	ctx, done, err := s.begin(requestID)
 	if err != nil {

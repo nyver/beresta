@@ -170,6 +170,20 @@ func estimateBackupBytes(ctx context.Context, db *sql.DB) (uint64, error) {
 	return databaseBytes + blobBytes, nil
 }
 
+// EstimateBackupSize returns the same plaintext-size estimate
+// checkBackupCapacity uses (before its safety margin), so a caller can show
+// a storage-pressure estimate before committing to a manual backup, per
+// specs/backup-and-recovery.md's "Crash-safe backup publication and
+// storage pressure" requirement ("clients SHALL estimate required capacity
+// where possible").
+func (a *Account) EstimateBackupSize(ctx context.Context) (uint64, error) {
+	db, _, err := a.accountSession()
+	if err != nil {
+		return 0, err
+	}
+	return estimateBackupBytes(ctx, db)
+}
+
 // CreateBackup assembles and durably publishes one backup set under
 // destRoot/<backup ID>: a SQLCipher-consistent plaintext export of the
 // database, zstd-compressed and encrypted under a backup key derived from

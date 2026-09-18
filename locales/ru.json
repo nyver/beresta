@@ -136,6 +136,7 @@
   "backups.changing_directory_button": "Изменение…",
   "backups.create_manual_button": "Создать резервную копию сейчас",
   "backups.creating_manual_button": "Создание резервной копии…",
+  "backups.estimated_size_label": "Примерный размер",
   "backups.kind_daily": "Ежедневные",
   "backups.kind_manual": "Ручные",
   "backups.kind_pre_restore": "Перед восстановлением",

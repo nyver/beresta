@@ -312,6 +312,7 @@ class MainActivity : FlutterFragmentActivity() {
             "setActiveWorkspace" -> service.setActiveWorkspace(requestId, required(call, "workspaceId"))
             "pollEvents" -> service.pollEvents((call.argument<Number>("afterSequence")?.toLong() ?: 0L), 64L)
             "createBackup" -> BackupDestination.createManual(this, service, requestId)
+            "estimateBackupSize" -> service.estimateBackupSize()
             "listBackups" -> service.listBackups(requestId)
             "backupStatus" -> service.backupStatus()
             "previewBackup" -> service.previewBackup(requestId, required(call, "backupId"))

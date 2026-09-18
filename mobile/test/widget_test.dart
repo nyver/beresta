@@ -597,6 +597,49 @@ void main() {
     },
   );
 
+  testWidgets(
+    "backup sheet shows a storage-pressure estimate before backing up",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)..estimateBackupSizeValue = 1500000;
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.backup_outlined));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining("Estimated size"), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    "backup sheet offers a change-destination remedy when backup fails from insufficient space",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..createBackupFailure = Exception("not enough space at the backup destination");
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.backup_outlined));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(OutlinedButton, "Choose destination"), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(FilledButton, "Back up now"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Not enough free space. Existing backups were not changed."), findsOneWidget);
+      // The top action row already has its own "Choose destination"
+      // button; the remedy below the error message is a second one.
+      final remedyButtons = find.widgetWithText(OutlinedButton, "Choose destination");
+      expect(remedyButtons, findsNWidgets(2));
+
+      await tester.tap(remedyButtons.last);
+      await tester.pumpAndSettle();
+
+      expect(gateway.selectBackupDestinationCalls, 1);
+    },
+  );
+
   testWidgets("refreshes notes after the selected workspace finishes syncing", (
     tester,
   ) async {
@@ -900,10 +943,22 @@ class FakeGateway implements CoreGateway {
 
   @override
   Future<void> capturePhoto(String noteId) async {}
+  int selectBackupDestinationCalls = 0;
   @override
-  Future<bool> selectBackupDestination() async => false;
+  Future<bool> selectBackupDestination() async {
+    selectBackupDestinationCalls += 1;
+    return false;
+  }
+
+  Object? createBackupFailure;
   @override
-  Future<void> createBackup() async {}
+  Future<void> createBackup() async {
+    if (createBackupFailure != null) throw createBackupFailure!;
+  }
+
+  int estimateBackupSizeValue = 0;
+  @override
+  Future<int> estimateBackupSize() async => estimateBackupSizeValue;
   List<Map<String, dynamic>> backupsValue = [];
   @override
   Future<List<Map<String, dynamic>>> listBackups() async => backupsValue;

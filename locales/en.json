@@ -127,6 +127,7 @@
   "backups.changing_directory_button": "Changing…",
   "backups.create_manual_button": "Back up now",
   "backups.creating_manual_button": "Backing up…",
+  "backups.estimated_size_label": "Estimated size",
   "backups.kind_daily": "Daily",
   "backups.kind_manual": "Manual",
   "backups.kind_pre_restore": "Pre-restore safety",

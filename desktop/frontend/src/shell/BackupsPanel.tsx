@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   backupStatus,
   createManualBackup,
+  estimateBackupSize,
   getSettings,
   listBackups,
   pickBackupDirectory,
@@ -57,8 +58,11 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
   const [backups, setBackups] = useState<main.BackupDTO[]>([]);
   const [listError, setListError] = useState<string | null>(null);
 
+  const [estimatedSize, setEstimatedSize] = useState<number | null>(null);
+
   const [creatingManual, setCreatingManual] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
+  const [manualErrorCode, setManualErrorCode] = useState<string | null>(null);
 
   const [selectedBackupId, setSelectedBackupId] = useState("");
   const [preview, setPreview] = useState<main.BackupPreviewDTO | null>(null);
@@ -79,6 +83,18 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
       .then((settings) => setDirectory(settings.backup_directory))
       .catch((thrown: unknown) => setDirectoryError(errorMessage(unwrapError(thrown))));
   }, [ready, errorMessage]);
+
+  useEffect(() => {
+    if (!ready) return;
+    // A storage-pressure estimate shown before the user commits to a
+    // backup (specs/backup-and-recovery.md, "Crash-safe backup publication
+    // and storage pressure": "clients SHALL estimate required capacity
+    // where possible"). Best-effort: a failure here just leaves the
+    // estimate hidden, since it is informational only.
+    estimateBackupSize()
+      .then(setEstimatedSize)
+      .catch(() => setEstimatedSize(null));
+  }, [ready]);
 
   const refreshBackups = useCallback(() => {
     listBackups(kind)
@@ -132,12 +148,18 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
     if (!directory) return;
     setCreatingManual(true);
     setManualError(null);
+    setManualErrorCode(null);
     try {
       await createManualBackup(directory);
       if (kind === "manual") refreshBackups();
       refreshStatus();
+      estimateBackupSize()
+        .then(setEstimatedSize)
+        .catch(() => {});
     } catch (thrown: unknown) {
-      setManualError(errorMessage(unwrapError(thrown)));
+      const error = unwrapError(thrown);
+      setManualError(errorMessage(error));
+      setManualErrorCode(error.code);
     } finally {
       setCreatingManual(false);
     }
@@ -288,10 +310,20 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
       <button type="button" disabled={creatingManual || !directory} onClick={() => void handleCreateManualBackup()}>
         {creatingManual ? t("backups.creating_manual_button") : t("backups.create_manual_button")}
       </button>
+      {estimatedSize !== null ? (
+        <p className="hint">
+          {t("backups.estimated_size_label")}: {formatBytes(estimatedSize)}
+        </p>
+      ) : null}
       {manualError ? (
         <p className="error" role="alert">
           {manualError}
         </p>
+      ) : null}
+      {manualErrorCode === "insufficient_space" ? (
+        <button type="button" className="link-button" disabled={changingDirectory} onClick={() => void handleChangeDirectory()}>
+          {t("backups.change_directory_button")}
+        </button>
       ) : null}
 
       <div className="backup-kind-tabs" role="tablist" aria-label={t("backups.title")}>

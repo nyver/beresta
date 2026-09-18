@@ -2403,12 +2403,33 @@ class _BackupSheetState extends State<BackupSheet> {
   late Future<List<Map<String, dynamic>>> backups =
       widget.gateway.listBackups();
   late Future<Map<String, dynamic>> status = widget.gateway.backupStatus();
+  late Future<int> estimatedSize = widget.gateway.estimateBackupSize();
   String? error;
+  // spaceError tracks whether the current error came from insufficient
+  // storage, so the UI can offer the one concrete remedy that helps here -
+  // choosing a different destination - rather than just a static message
+  // (specs/backup-and-recovery.md, "Crash-safe backup publication and
+  // storage pressure": "offer cache cleanup, retention adjustment, or
+  // destination change as applicable").
+  bool spaceError = false;
 
   void reload() => setState(() {
     backups = widget.gateway.listBackups();
     status = widget.gateway.backupStatus();
+    estimatedSize = widget.gateway.estimateBackupSize();
   });
+
+  void _setBackupError(Object failure) {
+    if (!mounted) return;
+    final isSpaceError = failure.toString().toLowerCase().contains("space");
+    setState(() {
+      spaceError = isSpaceError;
+      error =
+          isSpaceError
+              ? widget.strings("backup_capacity")
+              : describeFailure(widget.strings, failure);
+    });
+  }
 
   // _backupStatusSummary covers task 5.4's Data settings backup status
   // surface: the catalog's health, last verified time, and location -
@@ -2483,14 +2504,7 @@ class _BackupSheetState extends State<BackupSheet> {
                   await widget.gateway.importBackups();
                   reload();
                 } catch (failure) {
-                  if (mounted) {
-                    setState(() {
-                      error =
-                          failure.toString().toLowerCase().contains("space")
-                              ? widget.strings("backup_capacity")
-                              : describeFailure(widget.strings, failure);
-                    });
-                  }
+                  _setBackupError(failure);
                 }
               },
               icon: const Icon(Icons.cloud_download_outlined),
@@ -2502,14 +2516,7 @@ class _BackupSheetState extends State<BackupSheet> {
                   await widget.gateway.createBackup();
                   reload();
                 } catch (failure) {
-                  if (mounted) {
-                    setState(() {
-                      error =
-                          failure.toString().toLowerCase().contains("space")
-                              ? widget.strings("backup_capacity")
-                              : describeFailure(widget.strings, failure);
-                    });
-                  }
+                  _setBackupError(failure);
                 }
               },
               icon: const Icon(Icons.backup),
@@ -2517,10 +2524,25 @@ class _BackupSheetState extends State<BackupSheet> {
             ),
           ],
         ),
+        FutureBuilder<int>(
+          future: estimatedSize,
+          builder: (context, snapshot) {
+            final size = snapshot.data;
+            if (size == null) return const SizedBox.shrink();
+            return Text(
+              "${widget.strings("backup_estimated_size")}: ${_formatBytes(size)}",
+            );
+          },
+        ),
         if (error != null)
           Text(
             error!,
             style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        if (spaceError)
+          OutlinedButton(
+            onPressed: widget.gateway.selectBackupDestination,
+            child: Text(widget.strings("backup_destination")),
           ),
         Expanded(
           child: FutureBuilder<List<Map<String, dynamic>>>(

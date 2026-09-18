@@ -47,3 +47,27 @@ func TestBackupStatusReflectsManualBackup(t *testing.T) {
 		t.Fatalf("last_verified_unix_ms = %v, want > 0", after["last_verified_unix_ms"])
 	}
 }
+
+// TestEstimateBackupSizeIsPositiveForANonEmptyAccount covers task 5.7's
+// storage-pressure estimate bridge method on Android's own gomobile
+// boundary, mirroring desktop's identical test.
+func TestEstimateBackupSizeIsPositiveForANonEmptyAccount(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "beresta.db")
+	service, err := NewService(newTestServiceDeviceSecret(t))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	t.Cleanup(service.Close)
+
+	if _, err := service.CreateAccount("create", dbPath, "correct horse battery staple"); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+
+	estimated, err := service.EstimateBackupSize()
+	if err != nil {
+		t.Fatalf("EstimateBackupSize: %v", err)
+	}
+	if estimated <= 0 {
+		t.Fatalf("EstimateBackupSize = %d, want > 0", estimated)
+	}
+}

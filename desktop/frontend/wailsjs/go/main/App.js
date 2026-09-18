@@ -94,6 +94,10 @@ export function EnsureDailyBackup(arg1) {
   return window['go']['main']['App']['EnsureDailyBackup'](arg1);
 }
 
+export function EstimateBackupSize() {
+  return window['go']['main']['App']['EstimateBackupSize']();
+}
+
 export function ExportIdentity() {
   return window['go']['main']['App']['ExportIdentity']();
 }

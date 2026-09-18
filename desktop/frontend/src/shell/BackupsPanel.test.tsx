@@ -33,6 +33,7 @@ function renderPanel(initialBackups: main.BackupDTO[] = []) {
   mockSettings({ backup_directory: "C:\\backups" });
   appMock.ListBackups.mockResolvedValue(initialBackups);
   appMock.BackupStatus.mockResolvedValue(fakeBackupStatus());
+  appMock.EstimateBackupSize.mockResolvedValue(0);
   const onRestored = vi.fn();
   render(
     <I18nProvider>
@@ -121,6 +122,38 @@ describe("BackupsPanel", () => {
     await user.click(screen.getByRole("button", { name: "backups.create_manual_button" }));
 
     await waitFor(() => expect(appMock.CreateManualBackup).toHaveBeenCalledWith("C:\\backups"));
+  });
+
+  it("shows a storage-pressure estimate before creating a backup", async () => {
+    renderPanel();
+    appMock.EstimateBackupSize.mockResolvedValue(1_500_000);
+
+    expect(await screen.findByText(/backups.estimated_size_label/)).toBeInTheDocument();
+  });
+
+  it("offers a change-destination remedy when a manual backup fails from insufficient space", async () => {
+    renderPanel();
+    const user = userEvent.setup();
+    appMock.CreateManualBackup.mockRejectedValue(
+      new Error(JSON.stringify({ code: "insufficient_space", message: "Not enough free space." })),
+    );
+    appMock.PickBackupDirectory.mockResolvedValue("D:\\external\\backups");
+    appMock.UpdateSettings.mockResolvedValue({
+      language: "en",
+      last_database_path: "",
+      auto_lock_minutes: 15,
+      backup_directory: "D:\\external\\backups",
+    });
+
+    await screen.findByText("C:\\backups");
+    await user.click(screen.getByRole("button", { name: "backups.create_manual_button" }));
+
+    const remedyButton = await screen.findAllByRole("button", { name: "backups.change_directory_button" });
+    expect(remedyButton.length).toBeGreaterThan(1);
+
+    await user.click(remedyButton[remedyButton.length - 1]);
+
+    await waitFor(() => expect(appMock.PickBackupDirectory).toHaveBeenCalled());
   });
 
   it("previews a backup's note titles", async () => {

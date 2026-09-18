@@ -49,6 +49,8 @@ export function DisableServer():Promise<void>;
 
 export function EnsureDailyBackup(arg1:string):Promise<boolean>;
 
+export function EstimateBackupSize():Promise<number>;
+
 export function ExportIdentity():Promise<string>;
 
 export function ExportNotes(arg1:string,arg2:Array<string>):Promise<main.ExportManifestDTO>;

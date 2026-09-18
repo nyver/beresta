@@ -104,7 +104,14 @@ predictably, instead of silently vanishing only later, at export. Local
 edits are captured as incremental
 Yjs updates, debounced, merged, and committed through `CommitNoteBody`;
 they flush immediately (not debounced) when a note closes or the account
-locks, and a failed commit is retried rather than dropped. Attachments are
+locks, and a failed commit is retried rather than dropped. A note left open
+also receives background synchronization's remote merges live: on every
+`sync:summary` tick (coalesced to at most one outstanding refresh, with a
+single trailing catch-up for whatever arrived while it was in flight) the
+frontend re-fetches and merges the note's current state into the same open
+`Y.Doc` rather than replacing it, so Quill's own selection transform keeps
+the user's cursor anchored to its referenced content across the merge
+instead of the editor silently going stale until reopened. Attachments are
 fully wired into the editor pane: native drag-and-drop (Wails'
 `OnFileDrop`, scoped to the attachment panel via the `--wails-drop-target`
 CSS marker) and clipboard image paste (from either the editor or an open

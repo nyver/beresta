@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as Y from "yjs";
 
 import { commitNoteBody, getNoteDocument, unwrapError, type ApiError } from "../api";
+import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 import { CommitTracker, type LocalSaveState } from "./commitTracker";
 
@@ -9,6 +10,33 @@ import { CommitTracker, type LocalSaveState } from "./commitTracker";
  * the Go core. Chosen to keep keystrokes from each individually round-
  * tripping through IPC while still saving promptly if the user pauses. */
 const COMMIT_DEBOUNCE_MS = 800;
+
+/** Fires on every synchronization phase transition (see desktop/sync.go's
+ * Progress callback); SyncPanel/Shell already use it as a cheap "recheck"
+ * signal instead of a dedicated payload. Reused here for the same reason -
+ * see the remote-merge subscription below. */
+const EVENT_SYNC_SUMMARY = "sync:summary";
+
+/** Tags a Y.Doc transaction as a background-synchronization merge (see the
+ * remote-merge subscription below), so the doc.on("update") listener that
+ * queues local edits for commit can tell it apart from the user's own
+ * typing and not echo already-durable remote content back as a "local"
+ * edit. */
+const REMOTE_MERGE_ORIGIN = Symbol("remote-merge");
+
+/** Applies a base64-encoded Yjs update, as GetNoteDocument's NoteDocumentDTO
+ * returns it, to doc with the matching v1/v2 codec - shared by the initial
+ * hydration and the remote-merge refresh below so the two never drift on
+ * how "format" is interpreted. */
+function applyEncodedUpdate(doc: Y.Doc, updateBase64: string, format: string, origin?: unknown): void {
+  const bytes = base64ToBytes(updateBase64);
+  if (bytes.length === 0) return;
+  if (format === "v2") {
+    Y.applyUpdateV2(doc, bytes, origin);
+  } else {
+    Y.applyUpdate(doc, bytes, origin);
+  }
+}
 
 export interface NoteDocumentState {
   ydoc: Y.Doc | null;
@@ -136,6 +164,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
   useEffect(() => {
     noteIdRef.current = noteId;
     let canceled = false;
+    let unsubscribeRemoteMerge: (() => void) | null = null;
     setReady(false);
     setError(null);
     setSaveState(null);
@@ -148,15 +177,14 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
       .then(({ update_base64, format }) => {
         if (canceled) return;
         const doc = new Y.Doc();
-        const bytes = base64ToBytes(update_base64);
-        if (bytes.length > 0) {
-          if (format === "v2") {
-            Y.applyUpdateV2(doc, bytes);
-          } else {
-            Y.applyUpdate(doc, bytes);
-          }
-        }
-        doc.on("update", (update: Uint8Array) => {
+        applyEncodedUpdate(doc, update_base64, format);
+        doc.on("update", (update: Uint8Array, origin: unknown) => {
+          // A merge this same hook applied below (see
+          // applyRemoteMerge) is already durable server-side; queuing it
+          // back up for commit would be redundant at best and, worse,
+          // would mark this session dirty/everEdited for content the user
+          // never touched.
+          if (origin === REMOTE_MERGE_ORIGIN) return;
           pendingRef.current.push(update);
           trackerRef.current.dirty();
           setEverEdited(true);
@@ -168,6 +196,58 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
         ydocRef.current = doc;
         setYdoc(doc);
         setReady(true);
+
+        // Background synchronization merges a remote change into this
+        // note's durable state without ever touching this already-open
+        // Y.Doc - there is no per-note server push, only local commits
+        // (see design.md). "sync:summary" already fires on every sync
+        // phase transition for the status line (desktop/sync.go), so
+        // reusing it here as a cheap "maybe something changed, recheck"
+        // signal needs no new Go-side plumbing: re-fetching and merging
+        // an already-current note is a safe no-op (Yjs dedupes by
+        // clock), and merging into the SAME live Y.Doc y-quill's
+        // QuillBinding already observes - instead of replacing it - is
+        // what lets Quill's own Delta transform keep the user's cursor
+        // and selection stable through the merge (specs/notes-
+        // management's "Remote merge during editing" scenario): that
+        // transform is a Quill/y-quill property this relies on, not
+        // something implemented here.
+        // "sync:summary" can fire many times in a burst (once per pull
+        // page, apply, and push batch - see desktop/sync.go's Progress
+        // callback), most of which have nothing to do with this note; an
+        // in-flight guard caps this at one outstanding GetNoteDocument
+        // IPC call at a time instead of piling one up per tick, and a
+        // single trailing "queued" flag (not a counter) still catches up
+        // to the latest state once the in-flight fetch settles, rather
+        // than silently dropping every tick that arrived meanwhile.
+        let remoteMergeInFlight = false;
+        let remoteMergeQueued = false;
+        const applyRemoteMerge = () => {
+          if (remoteMergeInFlight) {
+            remoteMergeQueued = true;
+            return;
+          }
+          remoteMergeInFlight = true;
+          getNoteDocument(noteId)
+            .then(({ update_base64: remoteBase64, format: remoteFormat }) => {
+              if (canceled || ydocRef.current !== doc) return;
+              applyEncodedUpdate(doc, remoteBase64, remoteFormat, REMOTE_MERGE_ORIGIN);
+            })
+            .catch(() => {
+              // Best-effort: a failed background refresh leaves the
+              // editor exactly as it was, nothing pending or at risk -
+              // the next "sync:summary" tick (or reopening the note)
+              // retries.
+            })
+            .finally(() => {
+              remoteMergeInFlight = false;
+              if (remoteMergeQueued && !canceled) {
+                remoteMergeQueued = false;
+                applyRemoteMerge();
+              }
+            });
+        };
+        unsubscribeRemoteMerge = EventsOn(EVENT_SYNC_SUMMARY, applyRemoteMerge);
       })
       .catch((thrown: unknown) => {
         if (!canceled) setError(unwrapError(thrown));
@@ -175,6 +255,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
 
     return () => {
       canceled = true;
+      unsubscribeRemoteMerge?.();
       void flush();
       window.clearTimeout(timerRef.current);
       ydocRef.current?.destroy();

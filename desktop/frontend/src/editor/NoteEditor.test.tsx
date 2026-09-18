@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 
 import { I18nProvider } from "../i18n";
-import { appMock } from "../setupTests";
+import { appMock, runtimeMock } from "../setupTests";
 import { mockLocaleCatalog, mockSettings } from "../testUtils";
 import { bytesToBase64 } from "./base64";
 import { NoteEditor } from "./NoteEditor";
@@ -164,6 +164,56 @@ describe("NoteEditor", () => {
 
     quill.history.redo();
     expect(quill.getContents()).toEqual(fullyEdited);
+  });
+
+  // Covers task 6.2's "Remote merge during editing" scenario (specs/
+  // notes-management/spec.md): the cursor/selection preservation itself is
+  // Quill's own Delta-transform (y-quill applies a remote Yjs change via
+  // updateContents, never setContents - see useNoteDocument's
+  // applyRemoteMerge doc comment); what this test actually proves is that
+  // this codebase's wiring delivers a background merge to an *already
+  // open* editor through the live Y.Doc at all, rather than the editor
+  // silently going stale until the note is reopened.
+  it("keeps the cursor anchored to its referenced content across a background merge", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    const initialDoc = new Y.Doc();
+    initialDoc.getText("body").insert(0, "Hello world");
+    const initialUpdate = Y.encodeStateAsUpdate(initialDoc);
+    appMock.GetNoteDocument.mockResolvedValueOnce({ update_base64: bytesToBase64(initialUpdate), format: "v1" });
+
+    render(
+      <I18nProvider>
+        <NoteEditor noteId="note-1" />
+      </I18nProvider>,
+    );
+    const quill = await findQuill();
+    await waitFor(() => expect(quill.getText()).toBe("Hello world\n"));
+
+    // The cursor sits right after "world", before the trailing newline.
+    quill.setSelection(11, 0, "silent");
+    expect(quill.getSelection()?.index).toBe(11);
+
+    // A remote client that forked from the same base state (before this
+    // session ever loaded it - matching a merge that happened on another
+    // device) inserts text at the very start of the document.
+    const remoteDoc = new Y.Doc();
+    Y.applyUpdate(remoteDoc, initialUpdate);
+    remoteDoc.getText("body").insert(0, "PREFIX ");
+    const remoteUpdate = Y.encodeStateAsUpdate(remoteDoc);
+    remoteDoc.destroy();
+    appMock.GetNoteDocument.mockResolvedValueOnce({ update_base64: bytesToBase64(remoteUpdate), format: "v1" });
+
+    const [, onSyncSummary] =
+      runtimeMock.EventsOnMultiple.mock.calls.find(([name]) => name === "sync:summary") ?? [];
+    if (!onSyncSummary) throw new Error("NoteEditor never subscribed to sync:summary");
+    onSyncSummary();
+
+    await waitFor(() => expect(quill.getText()).toBe("PREFIX Hello world\n"));
+    // The cursor's *referenced content* (still right after "world") is
+    // what must survive, not the raw index - 7 characters were inserted
+    // ahead of it, so the index shifts by exactly that much.
+    expect(quill.getSelection()?.index).toBe(11 + "PREFIX ".length);
   });
 
   it("shows a localized error when the document fails to load", async () => {

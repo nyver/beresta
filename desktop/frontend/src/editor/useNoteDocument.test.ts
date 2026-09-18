@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 
-import { appMock } from "../setupTests";
+import { appMock, runtimeMock } from "../setupTests";
 import { bytesToBase64 } from "./base64";
 import { useNoteDocument } from "./useNoteDocument";
 
@@ -328,6 +328,142 @@ describe("useNoteDocument", () => {
     unmount();
 
     await waitFor(() => expect(appMock.CommitNoteBody).toHaveBeenCalledTimes(1));
+  });
+
+  // The two tests below cover task 6.2's "Remote merge during editing"
+  // scenario (specs/notes-management/spec.md): a background sync merges a
+  // remote change into a note's durable state, delivered to an already-
+  // open note only through the "sync:summary" signal SyncPanel/Shell
+  // already use (see useNoteDocument's applyRemoteMerge) - simulated here
+  // exactly like SyncPanel.test.tsx does, by capturing and directly
+  // invoking the callback EventsOnMultiple was registered with.
+  function findSyncSummaryHandler(): () => void {
+    const [, handler] = runtimeMock.EventsOnMultiple.mock.calls.find(([name]) => name === "sync:summary") ?? [];
+    if (!handler) throw new Error("useNoteDocument never subscribed to sync:summary");
+    return handler as () => void;
+  }
+
+  it("merges a remote sync update into the live doc without queuing it for local commit", async () => {
+    // Real timers: this test's waitFor polls for a promise chain
+    // (applyRemoteMerge's getNoteDocument().then(...)) with nothing to
+    // advance under fake timers, exactly like "flushes pending edits on
+    // unmount" below.
+    vi.useRealTimers();
+    appMock.GetNoteDocument.mockResolvedValueOnce(emptyDocumentResponse());
+    appMock.CommitNoteBody.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useNoteDocument("note-1"));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    const onSyncSummary = findSyncSummaryHandler();
+
+    // A separate Yjs client diverging from the same base state the local
+    // doc just loaded, mirroring how a real remote device's change
+    // arrives - not the same object as result.current.ydoc.
+    const remoteDoc = new Y.Doc();
+    Y.applyUpdate(remoteDoc, Y.encodeStateAsUpdate(result.current.ydoc!));
+    remoteDoc.getText("body").insert(0, "from another device");
+    const remoteUpdate = Y.encodeStateAsUpdate(remoteDoc);
+    remoteDoc.destroy();
+    appMock.GetNoteDocument.mockResolvedValueOnce({ update_base64: bytesToBase64(remoteUpdate), format: "v1" });
+
+    act(() => onSyncSummary());
+
+    await waitFor(() => expect(result.current.ydoc!.getText("body").toString()).toBe("from another device"));
+    // The merge is already durable server-side (that is where it came
+    // from); re-queuing it for commit would be redundant and would wrongly
+    // mark this session as edited.
+    expect(appMock.CommitNoteBody).not.toHaveBeenCalled();
+    expect(result.current.everEdited).toBe(false);
+  });
+
+  it("coalesces a burst of sync:summary ticks into one outstanding refresh plus one trailing catch-up", async () => {
+    // "sync:summary" fires once per pull page/apply/push batch
+    // (desktop/sync.go's Progress callback), so a device catching up
+    // after being offline can fire many ticks within milliseconds; this
+    // proves that burst never queues one GetNoteDocument call per tick.
+    vi.useRealTimers();
+    appMock.GetNoteDocument.mockResolvedValueOnce(emptyDocumentResponse());
+    const { result } = renderHook(() => useNoteDocument("note-1"));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    const onSyncSummary = findSyncSummaryHandler();
+    expect(appMock.GetNoteDocument).toHaveBeenCalledTimes(1);
+
+    let resolveFirstMerge: ((value: { update_base64: string; format: string }) => void) | undefined;
+    appMock.GetNoteDocument.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirstMerge = resolve;
+        }),
+    );
+
+    // Three ticks in a row while the first refresh they trigger is still
+    // pending.
+    act(() => {
+      onSyncSummary();
+      onSyncSummary();
+      onSyncSummary();
+    });
+    // Only the first tick's fetch actually went out; the other two were
+    // coalesced into a single pending "refresh again after this" flag
+    // instead of each starting their own request.
+    expect(appMock.GetNoteDocument).toHaveBeenCalledTimes(2);
+
+    appMock.GetNoteDocument.mockResolvedValueOnce(emptyDocumentResponse());
+    resolveFirstMerge?.(emptyDocumentResponse());
+
+    // Exactly one trailing catch-up call fires once the in-flight one
+    // settles - not two more for the two ticks that arrived during it.
+    await waitFor(() => expect(appMock.GetNoteDocument).toHaveBeenCalledTimes(3));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(appMock.GetNoteDocument).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps an uncommitted local edit when a remote merge arrives concurrently", async () => {
+    vi.useRealTimers();
+    appMock.GetNoteDocument.mockResolvedValueOnce(emptyDocumentResponse());
+    appMock.CommitNoteBody.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useNoteDocument("note-1"));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    const onSyncSummary = findSyncSummaryHandler();
+
+    // The common state both writers started from, captured before either
+    // one's edit below - true concurrent divergence, not one building on
+    // the other's change.
+    const baseState = Y.encodeStateAsUpdate(result.current.ydoc!);
+
+    // The user has typed something that has not been committed yet -
+    // still only in this local Y.Doc, exactly like the pending-edit tests
+    // above.
+    act(() => {
+      result.current.ydoc!.getText("body").insert(0, "local draft");
+    });
+
+    // A remote change from a separate client that forked from the same
+    // base state and never saw the local edit above.
+    const remoteDoc = new Y.Doc();
+    Y.applyUpdate(remoteDoc, baseState);
+    remoteDoc.getText("body").insert(0, "remote change");
+    const remoteUpdate = Y.encodeStateAsUpdate(remoteDoc);
+    remoteDoc.destroy();
+    appMock.GetNoteDocument.mockResolvedValueOnce({ update_base64: bytesToBase64(remoteUpdate), format: "v1" });
+
+    act(() => onSyncSummary());
+
+    // Yjs converges deterministically; this test only needs both writers'
+    // content to survive the merge - a torn or one-sided result is what it
+    // guards against - not the exact interleaving.
+    await waitFor(() => {
+      const merged = result.current.ydoc!.getText("body").toString();
+      expect(merged).toContain("local draft");
+      expect(merged).toContain("remote change");
+    });
+
+    // The still-uncommitted local edit is not lost or silently dropped by
+    // the merge: it is still queued and reaches the server on the next
+    // flush.
+    await act(async () => {
+      await result.current.flush();
+    });
+    expect(appMock.CommitNoteBody).toHaveBeenCalledTimes(1);
   });
 
   it("re-hydrates from scratch when noteId changes", async () => {

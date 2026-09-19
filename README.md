@@ -153,9 +153,12 @@ into that same query language and runs it through the debounced (~150 ms)
 above), so that budget covers this UI's queries too; `SavedSearch` stores
 the composed query verbatim so saved searches round-trip through the same
 box. Either way, an active search overrides the sidebar's notebook/tag
-browsing (cleared by picking a notebook or tag, or by the box's own Clear
-button) and highlights its matched free-text term in each result's title.
-A note's history
+browsing (cleared by picking a notebook or tag, by the box's own Clear
+button, or by pressing Escape inside the field - which clears an active
+query/filters first and only blurs the field once there is nothing left to
+clear) and highlights its matched free-text term in each result's title. A
+search that matches nothing shows its message alongside a Clear action
+rather than leaving the list at a dead end. A note's history
 panel lists its retained revisions (newest first, checkpoints marked),
 diffs the selected one against its predecessor, and can restore it as a
 new current revision without erasing anything in between - restoring

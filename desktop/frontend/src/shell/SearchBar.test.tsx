@@ -214,6 +214,34 @@ describe("SearchBar", () => {
     expect(screen.queryByRole("button", { name: "search.delete_button" })).not.toBeInTheDocument();
   });
 
+  it("Escape clears an active query instead of doing nothing", async () => {
+    const { onResultsChange } = renderSearchBar([], [fakeNoteDTO("Note")]);
+    const user = userEvent.setup();
+
+    const input = screen.getByPlaceholderText("search.placeholder");
+    await user.type(input, "note");
+    await waitFor(() => expect(onResultsChange).toHaveBeenCalledWith([fakeResult("Note")], ["note"]));
+
+    await user.keyboard("{Escape}");
+
+    expect(input).toHaveValue("");
+    await waitFor(() => expect(onResultsChange).toHaveBeenLastCalledWith(null, []));
+    expect(input).toHaveFocus();
+  });
+
+  it("Escape blurs an already-empty search field instead of doing nothing", async () => {
+    renderSearchBar();
+    const user = userEvent.setup();
+
+    const input = screen.getByPlaceholderText("search.placeholder");
+    await user.click(input);
+    expect(input).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(input).not.toHaveFocus();
+  });
+
   it("clear() resets every field through the imperative handle", async () => {
     const { ref, onResultsChange } = renderSearchBar([], [fakeNoteDTO("Note")]);
     const user = userEvent.setup();

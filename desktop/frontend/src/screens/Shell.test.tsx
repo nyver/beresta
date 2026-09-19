@@ -214,6 +214,25 @@ describe("Shell", () => {
     expect(screen.getByPlaceholderText("search.placeholder")).toHaveValue("");
   });
 
+  it("offers a way to clear a search that matched nothing (task 6.4's actionable no-results state)", async () => {
+    const browsedNote = fakeNote({ title: "Browsed note" });
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([browsedNote]);
+    appMock.Search.mockResolvedValue([]);
+    renderShell();
+    const user = userEvent.setup();
+
+    await screen.findByText("Browsed note");
+    await user.type(screen.getByPlaceholderText("search.placeholder"), "deleted:true");
+    await screen.findByText("search.no_results");
+
+    await user.click(screen.getByRole("button", { name: "search.clear_button" }));
+
+    expect(screen.getByPlaceholderText("search.placeholder")).toHaveValue("");
+    expect(await screen.findByText("Browsed note")).toBeInTheDocument();
+  });
+
   it("shows a retryable error when loading fails", async () => {
     appMock.ListNotebooks.mockRejectedValue(
       new Error(JSON.stringify({ code: "internal", message: "boom" })),

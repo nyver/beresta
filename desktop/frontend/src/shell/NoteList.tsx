@@ -32,6 +32,11 @@ export interface NoteListProps {
   /** Overrides the "no notes" message shown when notes is empty, e.g. to
    * distinguish an empty search result from an empty notebook. */
   emptyMessage?: string;
+  /** An actionable next step shown alongside emptyMessage, e.g. clearing an
+   * active search that matched nothing (task 6.4's "actionable no-results
+   * state") rather than leaving the user at a dead end. Ignored while notes
+   * is non-empty. */
+  emptyAction?: { label: string; onClick: () => void };
 }
 
 // Taller than a title-only row (task: note list shows a preview + date) so
@@ -83,6 +88,7 @@ export function NoteList({
   noteMetaById,
   highlightTerms = [],
   emptyMessage,
+  emptyAction,
 }: NoteListProps) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -116,7 +122,16 @@ export function NoteList({
     return <p className="note-list-status">{t("common.loading")}</p>;
   }
   if (notes.length === 0) {
-    return <p className="note-list-status">{emptyMessage ?? t("shell.notelist_empty")}</p>;
+    return (
+      <div className="note-list-status">
+        <p>{emptyMessage ?? t("shell.notelist_empty")}</p>
+        {emptyAction ? (
+          <button type="button" className="link-button" onClick={emptyAction.onClick}>
+            {emptyAction.label}
+          </button>
+        ) : null}
+      </div>
+    );
   }
 
   return (

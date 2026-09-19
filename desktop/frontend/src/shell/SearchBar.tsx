@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  type KeyboardEvent,
 } from "react";
 
 import {
@@ -107,6 +108,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
   ref,
 ) {
   const { t, errorMessage } = useI18n();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [tagFilterId, setTagFilterId] = useState("");
@@ -224,6 +226,19 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
 
   useImperativeHandle(ref, () => ({ clear: reset }), []);
 
+  // Windows Escape convention for a search box (task 6.4): the first
+  // Escape clears an active query/filters rather than doing nothing, and
+  // only blurs the field once there is nothing left to clear.
+  function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    if (hasQuery) {
+      reset();
+    } else {
+      inputRef.current?.blur();
+    }
+  }
+
   function handleSelectSaved(id: string) {
     setSelectedSavedSearchId(id);
     if (!id) {
@@ -281,9 +296,11 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
           🔍
         </span>
         <input
+          ref={inputRef}
           type="search"
           value={text}
           onChange={(event) => setText(event.target.value)}
+          onKeyDown={handleInputKeyDown}
           placeholder={t("search.placeholder")}
           aria-label={t("search.placeholder")}
         />

@@ -876,6 +876,11 @@ export function Shell({ account, onLocked }: ShellProps) {
               noteMetaById={noteMetaById}
               highlightTerms={highlightTerms}
               emptyMessage={searchResults !== null ? t("search.no_results") : undefined}
+              emptyAction={
+                searchResults !== null
+                  ? { label: t("search.clear_button"), onClick: () => searchBarRef.current?.clear() }
+                  : undefined
+              }
             />
           </section>
           <section className="shell-detail">

@@ -578,6 +578,10 @@ li:hover > .tree-row-delete,
   color: #5a5148;
 }
 
+.note-list-status .link-button {
+  margin-top: 0.5rem;
+}
+
 .note-row {
   display: flex;
   flex-direction: column;

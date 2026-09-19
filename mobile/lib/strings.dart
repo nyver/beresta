@@ -13,6 +13,11 @@ class Strings {
       "local_hint":
           "Your account starts only on this device. A server is optional.",
       "returning_hint": "Enter your passphrase to unlock this device.",
+      "sync_prompt_title": "Connect to a sync server?",
+      "sync_prompt_description":
+          "You can connect this device to a self-hosted sync server now, or skip this and do it later from Settings — your local notes are unaffected either way.",
+      "sync_prompt_connect": "Connect now",
+      "sync_prompt_skip": "Skip for now",
       "notes": "Notes",
       "notebooks": "Notebooks",
       "new_notebook": "New notebook",
@@ -208,6 +213,11 @@ class Strings {
           "Аккаунт создаётся только на этом устройстве. Сервер необязателен.",
       "returning_hint":
           "Введите парольную фразу, чтобы разблокировать это устройство.",
+      "sync_prompt_title": "Подключить сервер синхронизации?",
+      "sync_prompt_description":
+          "Можно подключить это устройство к собственному серверу синхронизации сейчас или пропустить этот шаг и сделать это позже в настройках — в любом случае локальные заметки не пострадают.",
+      "sync_prompt_connect": "Подключить сейчас",
+      "sync_prompt_skip": "Пропустить",
       "notes": "Заметки",
       "notebooks": "Блокноты",
       "new_notebook": "Новый блокнот",

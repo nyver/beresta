@@ -4,7 +4,7 @@ import "dart:typed_data";
 import "package:flutter/foundation.dart" show kDebugMode;
 import "package:flutter/material.dart";
 import "package:flutter/services.dart"
-    show Clipboard, ClipboardData, PlatformException;
+    show AutofillHints, Clipboard, ClipboardData, PlatformException;
 import "package:flutter_localizations/flutter_localizations.dart";
 import "package:flutter_quill/flutter_quill.dart";
 
@@ -326,6 +326,11 @@ class _SessionRootState extends State<SessionRoot> {
   bool? unlocked;
   bool accountExists = false;
   bool deviceUnlockAvailable = false;
+  // Set from OnboardingScreen's optional post-create sync prompt (task
+  // 7.2): true only when the user just created a local account and chose
+  // "Connect now", so NotesShell opens the server sheet on this one
+  // transition and never again on an ordinary unlock.
+  bool openServerOnUnlock = false;
 
   @override
   void initState() {
@@ -387,7 +392,11 @@ class _SessionRootState extends State<SessionRoot> {
         accountExists: accountExists,
         deviceUnlockAvailable: deviceUnlockAvailable,
         onDeviceUnlock: unlockWithDeviceAuthentication,
-        onUnlocked: () => setState(() => unlocked = true),
+        onUnlocked:
+            ({openServer = false}) => setState(() {
+              unlocked = true;
+              openServerOnUnlock = openServer;
+            }),
       );
     }
     return NotesShell(
@@ -396,6 +405,7 @@ class _SessionRootState extends State<SessionRoot> {
       language: widget.language,
       onLanguageChanged: widget.onLanguageChanged,
       onLocked: () => setState(() => unlocked = false),
+      openServerOnMount: openServerOnUnlock,
     );
   }
 }
@@ -417,7 +427,10 @@ class OnboardingScreen extends StatefulWidget {
   final Strings strings;
   final String language;
   final ValueChanged<String> onLanguageChanged;
-  final VoidCallback onUnlocked;
+  // openServer is only ever true after a fresh local account creation, when
+  // the user chose "Connect now" on the optional post-create sync prompt
+  // below (task 7.2) - never for an ordinary unlock.
+  final void Function({bool openServer}) onUnlocked;
   final bool accountExists;
   final bool deviceUnlockAvailable;
   final Future<void> Function()? onDeviceUnlock;
@@ -430,6 +443,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final passphrase = TextEditingController();
   bool busy = false;
   String? error;
+  // Set once CreateAccount durably succeeds: from then on this screen
+  // shows the optional post-create sync prompt instead of calling
+  // widget.onUnlocked immediately (task 7.2, mirroring desktop's task
+  // 7.1) - local account creation is never blocked on this choice, but
+  // the choice itself is not skipped silently either. Never set on the
+  // unlock (returning-user) path.
+  bool showSyncPrompt = false;
 
   Future<void> submit(bool create) async {
     if (passphrase.text.isEmpty) return;
@@ -440,10 +460,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     try {
       if (create) {
         await widget.gateway.createAccount(passphrase.text);
+        if (mounted) setState(() => showSyncPrompt = true);
       } else {
         await widget.gateway.unlockAccount(passphrase.text);
+        widget.onUnlocked();
       }
-      widget.onUnlocked();
     } catch (failure) {
       if (mounted) {
         setState(() => error = describeFailure(widget.strings, failure));
@@ -479,6 +500,44 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (showSyncPrompt) {
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.strings("sync_prompt_title"),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      widget.strings("sync_prompt_description"),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton(
+                      onPressed: () => widget.onUnlocked(openServer: true),
+                      child: Text(widget.strings("sync_prompt_connect")),
+                    ),
+                    TextButton(
+                      onPressed: () => widget.onUnlocked(),
+                      child: Text(widget.strings("sync_prompt_skip")),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -497,14 +556,27 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
                 Text(widget.strings("tagline"), textAlign: TextAlign.center),
                 const SizedBox(height: 24),
-                TextField(
-                  controller: passphrase,
-                  obscureText: true,
-                  enableSuggestions: false,
-                  autocorrect: false,
-                  decoration: InputDecoration(
-                    labelText: widget.strings("passphrase"),
-                    border: const OutlineInputBorder(),
+                AutofillGroup(
+                  child: TextField(
+                    controller: passphrase,
+                    obscureText: true,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    // Platform-native password/autofill behavior (task
+                    // 7.2): a real password manager only offers to save or
+                    // fill this field when it carries the hint matching
+                    // what's actually happening - a new credential while
+                    // creating an account, an existing one while unlocking
+                    // - rather than a generic obscured text field.
+                    autofillHints: [
+                      widget.accountExists
+                          ? AutofillHints.password
+                          : AutofillHints.newPassword,
+                    ],
+                    decoration: InputDecoration(
+                      labelText: widget.strings("passphrase"),
+                      border: const OutlineInputBorder(),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -588,6 +660,7 @@ class NotesShell extends StatefulWidget {
     required this.language,
     required this.onLanguageChanged,
     required this.onLocked,
+    this.openServerOnMount = false,
     super.key,
   });
 
@@ -596,6 +669,12 @@ class NotesShell extends StatefulWidget {
   final String language;
   final ValueChanged<String> onLanguageChanged;
   final VoidCallback onLocked;
+  // Opens the server/sync sheet once, right after first build - set when
+  // onboarding's optional post-create sync prompt (task 7.2, mirroring
+  // desktop's task 7.1) chose "Connect now", so the user lands directly in
+  // the connect flow instead of having to find it in settings themselves
+  // right after asking for it.
+  final bool openServerOnMount;
 
   @override
   State<NotesShell> createState() => _NotesShellState();
@@ -637,6 +716,11 @@ class _NotesShellState extends State<NotesShell> {
       const Duration(seconds: 1),
       (_) => pollEvents(),
     );
+    if (widget.openServerOnMount) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(showServer());
+      });
+    }
   }
 
   Future<void> refreshSyncSummary() async {

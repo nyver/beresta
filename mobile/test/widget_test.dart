@@ -96,6 +96,55 @@ void main() {
   );
 
   testWidgets(
+    "creating a local account shows the optional sync prompt, and Skip enters the shell without opening it (task 7.2)",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: false);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextField, "Passphrase"),
+        "correct horse battery staple",
+      );
+      await tester.tap(find.text("Create local account"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Connect to a sync server?"), findsOneWidget);
+      expect(find.text("Create local account"), findsNothing);
+
+      await tester.tap(find.text("Skip for now"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Offline note"), findsOneWidget);
+      expect(find.widgetWithText(TextField, "HTTPS server URL"), findsNothing);
+    },
+  );
+
+  testWidgets(
+    "connecting from the sync prompt enters the shell with the server sheet already open (task 7.2)",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: false);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextField, "Passphrase"),
+        "correct horse battery staple",
+      );
+      await tester.tap(find.text("Create local account"));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text("Connect now"));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(TextField, "HTTPS server URL"),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
     "revision history lists newest first with a checkpoint badge and shows a diff",
     (tester) async {
       final gateway = FakeGateway(unlocked: true)

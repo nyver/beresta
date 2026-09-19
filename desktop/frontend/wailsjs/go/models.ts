@@ -424,6 +424,7 @@ export namespace main {
 	}
 	export class ImportWarningDTO {
 	    note_title: string;
+	    kind: string;
 	    message: string;
 	
 	    static createFrom(source: any = {}) {
@@ -433,11 +434,14 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.note_title = source["note_title"];
+	        this.kind = source["kind"];
 	        this.message = source["message"];
 	    }
 	}
 	export class ImportResultDTO {
 	    new_note_ids: string[];
+	    simplified_count: number;
+	    skipped_count: number;
 	    warnings: ImportWarningDTO[];
 	
 	    static createFrom(source: any = {}) {
@@ -447,6 +451,8 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.new_note_ids = source["new_note_ids"];
+	        this.simplified_count = source["simplified_count"];
+	        this.skipped_count = source["skipped_count"];
 	        this.warnings = this.convertValues(source["warnings"], ImportWarningDTO);
 	    }
 	

@@ -157,6 +157,17 @@ export function ImportExportPanel({ onImported }: ImportExportPanelProps) {
         {importResult ? (
           <div className="import-result">
             <p className="import-success">{t("import.success")}</p>
+            <ul className="import-summary">
+              <li>
+                {t("import.summary_notes_imported")}: {importResult.new_note_ids.length}
+              </li>
+              <li>
+                {t("import.summary_formatting_simplified")}: {importResult.simplified_count}
+              </li>
+              <li>
+                {t("import.summary_files_skipped")}: {importResult.skipped_count}
+              </li>
+            </ul>
             {importResult.warnings.length > 0 ? (
               <>
                 <p>{t("import.warnings_title")}</p>

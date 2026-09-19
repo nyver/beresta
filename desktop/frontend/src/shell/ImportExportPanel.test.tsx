@@ -59,7 +59,12 @@ describe("ImportExportPanel", () => {
     const { onImported } = renderPanel();
     const user = userEvent.setup();
     appMock.PickImportSource.mockResolvedValue("D:\\old-export");
-    appMock.ImportBerestaArchive.mockResolvedValue({ new_note_ids: ["n1", "n2"], warnings: [] });
+    appMock.ImportBerestaArchive.mockResolvedValue({
+      new_note_ids: ["n1", "n2"],
+      simplified_count: 0,
+      skipped_count: 0,
+      warnings: [],
+    });
 
     await user.click(screen.getByRole("button", { name: "import.beresta_button" }));
 
@@ -75,7 +80,15 @@ describe("ImportExportPanel", () => {
     appMock.PickImportSource.mockResolvedValue("D:\\export.enex");
     appMock.ImportEvernoteArchive.mockResolvedValue({
       new_note_ids: ["n1"],
-      warnings: [{ note_title: "Recipe", message: "attached checklist was flattened to plain text" }],
+      simplified_count: 1,
+      skipped_count: 0,
+      warnings: [
+        {
+          note_title: "Recipe",
+          kind: "simplified_formatting",
+          message: "attached checklist was flattened to plain text",
+        },
+      ],
     });
 
     await user.click(screen.getByRole("button", { name: "import.evernote_button" }));
@@ -84,6 +97,29 @@ describe("ImportExportPanel", () => {
     expect(await screen.findByText("import.warnings_title")).toBeInTheDocument();
     expect(screen.getByText("Recipe")).toBeInTheDocument();
     expect(screen.getByText(/attached checklist was flattened/)).toBeInTheDocument();
+  });
+
+  it("shows a count summary of notes imported, formatting simplified, and files skipped (task 6.7)", async () => {
+    renderPanel();
+    const user = userEvent.setup();
+    appMock.PickImportSource.mockResolvedValue("D:\\old-export");
+    appMock.ImportBerestaArchive.mockResolvedValue({
+      new_note_ids: ["n1", "n2", "n3"],
+      simplified_count: 3,
+      skipped_count: 1,
+      warnings: [
+        { note_title: "A", kind: "simplified_formatting", message: "formatting simplified" },
+        { note_title: "A", kind: "skipped_file", message: "attachment could not be imported" },
+        { note_title: "B", kind: "simplified_formatting", message: "formatting simplified" },
+        { note_title: "C", kind: "simplified_formatting", message: "formatting simplified" },
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: "import.beresta_button" }));
+
+    expect(await screen.findByText("import.summary_notes_imported: 3")).toBeInTheDocument();
+    expect(screen.getByText("import.summary_formatting_simplified: 3")).toBeInTheDocument();
+    expect(screen.getByText("import.summary_files_skipped: 1")).toBeInTheDocument();
   });
 
   it("does nothing when the import source picker is canceled", async () => {

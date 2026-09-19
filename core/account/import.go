@@ -17,11 +17,27 @@ import (
 	"github.com/beresta-app/beresta/core/sync/yjsadapter"
 )
 
+// ImportWarningKind classifies one ImportWarning for the result summary's
+// counts (notes-management spec: "the result summary counts the simplified
+// items"), distinguishing content that was imported in a degraded form from
+// a file that could not be imported at all.
+type ImportWarningKind string
+
+const (
+	// ImportWarningSimplifiedFormatting reports a note whose rich text
+	// could not be recovered and was imported as plain text instead.
+	ImportWarningSimplifiedFormatting ImportWarningKind = "simplified_formatting"
+	// ImportWarningSkippedFile reports an attachment or resource that could
+	// not be imported at all; the note itself still was.
+	ImportWarningSkippedFile ImportWarningKind = "skipped_file"
+)
+
 // ImportWarning reports one element an import could not fully represent
 // (notes-management spec: "reports any elements that could not be
 // represented"), attributed to the note it came from.
 type ImportWarning struct {
 	NoteTitle string
+	Kind      ImportWarningKind
 	Message   string
 }
 
@@ -74,6 +90,7 @@ func (a *Account) ImportBerestaArchive(ctx context.Context, workspaceID model.ID
 		result.NewNoteIDs = append(result.NewNoteIDs, newNote.ID)
 		result.Warnings = append(result.Warnings, ImportWarning{
 			NoteTitle: entry.Title,
+			Kind:      ImportWarningSimplifiedFormatting,
 			Message:   "rich text formatting could not be recovered from exported Markdown; imported as plain text",
 		})
 
@@ -95,6 +112,7 @@ func (a *Account) ImportBerestaArchive(ctx context.Context, workspaceID model.ID
 			if err := a.importAttachmentFile(ctx, workspaceID, newNote.ID, filepath.Join(sourceDir, filepath.FromSlash(attachmentPath))); err != nil {
 				result.Warnings = append(result.Warnings, ImportWarning{
 					NoteTitle: entry.Title,
+					Kind:      ImportWarningSkippedFile,
 					// The underlying error is deliberately not interpolated
 					// here: it can be a raw filesystem error carrying a full
 					// path (including the OS username), which must not
@@ -256,6 +274,7 @@ func (a *Account) ImportEvernoteArchive(ctx context.Context, workspaceID model.I
 		result.NewNoteIDs = append(result.NewNoteIDs, newNote.ID)
 		result.Warnings = append(result.Warnings, ImportWarning{
 			NoteTitle: title,
+			Kind:      ImportWarningSimplifiedFormatting,
 			Message:   "Evernote rich text (ENML) has no equivalent in this app and was flattened to plain text",
 		})
 
@@ -281,6 +300,7 @@ func (a *Account) ImportEvernoteArchive(ctx context.Context, workspaceID model.I
 			if err := a.importEnexResource(ctx, workspaceID, newNote.ID, i, res); err != nil {
 				result.Warnings = append(result.Warnings, ImportWarning{
 					NoteTitle: title,
+					Kind:      ImportWarningSkippedFile,
 					// The underlying error is deliberately not interpolated
 					// here: see the identical rationale on the Beresta
 					// archive import path above.

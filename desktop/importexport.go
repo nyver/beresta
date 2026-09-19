@@ -77,21 +77,42 @@ func (a *App) ExportNotes(destDir string, noteIDs []string) (ExportManifestDTO, 
 // ImportWarningDTO is one element an import could not fully represent.
 type ImportWarningDTO struct {
 	NoteTitle string `json:"note_title"`
-	Message   string `json:"message"`
+	// Kind is one of account.ImportWarningKind's values ("simplified_formatting"
+	// or "skipped_file"), letting the frontend count warnings by category for
+	// the result summary without parsing Message.
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
 }
 
-// ImportResultDTO reports what an import actually did.
+// ImportResultDTO reports what an import actually did. SimplifiedCount and
+// SkippedCount are Warnings pre-counted by kind (notes-management spec:
+// "the result summary counts the simplified items"), so the frontend does
+// not need to duplicate account.ImportWarningKind's classification logic.
 type ImportResultDTO struct {
-	NewNoteIDs []string           `json:"new_note_ids"`
-	Warnings   []ImportWarningDTO `json:"warnings"`
+	NewNoteIDs      []string           `json:"new_note_ids"`
+	SimplifiedCount int                `json:"simplified_count"`
+	SkippedCount    int                `json:"skipped_count"`
+	Warnings        []ImportWarningDTO `json:"warnings"`
 }
 
 func importResultDTO(r account.ImportResult) ImportResultDTO {
 	warnings := make([]ImportWarningDTO, len(r.Warnings))
+	var simplifiedCount, skippedCount int
 	for i, w := range r.Warnings {
-		warnings[i] = ImportWarningDTO{NoteTitle: w.NoteTitle, Message: w.Message}
+		warnings[i] = ImportWarningDTO{NoteTitle: w.NoteTitle, Kind: string(w.Kind), Message: w.Message}
+		switch w.Kind {
+		case account.ImportWarningSimplifiedFormatting:
+			simplifiedCount++
+		case account.ImportWarningSkippedFile:
+			skippedCount++
+		}
 	}
-	return ImportResultDTO{NewNoteIDs: idStrings(r.NewNoteIDs), Warnings: warnings}
+	return ImportResultDTO{
+		NewNoteIDs:      idStrings(r.NewNoteIDs),
+		SimplifiedCount: simplifiedCount,
+		SkippedCount:    skippedCount,
+		Warnings:        warnings,
+	}
 }
 
 // ImportBerestaArchive imports a portable archive written by ExportNotes.

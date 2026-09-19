@@ -55,6 +55,9 @@ func TestImportBerestaArchiveRecreatesExportedContent(t *testing.T) {
 	if len(result.Warnings) == 0 {
 		t.Fatal("expected a formatting-simplification warning")
 	}
+	if result.Warnings[0].Kind != ImportWarningSimplifiedFormatting {
+		t.Fatalf("Warnings[0].Kind = %v, want %v", result.Warnings[0].Kind, ImportWarningSimplifiedFormatting)
+	}
 
 	imported, err := target.GetNote(ctx, result.NewNoteIDs[0])
 	if err != nil {
@@ -231,7 +234,11 @@ func TestImportBerestaArchiveAttachmentWarningOmitsRawFilesystemDetail(t *testin
 	if len(result.Warnings) == 0 {
 		t.Fatal("expected a warning for the missing attachment")
 	}
+	sawSkippedFile := false
 	for _, warning := range result.Warnings {
+		if warning.Kind == ImportWarningSkippedFile {
+			sawSkippedFile = true
+		}
 		if strings.Contains(warning.Message, exportDir) {
 			t.Fatalf("ImportWarning.Message leaked the export directory path: %q", warning.Message)
 		}
@@ -239,6 +246,9 @@ func TestImportBerestaArchiveAttachmentWarningOmitsRawFilesystemDetail(t *testin
 			strings.Contains(warning.Message, "cannot find the file") {
 			t.Fatalf("ImportWarning.Message leaked raw OS error text: %q", warning.Message)
 		}
+	}
+	if !sawSkippedFile {
+		t.Fatal("expected one of the warnings to be classified ImportWarningSkippedFile")
 	}
 }
 

@@ -190,8 +190,13 @@ new notes" (`RestoreSelective`) or the separately confirmed, destructive
 "replace everything with this backup" (`RestoreWhole`); the same dialog's
 import/export section requires an explicit warning acknowledgement before
 a plaintext export (notes and attachments leave the encrypted store as
-plain files) and surfaces per-note warnings from a Beresta-archive or
-Evernote `.enex` import. The topbar also carries a configurable auto-lock
+plain files) and, on completion, an import reports a count summary
+(notes imported, formatting simplified, files skipped - each
+`ImportWarning` is now classified by `account.ImportWarningKind` so the
+frontend never has to re-derive these counts) alongside the existing
+per-note warning list from a Beresta-archive or Evernote `.enex` import,
+so a lossy conversion is never only visible by scrolling a raw list. The
+topbar also carries a configurable auto-lock
 timeout (never/5/15/30/60 minutes, backed by `AppSettings.AutoLockMinutes`
 and reset by any keyboard/mouse activity) and a badge reflecting the
 account's actual key-protection mode (`AccountInfo.KeyProtection`, already

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -222,5 +222,97 @@ describe("NotebookTree", () => {
     await user.click(await screen.findByRole("button", { name: "shell.rename_notebook_button" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
+  });
+
+  it("reparents a notebook via the row menu's move dialog (the keyboard/menu alternative to drag)", async () => {
+    const work = fakeNotebook({ name: "Work" });
+    const personal = fakeNotebook({ name: "Personal" });
+    appMock.MoveNotebook.mockResolvedValue(undefined);
+    const { onMoved } = renderTree([work, personal]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.move_notebook_menu_item" }));
+    const dialog = await screen.findByRole("dialog", { name: "shell.move_notebook_title: Work" });
+    await user.click(within(dialog).getByRole("button", { name: "Personal" }));
+
+    expect(appMock.MoveNotebook).toHaveBeenCalledWith(work.id, personal.id);
+    expect(onMoved).toHaveBeenCalledWith(work.id, personal.id);
+  });
+
+  it("moving a notebook to the top level via the move dialog passes an empty parent", async () => {
+    const child = fakeNotebook({ name: "Projects" });
+    appMock.MoveNotebook.mockResolvedValue(undefined);
+    const { onMoved } = renderTree([child]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Projects" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.move_notebook_menu_item" }));
+    await user.click(await screen.findByRole("button", { name: "shell.no_parent_notebook" }));
+
+    expect(appMock.MoveNotebook).toHaveBeenCalledWith(child.id, "");
+    expect(onMoved).toHaveBeenCalledWith(child.id, "");
+  });
+
+  it("does not offer a notebook as a move target for itself", async () => {
+    const root = fakeNotebook({ name: "Work" });
+    renderTree([root]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.move_notebook_menu_item" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "shell.move_notebook_title: Work" });
+    expect(within(dialog).queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "shell.no_parent_notebook" })).toBeInTheDocument();
+  });
+
+  it("explains an invalid move (a cycle) instead of leaving a generic error", async () => {
+    const root = fakeNotebook({ name: "Work" });
+    const child = fakeNotebook({ name: "Projects", parent_id: root.id });
+    appMock.MoveNotebook.mockRejectedValue(
+      new Error(JSON.stringify({ code: "notebook_cycle", message: "store: notebook parent would create a cycle" })),
+    );
+    renderTree([root, child]);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.notebook_actions: Work" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.move_notebook_menu_item" }));
+    await user.click(await screen.findByRole("button", { name: "Projects" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("errors.notebook_cycle");
+  });
+
+  it("persists notebook expansion across a remount", async () => {
+    const root = fakeNotebook({ name: "Work" });
+    const child = fakeNotebook({ name: "Projects", parent_id: root.id });
+    const tree = (
+      <I18nProvider>
+        <NotebookTree
+          notebooks={[root, child]}
+          selectedId=""
+          onSelect={vi.fn()}
+          onCreateNote={vi.fn()}
+          onCreated={vi.fn()}
+          onRenamed={vi.fn()}
+          onDeleted={vi.fn()}
+          onMoved={vi.fn()}
+          onNoteMoved={vi.fn()}
+        />
+      </I18nProvider>
+    );
+    mockLocaleCatalog();
+    mockSettings();
+    const { unmount } = render(tree);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "shell.expand_notebook" }));
+    expect(await screen.findByRole("button", { name: "Projects" })).toBeInTheDocument();
+    unmount();
+
+    mockLocaleCatalog();
+    mockSettings();
+    render(tree);
+
+    expect(await screen.findByRole("button", { name: "Projects" })).toBeInTheDocument();
   });
 });

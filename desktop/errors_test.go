@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/beresta-app/beresta/core/account"
+	"github.com/beresta-app/beresta/core/store"
 )
 
 func TestAppErrorErrorEncodesJSONForTheFrontendBridge(t *testing.T) {
@@ -60,5 +61,24 @@ func TestMapErrorReportsDistinctCodesForAttachmentPreflightFailures(t *testing.T
 		if !isAppErrorCode(mapError(tc.err), tc.want) {
 			t.Errorf("mapError(%v).Code = %v, want %v", tc.err, mapError(tc.err), tc.want)
 		}
+	}
+}
+
+// TestMapErrorReportsNotebookCycleDistinctlyFromInvalidInput covers task
+// 6.3's invalid-move feedback: dropping (or menu-moving) a notebook into
+// its own descendant must surface a code the frontend can localize into a
+// specific explanation, not the generic "that value is not valid" message
+// shared by every other invalid_input case.
+func TestMapErrorReportsNotebookCycleDistinctlyFromInvalidInput(t *testing.T) {
+	if !isAppErrorCode(mapError(store.ErrNotebookCycle), ErrCodeNotebookCycle) {
+		t.Errorf("mapError(store.ErrNotebookCycle).Code = %v, want %v", mapError(store.ErrNotebookCycle), ErrCodeNotebookCycle)
+	}
+	if isAppErrorCode(mapError(store.ErrNotebookCycle), ErrCodeInvalidInput) {
+		t.Errorf("mapError(store.ErrNotebookCycle) still reports the generic %v code", ErrCodeInvalidInput)
+	}
+	// store.ErrInvalidName must still map to the generic code: only the
+	// cycle case gets its own.
+	if !isAppErrorCode(mapError(store.ErrInvalidName), ErrCodeInvalidInput) {
+		t.Errorf("mapError(store.ErrInvalidName).Code = %v, want %v", mapError(store.ErrInvalidName), ErrCodeInvalidInput)
 	}
 }

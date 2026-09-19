@@ -160,6 +160,11 @@ beforeEach(() => {
   // other appMock entry) avoids repeating it in every test that renders
   // Shell.
   appMock.NoteTagsByWorkspace.mockResolvedValue({});
+  // Sidebar/focus-mode/selection/notebook-expansion state (Shell.tsx,
+  // NotebookTree.tsx) persists to real jsdom localStorage, which otherwise
+  // survives between tests in the same file and lets an earlier test's
+  // persisted state leak into a later one.
+  window.localStorage.clear();
 });
 
 // @testing-library/react's own automatic-cleanup registration only fires

@@ -86,7 +86,16 @@ everything filed under it) via the existing `MoveNotebook` cycle-checked
 binding, and dragging a note from the list onto a notebook row refiles it
 via `SetNoteNotebook` - both are plain reparenting/refiling, since neither
 `store.Notebook` nor `model.Note` carries a persisted sibling order to
-reorder within a level. Tags themselves are created from the sidebar's tag
+reorder within a level. Every drag operation also has a menu/keyboard
+alternative: a notebook row's kebab menu has its own "Move to..." dialog
+that reparents it the same way, and the open note's "⋮" menu has a "Move to
+notebook..." dialog that refiles it - both surface a specific, localized
+explanation (`errors.notebook_cycle`) rather than a generic error when the
+chosen move would create a cycle. The notebook tree's expanded/collapsed
+state and the sidebar's active selection (All Notes, a notebook, or a tag)
+persist to `localStorage` across restarts, falling back to All Notes if a
+persisted notebook or tag no longer exists. Tags themselves are created from
+the sidebar's tag
 list (behind a "+" toggle that opens the same naming dialog), and assigned to
 or removed from the open note via a chip editor in the note header
 (`shell/NoteTagsEditor.tsx`, backed by `App.NoteTagsByWorkspace` and the

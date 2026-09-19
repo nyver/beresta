@@ -1,12 +1,13 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
-import { type SyncState } from "../api";
+import { setNoteNotebook, unwrapError, type SyncState } from "../api";
 import { NoteEditor, type NoteEditorHandle, type NoteSaveState } from "../editor/NoteEditor";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { AttachmentPanel, type AttachmentPanelHandle } from "./AttachmentPanel";
 import { KebabMenu } from "./KebabMenu";
 import { Modal } from "./Modal";
+import { buildNotebookTree, flattenVisibleNotebooks } from "./notebookTreeModel";
 import { NoteTagsEditor } from "./NoteTagsEditor";
 import { RevisionsPanel } from "./RevisionsPanel";
 import { SaveStatusLine } from "./SaveStatusLine";
@@ -20,6 +21,14 @@ export interface NoteEditorPaneHandle {
 export interface NoteEditorPaneProps {
   note: main.NoteDTO | null;
   tags: main.TagDTO[];
+  /** Every workspace notebook, used only to populate the "Move to
+   * notebook..." picker below - the keyboard/menu alternative to dragging
+   * the note onto a notebook row in the sidebar (task 6.3). */
+  notebooks: main.NotebookDTO[];
+  /** Called after the open note has been durably refiled into a different
+   * notebook, so the caller (Shell) can patch its own notes state the same
+   * way it does for a drag-and-drop refile (see Shell's handleNoteMoved). */
+  onMove: (noteId: string, notebookId: string) => void;
   /** Tag ids currently assigned to the open note; ignored while no note is
    * open. */
   assignedTagIds: string[];
@@ -77,6 +86,8 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     {
       note,
       tags,
+      notebooks,
+      onMove,
       assignedTagIds,
       onTitleCommitted,
       onDelete,
@@ -91,7 +102,7 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     },
     ref,
   ) {
-    const { t } = useI18n();
+    const { t, errorMessage } = useI18n();
     const editorRef = useRef<NoteEditorHandle>(null);
     const attachmentPanelRef = useRef<AttachmentPanelHandle>(null);
     const titleInputRef = useRef<HTMLInputElement>(null);
@@ -112,6 +123,16 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
     // so switching notes does not leave the previous note's modal open.
     const [historyOpen, setHistoryOpen] = useState(false);
     const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+    // The keyboard/menu alternative to dragging this note onto a notebook
+    // row in the sidebar (task 6.3): same setNoteNotebook call, same
+    // localized error surfaced through formError.
+    const [moveOpen, setMoveOpen] = useState(false);
+    const [moveBusy, setMoveBusy] = useState(false);
+    const [moveError, setMoveError] = useState<string | null>(null);
+    const notebookNodes = useMemo(
+      () => flattenVisibleNotebooks(buildNotebookTree(notebooks), new Set(notebooks.map((n) => n.id))),
+      [notebooks],
+    );
 
     useEffect(() => {
       setTitle(note?.title ?? "");
@@ -120,7 +141,24 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
       // note=null rather than unmounting it.
       setHistoryOpen(false);
       setAttachmentsOpen(false);
+      setMoveOpen(false);
+      setMoveError(null);
     }, [note?.id, note?.title]);
+
+    async function handleMoveTo(notebookId: string) {
+      if (!note || moveBusy) return;
+      setMoveBusy(true);
+      setMoveError(null);
+      try {
+        await setNoteNotebook(note.id, notebookId);
+        onMove(note.id, notebookId);
+        setMoveOpen(false);
+      } catch (thrown: unknown) {
+        setMoveError(errorMessage(unwrapError(thrown)));
+      } finally {
+        setMoveBusy(false);
+      }
+    }
 
     // Instant creation and durable automatic save (specs/notes-management):
     // a newly created note SHALL be focused without a modal. Only fires for
@@ -181,10 +219,49 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
             label={t("shell.note_actions")}
             items={[
               { label: t("revisions.open_button"), onSelect: () => setHistoryOpen(true) },
+              {
+                label: t("shell.move_to_notebook"),
+                onSelect: () => {
+                  setMoveError(null);
+                  setMoveOpen(true);
+                },
+              },
               { label: t("shell.delete_note"), onSelect: () => onDelete(note.id), destructive: true },
             ]}
           />
         </div>
+        {moveOpen ? (
+          <Modal title={t("shell.move_to_notebook_title")} onClose={() => (moveBusy ? undefined : setMoveOpen(false))}>
+            <ul className="notebook-move-list">
+              <li>
+                <button
+                  type="button"
+                  disabled={moveBusy || note.notebook_id === ""}
+                  onClick={() => void handleMoveTo("")}
+                >
+                  {t("shell.no_notebook")}
+                </button>
+              </li>
+              {notebookNodes.map((node) => (
+                <li key={node.notebook.id} style={{ paddingLeft: `${node.depth}rem` }}>
+                  <button
+                    type="button"
+                    disabled={moveBusy || note.notebook_id === node.notebook.id}
+                    onClick={() => void handleMoveTo(node.notebook.id)}
+                  >
+                    {node.notebook.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {moveBusy ? <p>{t("shell.moving")}</p> : null}
+            {moveError ? (
+              <p className="error" role="alert">
+                {moveError}
+              </p>
+            ) : null}
+          </Modal>
+        ) : null}
         <NoteTagsEditor
           tags={tags}
           assignedTagIds={assignedTagIds}

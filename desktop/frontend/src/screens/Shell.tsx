@@ -51,6 +51,10 @@ const EVENT_SYNC_SUMMARY = "sync:summary";
 // smaller windows) so the user's chosen layout survives a restart.
 const SIDEBAR_COLLAPSED_KEY = "beresta.sidebar-collapsed";
 const FOCUS_MODE_KEY = "beresta.focus-mode";
+// Persisted across launches (task 6.3: the active sidebar selection should
+// survive a restart the same way notebook expansion does - see
+// NotebookTree.tsx's own NOTEBOOK_EXPANDED_KEY).
+const SELECTION_KEY = "beresta.selection";
 
 export interface ShellProps {
   account: main.AccountInfo;
@@ -58,6 +62,25 @@ export interface ShellProps {
 }
 
 type Selection = { kind: "all" } | { kind: "notebook"; id: string } | { kind: "tag"; id: string };
+
+function loadPersistedSelection(): Selection {
+  try {
+    const raw = window.localStorage.getItem(SELECTION_KEY);
+    if (!raw) return { kind: "all" };
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && "kind" in parsed) {
+      const candidate = parsed as { kind: unknown; id?: unknown };
+      if (candidate.kind === "all") return { kind: "all" };
+      if ((candidate.kind === "notebook" || candidate.kind === "tag") && typeof candidate.id === "string") {
+        return { kind: candidate.kind, id: candidate.id };
+      }
+    }
+  } catch {
+    // Corrupt or inaccessible storage falls back to the default selection
+    // rather than throwing out of a render.
+  }
+  return { kind: "all" };
+}
 
 function sortNotesByLastModified(notes: main.NoteDTO[]): main.NoteDTO[] {
   return [...notes].sort((left, right) => {
@@ -92,7 +115,7 @@ export function Shell({ account, onLocked }: ShellProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [selection, setSelection] = useState<Selection>({ kind: "all" });
+  const [selection, setSelection] = useState<Selection>(loadPersistedSelection);
   const [selectedNoteId, setSelectedNoteId] = useState("");
   // The id of a note created this session that the user has not yet
   // edited (title, body, tags, or attachments) - eligible for silent
@@ -161,6 +184,19 @@ export function Shell({ account, onLocked }: ShellProps) {
         setTags(loadedTags);
         setNotes(loadedNotes);
         setNoteTagIds(loadedNoteTagIds);
+        // A selection restored from a previous launch (or from a different
+        // workspace, before task 8.2 scopes this per-workspace) may name a
+        // notebook or tag that no longer exists here - fall back to "All
+        // Notes" rather than showing a permanently empty filtered list.
+        setSelection((current) => {
+          if (current.kind === "notebook" && !loadedNotebooks.some((notebook) => notebook.id === current.id)) {
+            return { kind: "all" };
+          }
+          if (current.kind === "tag" && !loadedTags.some((tag) => tag.id === current.id)) {
+            return { kind: "all" };
+          }
+          return current;
+        });
       })
       .catch((thrown: unknown) => setError(errorMessage(unwrapError(thrown))))
       .finally(() => setLoading(false));
@@ -255,6 +291,15 @@ export function Shell({ account, onLocked }: ShellProps) {
   useEffect(() => {
     window.localStorage.setItem(FOCUS_MODE_KEY, focusMode ? "1" : "0");
   }, [focusMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SELECTION_KEY, JSON.stringify(selection));
+    } catch {
+      // Best-effort persistence; a full/unavailable localStorage should
+      // never break navigation itself.
+    }
+  }, [selection]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -838,6 +883,8 @@ export function Shell({ account, onLocked }: ShellProps) {
               ref={editorPaneRef}
               note={selectedNote}
               tags={tags}
+              notebooks={notebooks}
+              onMove={handleNoteMoved}
               assignedTagIds={selectedNote ? (noteTagIds[selectedNote.id] ?? []) : []}
               onTitleCommitted={handleTitleCommitted}
               onDelete={(noteId) => void handleDeleteNote(noteId)}

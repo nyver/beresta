@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 
 import { createNotebook, deleteNotebook, moveNotebook, renameNotebook, setNoteNotebook, unwrapError } from "../api";
 import { useI18n } from "../i18n";
@@ -13,15 +13,36 @@ import { buildNotebookTree, flattenVisibleNotebooks, type NotebookNode } from ".
 const DRAG_TYPE_NOTEBOOK = "application/x-beresta-notebook-id";
 const DRAG_TYPE_NOTE = "application/x-beresta-note-id";
 
+// Persisted across launches (task 6.3: which notebooks are expanded should
+// survive a restart, same as the sidebar-collapsed/focus-mode flags in
+// Shell.tsx) so the tree does not collapse back to its default every time
+// the app opens.
+const NOTEBOOK_EXPANDED_KEY = "beresta.notebook-expanded";
+
+function loadExpanded(): ReadonlySet<string> {
+  try {
+    const raw = window.localStorage.getItem(NOTEBOOK_EXPANDED_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === "string"));
+  } catch {
+    // Corrupt or inaccessible storage falls back to "nothing expanded"
+    // rather than throwing out of a render.
+    return new Set();
+  }
+}
+
 // The single modal that can be open at a time: naming a new notebook,
-// renaming an existing one, or confirming a deletion. Modeling these as one
-// discriminated union (rather than three separate open/id state pairs)
-// makes "only one dialog open at once" structural instead of a convention
-// callers have to maintain.
+// renaming an existing one, confirming a deletion, or picking a new parent.
+// Modeling these as one discriminated union (rather than separate open/id
+// state pairs) makes "only one dialog open at once" structural instead of a
+// convention callers have to maintain.
 type NotebookDialog =
   | { kind: "create"; parentId: string }
   | { kind: "rename"; notebookId: string }
-  | { kind: "delete"; notebookId: string; name: string };
+  | { kind: "delete"; notebookId: string; name: string }
+  | { kind: "move"; notebookId: string; name: string };
 
 export interface NotebookTreeProps {
   notebooks: main.NotebookDTO[];
@@ -68,7 +89,7 @@ export function NotebookTree({
   onNoteMoved,
 }: NotebookTreeProps) {
   const { t, errorMessage } = useI18n();
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(loadExpanded);
   const [dialog, setDialog] = useState<NotebookDialog | null>(null);
   const [formName, setFormName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -80,6 +101,22 @@ export function NotebookTree({
 
   const tree = useMemo(() => buildNotebookTree(notebooks), [notebooks]);
   const visible = useMemo(() => flattenVisibleNotebooks(tree, expanded), [tree, expanded]);
+  // Every notebook, fully flattened regardless of expansion state, for the
+  // "Move to..." picker below - unlike `visible`, a collapsed ancestor must
+  // not hide a valid move target.
+  const allNotebookNodes = useMemo(
+    () => flattenVisibleNotebooks(tree, new Set(notebooks.map((notebook) => notebook.id))),
+    [tree, notebooks],
+  );
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(NOTEBOOK_EXPANDED_KEY, JSON.stringify([...expanded]));
+    } catch {
+      // Best-effort persistence; a full/unavailable localStorage should
+      // never break the tree itself.
+    }
+  }, [expanded]);
 
   function toggle(id: string) {
     setExpanded((current) => {
@@ -108,6 +145,14 @@ export function NotebookTree({
   function startDelete(notebook: main.NotebookDTO) {
     setFormError(null);
     setDialog({ kind: "delete", notebookId: notebook.id, name: notebook.name });
+  }
+
+  // The keyboard/menu alternative to dragging a notebook row onto another
+  // one (task 6.3): reparents through the same moveNotebook API and surfaces
+  // the same errors (including a cycle) that a drag-and-drop attempt would.
+  function startMove(notebook: main.NotebookDTO) {
+    setFormError(null);
+    setDialog({ kind: "move", notebookId: notebook.id, name: notebook.name });
   }
 
   function closeDialog() {
@@ -154,6 +199,21 @@ export function NotebookTree({
     try {
       await deleteNotebook(dialog.notebookId);
       onDeleted(dialog.notebookId);
+      setDialog(null);
+    } catch (thrown: unknown) {
+      setFormError(errorMessage(unwrapError(thrown)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleMoveSubmit(newParentId: string) {
+    if (busy || dialog?.kind !== "move") return;
+    setBusy(true);
+    setFormError(null);
+    try {
+      await moveNotebook(dialog.notebookId, newParentId);
+      onMoved(dialog.notebookId, newParentId);
       setDialog(null);
     } catch (thrown: unknown) {
       setFormError(errorMessage(unwrapError(thrown)));
@@ -233,6 +293,7 @@ export function NotebookTree({
               onRequestCreateChild={() => startCreate(node.notebook.id)}
               onRequestRename={() => startRename(node.notebook)}
               onRequestDelete={() => startDelete(node.notebook)}
+              onRequestMove={() => startMove(node.notebook)}
               onDragOver={(event) => handleDragOver(node.notebook.id, event)}
               onDragLeave={() => handleDragLeave(node.notebook.id)}
               onDrop={(event) => void handleDrop(node.notebook.id, event)}
@@ -297,6 +358,32 @@ export function NotebookTree({
           ) : null}
         </Modal>
       ) : null}
+      {dialog?.kind === "move" ? (
+        <Modal title={`${t("shell.move_notebook_title")}: ${dialog.name}`} onClose={closeDialog}>
+          <ul className="notebook-move-list">
+            <li>
+              <button type="button" disabled={busy} onClick={() => void handleMoveSubmit("")}>
+                {t("shell.no_parent_notebook")}
+              </button>
+            </li>
+            {allNotebookNodes
+              .filter((node) => node.notebook.id !== dialog.notebookId)
+              .map((node) => (
+                <li key={node.notebook.id} style={{ paddingLeft: `${node.depth}rem` }}>
+                  <button type="button" disabled={busy} onClick={() => void handleMoveSubmit(node.notebook.id)}>
+                    {node.notebook.name}
+                  </button>
+                </li>
+              ))}
+          </ul>
+          {busy ? <p>{t("shell.moving")}</p> : null}
+          {formError ? (
+            <p className="error" role="alert">
+              {formError}
+            </p>
+          ) : null}
+        </Modal>
+      ) : null}
     </nav>
   );
 }
@@ -312,6 +399,7 @@ function NotebookRow({
   onRequestCreateChild,
   onRequestRename,
   onRequestDelete,
+  onRequestMove,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -326,6 +414,7 @@ function NotebookRow({
   onRequestCreateChild: () => void;
   onRequestRename: () => void;
   onRequestDelete: () => void;
+  onRequestMove: () => void;
   onDragOver: (event: DragEvent) => void;
   onDragLeave: () => void;
   onDrop: (event: DragEvent) => void;
@@ -370,6 +459,7 @@ function NotebookRow({
           { label: t("shell.new_note_button"), onSelect: onCreateNote },
           { label: t("shell.new_notebook_menu_item"), onSelect: onRequestCreateChild },
           { label: t("shell.rename_notebook"), onSelect: onRequestRename },
+          { label: t("shell.move_notebook_menu_item"), onSelect: onRequestMove },
           { label: t("shell.delete_notebook"), onSelect: onRequestDelete, destructive: true },
         ]}
       />

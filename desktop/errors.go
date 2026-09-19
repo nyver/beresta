@@ -61,6 +61,7 @@ const (
 	ErrCodeAlreadyExists               = "already_exists"
 	ErrCodeWorkspaceNotHeld            = "workspace_not_held"
 	ErrCodeShareNotFound               = "share_not_found"
+	ErrCodeNotebookCycle               = "notebook_cycle"
 	ErrCodeInternal                    = "internal"
 )
 
@@ -107,7 +108,9 @@ func mapError(err error) error {
 		return &AppError{Code: ErrCodeNotFound, Message: "The requested item was not found."}
 	case errors.Is(err, store.ErrWrongWorkspace):
 		return &AppError{Code: ErrCodeWrongWorkspace, Message: "That item does not belong to this workspace."}
-	case errors.Is(err, store.ErrNotebookCycle), errors.Is(err, store.ErrInvalidName), errors.Is(err, store.ErrEmptySearchQuery), errors.Is(err, store.ErrUnknownSearchTag):
+	case errors.Is(err, store.ErrNotebookCycle):
+		return &AppError{Code: ErrCodeNotebookCycle, Message: err.Error()}
+	case errors.Is(err, store.ErrInvalidName), errors.Is(err, store.ErrEmptySearchQuery), errors.Is(err, store.ErrUnknownSearchTag):
 		return &AppError{Code: ErrCodeInvalidInput, Message: err.Error()}
 	case errors.Is(err, account.ErrInvalidAttachmentMetadata), errors.Is(err, account.ErrAttachmentBlobOrphaned):
 		return &AppError{Code: ErrCodeInvalidInput, Message: err.Error()}

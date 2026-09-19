@@ -7,7 +7,7 @@ import * as Y from "yjs";
 import { bytesToBase64 } from "../editor/base64";
 import { I18nProvider } from "../i18n";
 import { appMock } from "../setupTests";
-import { fakeNote, mockLocaleCatalog, mockSettings } from "../testUtils";
+import { fakeNote, fakeNotebook, mockLocaleCatalog, mockSettings } from "../testUtils";
 import { NoteEditorPane, type NoteEditorPaneHandle, type NoteEditorPaneProps } from "./NoteEditorPane";
 
 function mockEmptyDocument() {
@@ -26,6 +26,8 @@ function baseProps(overrides: Partial<NoteEditorPaneProps> = {}): NoteEditorPane
   return {
     note: null,
     tags: [],
+    notebooks: [],
+    onMove: vi.fn(),
     assignedTagIds: [],
     onTitleCommitted: vi.fn(),
     onDelete: vi.fn(),
@@ -207,6 +209,56 @@ describe("NoteEditorPane", () => {
 
     expect(onDelete).toHaveBeenCalledWith(note.id);
     expect(appMock.DeleteNote).not.toHaveBeenCalled();
+  });
+
+  it("moves the open note to a different notebook via the menu alternative to drag-and-drop", async () => {
+    // The keyboard/menu path for note refiling (task 6.3): identical
+    // outcome to dragging the note onto a notebook row in the sidebar.
+    mockLocaleCatalog();
+    mockSettings();
+    mockEmptyDocument();
+    appMock.SetNoteNotebook.mockResolvedValue(undefined);
+    const notebook = fakeNotebook({ id: "nb-1", name: "Work" });
+    const note = fakeNote({ title: "Title", notebook_id: "" });
+    const onMove = vi.fn();
+    render(
+      <I18nProvider>
+        <NoteEditorPane {...baseProps({ note, notebooks: [notebook], onMove })} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.move_to_notebook" }));
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+
+    await waitFor(() => expect(appMock.SetNoteNotebook).toHaveBeenCalledWith(note.id, "nb-1"));
+    expect(onMove).toHaveBeenCalledWith(note.id, "nb-1");
+  });
+
+  it("shows a localized error and keeps the note in place when moving it fails", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    mockEmptyDocument();
+    appMock.SetNoteNotebook.mockRejectedValue(
+      new Error(JSON.stringify({ code: "internal", message: "disk full" })),
+    );
+    const notebook = fakeNotebook({ id: "nb-1", name: "Work" });
+    const note = fakeNote({ title: "Title", notebook_id: "" });
+    const onMove = vi.fn();
+    render(
+      <I18nProvider>
+        <NoteEditorPane {...baseProps({ note, notebooks: [notebook], onMove })} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.note_actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "shell.move_to_notebook" }));
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
+    expect(onMove).not.toHaveBeenCalled();
   });
 
   it("assigns and removes a tag on the open note", async () => {

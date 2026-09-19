@@ -36,12 +36,12 @@ function renderShell(
   mockSettings(options.settings);
   mockSavedSearches();
   const onLocked = vi.fn();
-  render(
+  const result = render(
     <I18nProvider>
       <Shell account={options.account ?? fakeAccountInfo()} onLocked={onLocked} />
     </I18nProvider>,
   );
-  return { onLocked };
+  return { onLocked, unmount: result.unmount };
 }
 
 describe("Shell", () => {
@@ -99,6 +99,39 @@ describe("Shell", () => {
 
     expect(await screen.findByText("In Work")).toBeInTheDocument();
     expect(screen.queryByText("In workspace root")).not.toBeInTheDocument();
+  });
+
+  it("persists the sidebar selection across a remount (task 6.3)", async () => {
+    const notebook = fakeNotebook({ name: "Work" });
+    appMock.ListNotebooks.mockResolvedValue([notebook]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([
+      fakeNote({ title: "In workspace root" }),
+      fakeNote({ title: "In Work", notebook_id: notebook.id }),
+    ]);
+    const { unmount } = renderShell();
+    const user = userEvent.setup();
+
+    await screen.findByText("In workspace root");
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+    await screen.findByText("In Work");
+    unmount();
+
+    renderShell();
+
+    expect(await screen.findByText("In Work")).toBeInTheDocument();
+    expect(screen.queryByText("In workspace root")).not.toBeInTheDocument();
+  });
+
+  it("falls back to All Notes when the persisted notebook selection no longer exists", async () => {
+    window.localStorage.setItem("beresta.selection", JSON.stringify({ kind: "notebook", id: "gone" }));
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([fakeNote({ title: "In workspace root" })]);
+    renderShell();
+
+    expect(await screen.findByText("In workspace root")).toBeInTheDocument();
+    expect((await screen.findByRole("button", { name: "shell.all_notes" }))).toHaveClass("selected");
   });
 
   it("filters the note list to a selected tag via SearchByTag", async () => {

@@ -15,7 +15,7 @@ type Screen =
   | { name: "loading" }
   | { name: "onboarding" }
   | { name: "unlock"; databasePath: string }
-  | { name: "shell"; account: main.AccountInfo }
+  | { name: "shell"; account: main.AccountInfo; openSync?: boolean }
   | { name: "error"; message: string };
 
 export function App() {
@@ -72,7 +72,7 @@ function AppShell() {
     case "onboarding":
       return (
         <Onboarding
-          onAccountReady={(account) => setScreen({ name: "shell", account })}
+          onAccountReady={(account, openSync) => setScreen({ name: "shell", account, openSync })}
           onSwitchToUnlock={(databasePath) => setScreen({ name: "unlock", databasePath })}
         />
       );
@@ -93,7 +93,7 @@ function AppShell() {
             </main>
           }
         >
-          <Shell account={screen.account} onLocked={load} />
+          <Shell account={screen.account} openSyncOnMount={screen.openSync ?? false} onLocked={load} />
         </Suspense>
       );
     case "error":

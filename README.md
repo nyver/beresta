@@ -61,11 +61,21 @@ bridge) so the frontend can localize and branch on `code` instead of
 matching English backend text.
 
 The first screens built on top of that layer are now in place: English/Russian
-onboarding with "Only on this computer" selected by default and a "Connect
-to server" path accepting an invite or trusted connection QR without blocking
-local account creation, a returning-user unlock screen (chosen automatically when
-a previous local account is on record, and submitted with either its Unlock
-button or Enter in the passphrase field), and a main shell with a keyboard-
+onboarding always creates the local encrypted account first regardless of
+which mode card is selected - "Connect to server" only changes the framing
+text, never gates the form - and offers connecting to a sync server as an
+optional step immediately after creation (`onboarding.sync_prompt_*`, Connect
+now/Skip for now; choosing "Connect now" opens the Sync settings modal as
+soon as the shell mounts) rather than blocking or silently dropping that
+intent. Both passphrase fields share one `PasswordField` component
+(`screens/PasswordField.tsx`) with a show/hide visibility toggle and a Caps
+Lock warning, and Enter in either field submits the form the same way the
+Create button does (Wails' WebView does not reliably treat Enter in a text
+input as a native form submit, so this is handled explicitly rather than
+left to the surrounding `<form>`). A returning-user unlock screen is chosen
+automatically when a previous local account is on record, and submits with
+either its Unlock button or Enter in the passphrase field. A main shell
+follows, with a keyboard-
 accessible notebook tree, tag navigation (via a dedicated `SearchByTag`
 binding that reuses the same search index as the search box, without its
 text-query quoting limitations), and a virtualized note list

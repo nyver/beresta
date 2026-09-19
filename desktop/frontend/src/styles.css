@@ -105,6 +105,35 @@ p {
   gap: 0.5rem;
 }
 
+.password-field-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.password-field-row input {
+  flex: 1;
+}
+
+.password-visibility-toggle {
+  flex: none;
+  padding: 0.5rem 0.75rem;
+}
+
+.caps-lock-warning {
+  color: #8a2c1f;
+  margin: 0.25rem 0 0;
+}
+
+.recovery-warning {
+  font-weight: 600;
+}
+
+.onboarding-sync-prompt-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
 .wipe-section {
   margin-top: 1.5rem;
 }

@@ -30,7 +30,11 @@ function mockEmptyNoteDocument() {
 }
 
 function renderShell(
-  options: { settings?: Partial<main.AppSettings>; account?: main.AccountInfo } = {},
+  options: {
+    settings?: Partial<main.AppSettings>;
+    account?: main.AccountInfo;
+    openSyncOnMount?: boolean;
+  } = {},
 ) {
   mockLocaleCatalog();
   mockSettings(options.settings);
@@ -38,7 +42,11 @@ function renderShell(
   const onLocked = vi.fn();
   const result = render(
     <I18nProvider>
-      <Shell account={options.account ?? fakeAccountInfo()} onLocked={onLocked} />
+      <Shell
+        account={options.account ?? fakeAccountInfo()}
+        onLocked={onLocked}
+        openSyncOnMount={options.openSyncOnMount}
+      />
     </I18nProvider>,
   );
   return { onLocked, unmount: result.unmount };
@@ -307,6 +315,16 @@ describe("Shell", () => {
     // "sync.status_local_only" text outside the dialog too, so this must
     // be scoped to the dialog to stay unambiguous.
     expect(within(dialog).getByText("sync.status_local_only")).toBeInTheDocument();
+  });
+
+  it("opens the Sync modal on mount when openSyncOnMount is set (task 7.1's post-create sync prompt)", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    mockSyncSummary();
+    renderShell({ openSyncOnMount: true });
+
+    expect(await screen.findByRole("dialog", { name: "sync.title" })).toBeInTheDocument();
   });
 
   it("starts an immediate synchronization cycle for the active workspace", async () => {

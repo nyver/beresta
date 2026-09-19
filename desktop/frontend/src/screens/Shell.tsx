@@ -59,6 +59,11 @@ const SELECTION_KEY = "beresta.selection";
 export interface ShellProps {
   account: main.AccountInfo;
   onLocked: () => void;
+  /** Opens the Sync modal once, on first mount - set when onboarding's
+   * optional post-create sync prompt (task 7.1) chose "Connect now",
+   * so the user lands directly in the connect flow instead of having to
+   * find it in Settings themselves right after asking for it. */
+  openSyncOnMount?: boolean;
 }
 
 type Selection = { kind: "all" } | { kind: "notebook"; id: string } | { kind: "tag"; id: string };
@@ -94,7 +99,7 @@ function sortNotesByLastModified(notes: main.NoteDTO[]): main.NoteDTO[] {
  * navigation, a note list, and the Yjs-backed body editor, all wired to
  * real account data.
  */
-export function Shell({ account, onLocked }: ShellProps) {
+export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps) {
   const { t, errorMessage, ready } = useI18n();
   const shellTitleId = useId();
   const [locking, setLocking] = useState(false);
@@ -138,7 +143,7 @@ export function Shell({ account, onLocked }: ShellProps) {
   const [searchResults, setSearchResults] = useState<main.SearchResultDTO[] | null>(null);
   const [highlightTerms, setHighlightTerms] = useState<string[]>([]);
   const [dataModalOpen, setDataModalOpen] = useState(false);
-  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [syncModalOpen, setSyncModalOpen] = useState(openSyncOnMount);
   // Workspace-wide synchronization state, shared by the topbar's compact
   // pill and the open note's footer status line (SaveStatusLine) so the two
   // never disagree; loaded once and kept live via the same "sync:summary"

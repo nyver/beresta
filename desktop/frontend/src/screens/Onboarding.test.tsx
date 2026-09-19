@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -36,9 +36,7 @@ describe("Onboarding", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("radio", { name: /mode_server_title/ }));
-    expect(screen.queryByRole("button", { name: "onboarding.create_button" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "onboarding.mode_local_title" }));
     expect(screen.getByRole("button", { name: "onboarding.create_button" })).toBeInTheDocument();
   });
 
@@ -66,7 +64,28 @@ describe("Onboarding", () => {
     expect(appMock.CreateAccount).not.toHaveBeenCalled();
   });
 
-  it("creates the account and reports it ready on success", async () => {
+  it("creates the account, then shows the optional sync prompt", async () => {
+    const account = fakeAccountInfo();
+    appMock.CreateAccount.mockResolvedValue(account);
+    renderOnboarding();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("C:\\Users\\test\\Beresta\\beresta.db")).toBeInTheDocument(),
+    );
+    await user.type(await screen.findByLabelText("onboarding.passphrase_label"), "correct horse battery");
+    await user.type(screen.getByLabelText("onboarding.passphrase_confirm_label"), "correct horse battery");
+    await user.click(screen.getByRole("button", { name: "onboarding.create_button" }));
+
+    expect(appMock.CreateAccount).toHaveBeenCalledWith({
+      database_path: "C:\\Users\\test\\Beresta\\beresta.db",
+      passphrase: "correct horse battery",
+    });
+    expect(await screen.findByText("onboarding.sync_prompt_title")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "onboarding.create_button" })).not.toBeInTheDocument();
+  });
+
+  it("skipping the sync prompt reports the account ready without opening sync", async () => {
     const account = fakeAccountInfo();
     appMock.CreateAccount.mockResolvedValue(account);
     const { onAccountReady } = renderOnboarding();
@@ -79,11 +98,77 @@ describe("Onboarding", () => {
     await user.type(screen.getByLabelText("onboarding.passphrase_confirm_label"), "correct horse battery");
     await user.click(screen.getByRole("button", { name: "onboarding.create_button" }));
 
-    await waitFor(() => expect(onAccountReady).toHaveBeenCalledWith(account));
-    expect(appMock.CreateAccount).toHaveBeenCalledWith({
-      database_path: "C:\\Users\\test\\Beresta\\beresta.db",
-      passphrase: "correct horse battery",
-    });
+    await user.click(await screen.findByRole("button", { name: "onboarding.sync_prompt_skip_button" }));
+
+    expect(onAccountReady).toHaveBeenCalledWith(account, false);
+  });
+
+  it("connecting from the sync prompt reports the account ready with openSync set", async () => {
+    const account = fakeAccountInfo();
+    appMock.CreateAccount.mockResolvedValue(account);
+    const { onAccountReady } = renderOnboarding();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("C:\\Users\\test\\Beresta\\beresta.db")).toBeInTheDocument(),
+    );
+    await user.type(await screen.findByLabelText("onboarding.passphrase_label"), "correct horse battery");
+    await user.type(screen.getByLabelText("onboarding.passphrase_confirm_label"), "correct horse battery");
+    await user.click(screen.getByRole("button", { name: "onboarding.create_button" }));
+
+    await user.click(await screen.findByRole("button", { name: "onboarding.sync_prompt_connect_button" }));
+
+    expect(onAccountReady).toHaveBeenCalledWith(account, true);
+  });
+
+  it("toggles passphrase visibility", async () => {
+    renderOnboarding();
+    const user = userEvent.setup();
+
+    const passphraseInput = await screen.findByLabelText("onboarding.passphrase_label");
+    expect(passphraseInput).toHaveAttribute("type", "password");
+    const passphraseLabel = within(passphraseInput.closest("label")!);
+
+    await user.click(passphraseLabel.getByRole("button", { name: "common.show_password" }));
+    expect(passphraseInput).toHaveAttribute("type", "text");
+
+    await user.click(passphraseLabel.getByRole("button", { name: "common.hide_password" }));
+    expect(passphraseInput).toHaveAttribute("type", "password");
+  });
+
+  it("warns when Caps Lock is on while typing the passphrase", async () => {
+    renderOnboarding();
+    const user = userEvent.setup();
+
+    const passphraseInput = await screen.findByLabelText("onboarding.passphrase_label");
+    expect(screen.queryByText("common.caps_lock_warning")).not.toBeInTheDocument();
+
+    await user.click(passphraseInput);
+    await user.keyboard("{CapsLock}b");
+
+    expect(await screen.findByText("common.caps_lock_warning")).toBeInTheDocument();
+
+    await user.keyboard("{CapsLock}c");
+
+    expect(screen.queryByText("common.caps_lock_warning")).not.toBeInTheDocument();
+  });
+
+  it("pressing Enter in the confirm-passphrase field submits the form", async () => {
+    const account = fakeAccountInfo();
+    appMock.CreateAccount.mockResolvedValue(account);
+    renderOnboarding();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("C:\\Users\\test\\Beresta\\beresta.db")).toBeInTheDocument(),
+    );
+    await user.type(await screen.findByLabelText("onboarding.passphrase_label"), "correct horse battery");
+    await user.type(
+      screen.getByLabelText("onboarding.passphrase_confirm_label"),
+      "correct horse battery{Enter}",
+    );
+
+    expect(await screen.findByText("onboarding.sync_prompt_title")).toBeInTheDocument();
   });
 
   it("persists a language change through UpdateSettings", async () => {

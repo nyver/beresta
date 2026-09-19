@@ -941,6 +941,13 @@ li:hover > .tree-row-delete,
   gap: 0.5rem;
 }
 
+.revision-diff-heading {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #5a5148;
+}
+
 .revision-diff {
   margin: 0;
   padding: 0.5rem;

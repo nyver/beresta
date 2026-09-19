@@ -46,10 +46,13 @@ class Strings {
       "undo": "Undo",
       "photo": "Add photo",
       "photo_adding": "Adding photo…",
-      "revisions": "Revisions",
-      "revisions_empty": "No revisions yet.",
+      "revisions": "Previous versions",
+      "revisions_empty": "No previous versions yet.",
       "revisions_checkpoint": "Checkpoint",
+      "revisions_diff_heading": "Preview",
       "restore": "Restore",
+      "revision_restore_explanation":
+          "Restoring makes this the current version. The version it replaces stays in history.",
       "sync": "Sync now",
       "server": "Synchronization server",
       "server_optional":
@@ -239,10 +242,13 @@ class Strings {
       "undo": "Отменить",
       "photo": "Добавить фото",
       "photo_adding": "Добавление фото…",
-      "revisions": "Версии",
-      "revisions_empty": "Версий пока нет.",
+      "revisions": "Предыдущие версии",
+      "revisions_empty": "Пока нет предыдущих версий.",
       "revisions_checkpoint": "Контрольная точка",
+      "revisions_diff_heading": "Предпросмотр",
       "restore": "Восстановить",
+      "revision_restore_explanation":
+          "Восстановление сделает эту версию текущей. Заменённая версия останется в истории.",
       "sync": "Синхронизировать",
       "server": "Сервер синхронизации",
       "server_optional":

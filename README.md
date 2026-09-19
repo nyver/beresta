@@ -165,13 +165,16 @@ button, or by pressing Escape inside the field - which clears an active
 query/filters first and only blurs the field once there is nothing left to
 clear) and highlights its matched free-text term in each result's title. A
 search that matches nothing shows its message alongside a Clear action
-rather than leaving the list at a dead end. A note's history
-panel lists its retained revisions (newest first, checkpoints marked),
-diffs the selected one against its predecessor, and can restore it as a
-new current revision without erasing anything in between - restoring
-first flushes any not-yet-debounced body edit still queued in the open
-editor, so that stale edit cannot get silently re-committed on top of the
-just-restored content when the editor remounts afterward. A "Backups &
+rather than leaving the list at a dead end. A note's "Previous versions"
+panel lists its retained history (newest first, checkpoints marked),
+previews the selected one as a diff against its predecessor under an
+explicit "Preview" heading, and explains before restoring that doing so
+makes it the new current version while the version it replaces stays in
+history - restoring itself first flushes any not-yet-debounced body edit
+still queued in the open editor, so that stale edit cannot get silently
+re-committed on top of the just-restored content when the editor remounts
+afterward. Android's equivalent revision sheet uses the same "Previous
+versions" language, diff preview, and restore explanation. A "Backups &
 Data" dialog off the shell's topbar covers the rest of task 5.7: the
 external backup directory setting (with a native folder picker,
 defaulting under the app data directory but movable to any external

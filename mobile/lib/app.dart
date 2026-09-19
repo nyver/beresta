@@ -3829,6 +3829,11 @@ class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
             ],
           ),
           const SizedBox(height: 8),
+          if (diffError == null && diffLines != null)
+            Text(
+              widget.strings("revisions_diff_heading"),
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
           Flexible(
             child:
                 diffError != null
@@ -3861,6 +3866,11 @@ class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
                         ),
                       ),
                     ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            widget.strings("revision_restore_explanation"),
+            style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
           if (restoreError != null)

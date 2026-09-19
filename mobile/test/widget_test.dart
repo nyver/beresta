@@ -72,7 +72,7 @@ void main() {
 
       await tester.tap(find.byIcon(Icons.add));
       await tester.pumpAndSettle();
-      await tester.tap(find.text("Revisions"));
+      await tester.tap(find.text("Previous versions"));
       await tester.pumpAndSettle();
 
       final oldestDate =
@@ -98,6 +98,15 @@ void main() {
       // order (rev-1), not against empty content.
       expect(find.textContaining("from rev-1"), findsOneWidget);
       expect(find.textContaining("to rev-2"), findsOneWidget);
+      expect(find.text("Preview"), findsOneWidget);
+      // task 6.6: restoring must explain it creates a new current version
+      // rather than destroying history.
+      expect(
+        find.text(
+          "Restoring makes this the current version. The version it replaces stays in history.",
+        ),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text("Restore"));
       await tester.pumpAndSettle();

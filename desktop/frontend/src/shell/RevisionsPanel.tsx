@@ -143,16 +143,19 @@ export function RevisionsPanel({ noteId, onBeforeRestore, onRestored }: Revision
           ) : diffLines === null ? (
             <p className="hint">{t("common.loading")}</p>
           ) : (
-            <pre className="revision-diff">
-              {diffLines.map((line, index) => (
-                <div key={index} className={`revision-diff-line revision-diff-${line.op}`}>
-                  <span className="revision-diff-marker" aria-hidden="true">
-                    {line.op === "insert" ? "+" : line.op === "delete" ? "-" : " "}
-                  </span>
-                  {line.text}
-                </div>
-              ))}
-            </pre>
+            <>
+              <h3 className="revision-diff-heading">{t("revisions.diff_heading")}</h3>
+              <pre className="revision-diff">
+                {diffLines.map((line, index) => (
+                  <div key={index} className={`revision-diff-line revision-diff-${line.op}`}>
+                    <span className="revision-diff-marker" aria-hidden="true">
+                      {line.op === "insert" ? "+" : line.op === "delete" ? "-" : " "}
+                    </span>
+                    {line.text}
+                  </div>
+                ))}
+              </pre>
+            </>
           )}
 
           {restoreError ? (

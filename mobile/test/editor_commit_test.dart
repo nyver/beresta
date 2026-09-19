@@ -260,7 +260,7 @@ void main() {
       await tester.pump();
       expect(gateway.savedBody, isEmpty);
 
-      await tester.tap(find.text("Revisions"));
+      await tester.tap(find.text("Previous versions"));
       await tester.pumpAndSettle();
       final revisionDate =
           DateTime.fromMillisecondsSinceEpoch(

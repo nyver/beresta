@@ -40,7 +40,14 @@ class MainActivity : FlutterFragmentActivity() {
     private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val pending = pendingCapture.also { pendingCapture = null } ?: return@registerForActivityResult
         if (uri == null) {
-            pending.result.success(null)
+            // The user backed out of the picker without choosing a file. This is
+            // reported as its own "canceled" error code, not success(null): the
+            // two used to be indistinguishable on the Dart side, which is
+            // harmless today (both are silent) but forecloses ever treating a
+            // real "nothing selected" outcome differently from "the user
+            // deliberately dismissed the picker" (task 6.5's cross-platform
+            // consistent cancellation behavior).
+            pending.result.error("canceled", null, null)
             return@registerForActivityResult
         }
         executor.execute {

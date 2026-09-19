@@ -3226,9 +3226,23 @@ class _EditorScreenState extends State<EditorScreen> {
       requestCurrentWorkspaceSync(widget.gateway);
       await refreshAttachments();
     } catch (failure) {
+      // The user backing out of the content-URI picker is not a failure to
+      // report (task 6.5: consistent cancellation behavior) - only a
+      // genuine add failure gets a snackbar, with a Retry action that
+      // simply re-runs this whole flow: Android's SAF content URIs are not
+      // safely re-readable after the fact, so re-prompting the picker
+      // (rather than re-attempting the same bytes, as desktop's queue
+      // does) is this platform's equivalent retry.
+      if (failure is PlatformException && failure.code == "canceled") return;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(describeFailure(widget.strings, failure))),
+          SnackBar(
+            content: Text(describeFailure(widget.strings, failure)),
+            action: SnackBarAction(
+              label: widget.strings("retry"),
+              onPressed: capturePhoto,
+            ),
+          ),
         );
       }
     } finally {
@@ -3392,7 +3406,9 @@ class _EditorScreenState extends State<EditorScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                         : const Icon(Icons.photo_camera),
-                label: Text(widget.strings("photo")),
+                label: Text(
+                  widget.strings(capturingPhoto ? "photo_adding" : "photo"),
+                ),
               ),
               TextButton.icon(
                 onPressed: showRevisions,

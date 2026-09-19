@@ -3,6 +3,7 @@ import "dart:typed_data";
 
 import "package:beresta/main.dart";
 import "package:flutter/material.dart";
+import "package:flutter/services.dart" show PlatformException;
 import "package:flutter_quill/flutter_quill.dart";
 import "package:flutter_test/flutter_test.dart";
 
@@ -349,6 +350,76 @@ void main() {
       "attachment-1",
     ));
   });
+
+  testWidgets(
+    "adding a photo shows an in-progress label and refreshes the list on success (task 6.5)",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)
+        ..capturePhotoCompleter = Completer<void>();
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text("Offline note"));
+      await tester.pumpAndSettle();
+      expect(find.text("Add photo"), findsOneWidget);
+
+      await tester.tap(find.text("Add photo"));
+      await tester.pump();
+
+      expect(find.text("Adding photo…"), findsOneWidget);
+      expect(find.text("Add photo"), findsNothing);
+
+      gateway.capturePhotoCompleter!.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.text("Add photo"), findsOneWidget);
+      expect(gateway.capturePhotoCalls, 1);
+    },
+  );
+
+  testWidgets(
+    "backing out of the photo picker shows no error (task 6.5's consistent cancellation)",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)
+        ..capturePhotoFailure = PlatformException(code: "canceled");
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text("Offline note"));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Add photo"));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsNothing);
+      expect(find.text("Add photo"), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    "a failed photo add offers Retry, which retries the same action (task 6.5)",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)
+        ..capturePhotoFailure = PlatformException(
+          code: "capture_failed",
+          message: "boom",
+        );
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text("Offline note"));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Add photo"));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(gateway.capturePhotoCalls, 1);
+
+      await tester.tap(find.text("Retry"));
+      await tester.pumpAndSettle();
+
+      expect(gateway.capturePhotoCalls, 2);
+    },
+  );
 
   testWidgets(
     "a note is deleted immediately from the editor, without a confirmation prompt, and offers undo",
@@ -941,8 +1012,17 @@ class FakeGateway implements CoreGateway {
     onSetActiveWorkspace?.call(workspaceId);
   }
 
+  int capturePhotoCalls = 0;
+  Object? capturePhotoFailure;
+  Completer<void>? capturePhotoCompleter;
   @override
-  Future<void> capturePhoto(String noteId) async {}
+  Future<void> capturePhoto(String noteId) async {
+    capturePhotoCalls += 1;
+    final completer = capturePhotoCompleter;
+    if (completer != null) await completer.future;
+    final failure = capturePhotoFailure;
+    if (failure != null) throw failure;
+  }
   int selectBackupDestinationCalls = 0;
   @override
   Future<bool> selectBackupDestination() async {

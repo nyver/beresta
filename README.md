@@ -136,7 +136,14 @@ each row's kebab menu, decrypting straight to a user-chosen destination.
 Every attachment path (file picker, paste, and drag/drop) preflights the
 source's size and the destination volume's free space before staging or
 encrypting any of it, so an oversized file or a full disk fails immediately
-with a distinct, localized message instead of after a partial copy.
+with a distinct, localized message instead of after a partial copy. Android's
+single-slot content-URI ("Add photo") picker now distinguishes the user
+backing out of the picker (silent, no error) from a genuine add failure
+(a snackbar with a Retry action that re-opens the picker, since a SAF
+content URI cannot be safely re-read after the fact the way desktop's
+queue retries the same staged bytes) and shows its own "Adding photo…"
+label while in flight, matching desktop's queued/uploading/failed
+attachment vocabulary.
 The note list's search box leads with a plain text field; the tag/date/
 include-deleted filter controls and saved-search management are collapsed
 behind a "Filters & saved searches" disclosure by default so they do not

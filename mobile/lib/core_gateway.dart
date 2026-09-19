@@ -82,6 +82,15 @@ abstract interface class CoreGateway {
   Future<Map<String, dynamic>> acceptWorkspaceGrant(String grantCode);
   Future<List<Map<String, dynamic>>> listWorkspaces();
   Future<void> setActiveWorkspace(String workspaceId);
+
+  /// Launches the Android content-URI picker (Storage Access Framework)
+  /// and, once an image is chosen, stages/encrypts/publishes it as an
+  /// attachment on noteId. Throws a PlatformException with code "canceled"
+  /// if the user backs out of the picker without choosing anything -
+  /// callers should treat that outcome as silent, not as a failure to
+  /// report. Any other PlatformException is a genuine add failure (see
+  /// MainActivity.kt's "capture_failed" code) that a caller may retry by
+  /// calling this again.
   Future<void> capturePhoto(String noteId);
   Future<bool> selectBackupDestination();
   Future<void> createBackup();

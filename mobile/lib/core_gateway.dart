@@ -10,21 +10,38 @@ abstract interface class CoreGateway {
   Future<void> lock();
   Future<List<Map<String, dynamic>>> listNotes();
   Future<Map<String, dynamic>> createNote(String title, {String notebookId});
+
+  /// The returned map's "base_revision" must be threaded back into the
+  /// next [saveNoteCancelable] call for this note: it lets that save
+  /// express its edit as CRDT operations against this exact fetch rather
+  /// than a blind replace of whatever the note's live state happens to be
+  /// by the time the save runs, which would silently discard a remote
+  /// merge landing in between (specs/notes-management's "Remote merge
+  /// during editing" scenario - see SaveNote's own doc comment in
+  /// core/mobileapi/service.go for the full mechanism).
   Future<Map<String, dynamic>> getNote(String id);
 
   /// Commits a note body update identified by [requestId], matching
   /// core/mobileapi.Service's begin/Cancel request-tracking contract. A
   /// caller that starts a newer commit before this one resolves should
-  /// cancel this one first via [cancelRequest]: SaveNote replaces the
-  /// note's entire body from a fresh read of its current state, so two
-  /// overlapping calls racing against the same base state can otherwise
-  /// silently lose one of the two edits to CRDT merge order, not just
-  /// misreport which one is "saved".
-  Future<void> saveNoteCancelable(
+  /// cancel this one first via [cancelRequest]: two overlapping calls
+  /// racing against the same baseRevision can otherwise silently lose one
+  /// of the two edits to CRDT merge order, not just misreport which one is
+  /// "saved".
+  ///
+  /// [baseRevision] should be the "base_revision" [getNote] returned (or
+  /// that a prior [saveNoteCancelable] call for the same note returned),
+  /// not a value invented or left stale by the caller - passing "" falls
+  /// back to a blind replace of the note's current live state, safe only
+  /// for a note this device just created and has not yet fetched.
+  /// Returns the new base_revision to store and pass to this note's next
+  /// [saveNoteCancelable] call.
+  Future<String> saveNoteCancelable(
     String requestId,
     String id,
     String title,
     String body,
+    String baseRevision,
   );
 
   /// Cancels an in-flight request started by [saveNoteCancelable] (or any
@@ -115,7 +132,10 @@ abstract interface class CoreGateway {
   /// would do - each entry classified "addition", "update", or "unchanged" -
   /// plus the additional local storage it would need. See
   /// core/mobileapi.Service.PlanRestore.
-  Future<Map<String, dynamic>> planRestore(String backupId, List<String> noteIds);
+  Future<Map<String, dynamic>> planRestore(
+    String backupId,
+    List<String> noteIds,
+  );
 
   /// Imports [noteIds] from [backupId] as new local notes, always taking a
   /// mandatory pre-restore safety backup under the app's own local backup
@@ -207,17 +227,21 @@ class MethodChannelCore implements CoreGateway {
       _object(await _invoke("getNote", {"noteId": id}));
 
   @override
-  Future<void> saveNoteCancelable(
+  Future<String> saveNoteCancelable(
     String requestId,
     String id,
     String title,
     String body,
-  ) => _channel.invokeMethod<dynamic>("saveNote", {
-    "requestId": requestId,
-    "noteId": id,
-    "title": title,
-    "body": body,
-  });
+    String baseRevision,
+  ) async =>
+      (await _channel.invokeMethod<dynamic>("saveNote", {
+            "requestId": requestId,
+            "noteId": id,
+            "title": title,
+            "body": body,
+            "baseRevision": baseRevision,
+          }))
+          as String;
 
   @override
   Future<void> cancelRequest(String requestId) =>
@@ -431,9 +455,7 @@ class MethodChannelCore implements CoreGateway {
 
   @override
   Future<Map<String, dynamic>> diagnosticSummary(String appVersion) async =>
-      _object(
-        await _invoke("diagnosticSummary", {"appVersion": appVersion}),
-      );
+      _object(await _invoke("diagnosticSummary", {"appVersion": appVersion}));
 
   @override
   Future<Map<String, dynamic>> technicalDiagnostics() async =>
@@ -441,6 +463,5 @@ class MethodChannelCore implements CoreGateway {
 
   @override
   Future<String> copyDiagnostics(String appVersion) async =>
-      await _invoke("copyDiagnostics", {"appVersion": appVersion})
-          as String;
+      await _invoke("copyDiagnostics", {"appVersion": appVersion}) as String;
 }

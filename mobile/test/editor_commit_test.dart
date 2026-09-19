@@ -404,14 +404,9 @@ void main() {
       await tester.tap(find.text("open"));
       await tester.pumpAndSettle();
 
+      expect(find.text("018f0000-0000-7000-8000-000000000099"), findsOneWidget);
       expect(
-        find.text("018f0000-0000-7000-8000-000000000099"),
-        findsOneWidget,
-      );
-      expect(
-        find.text(
-          "This operation could not be verified and may be corrupted.",
-        ),
+        find.text("This operation could not be verified and may be corrupted."),
         findsOneWidget,
       );
       expect(find.text("verification_failed"), findsNothing);
@@ -419,10 +414,7 @@ void main() {
       await tester.tap(find.text("Retry"));
       await tester.pumpAndSettle();
 
-      expect(
-        find.text("018f0000-0000-7000-8000-000000000099"),
-        findsNothing,
-      );
+      expect(find.text("018f0000-0000-7000-8000-000000000099"), findsNothing);
       expect(find.text("No unsafe incoming operations."), findsOneWidget);
     },
   );

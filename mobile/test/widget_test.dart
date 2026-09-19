@@ -56,6 +56,46 @@ void main() {
   });
 
   testWidgets(
+    "each commit sends the base_revision the previous one returned, not a stale one (task 6.8)",
+    (tester) async {
+      // Regression coverage for the Dart side of task 6.8's fix: SaveNote's
+      // three-way merge only works if the caller actually threads
+      // base_revision from GetNote/the previous save into the next one -
+      // core/mobileapi's own tests cover the merge itself, this covers the
+      // editor wiring around it.
+      final gateway = FakeGateway(unlocked: true);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+      final controller =
+          tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
+
+      controller.replaceText(
+        0,
+        0,
+        "first",
+        const TextSelection.collapsed(offset: 5),
+      );
+      await tester.pump(const Duration(milliseconds: 900));
+      expect(gateway.saveBaseRevisions, ["base-0"]);
+      final revisionAfterFirstCommit = gateway.noteBaseRevision;
+      expect(revisionAfterFirstCommit, isNot("base-0"));
+
+      controller.replaceText(
+        5,
+        0,
+        " second",
+        const TextSelection.collapsed(offset: 12),
+      );
+      await tester.pump(const Duration(milliseconds: 900));
+
+      expect(gateway.saveBaseRevisions, ["base-0", revisionAfterFirstCommit]);
+    },
+  );
+
+  testWidgets(
     "revision history lists newest first with a checkpoint badge and shows a diff",
     (tester) async {
       final gateway = FakeGateway(unlocked: true)
@@ -547,13 +587,13 @@ void main() {
   testWidgets(
     "backup sheet shows the catalog's health, last verified time, and location",
     (tester) async {
-      final gateway =
-          FakeGateway(unlocked: true)
-            ..backupStatusValue = {
-              "health": "healthy",
-              "last_verified_unix_ms": DateTime.utc(2026, 1, 1).millisecondsSinceEpoch,
-              "location": "/backups/daily-1",
-            };
+      final gateway = FakeGateway(unlocked: true)
+        ..backupStatusValue = {
+          "health": "healthy",
+          "last_verified_unix_ms":
+              DateTime.utc(2026, 1, 1).millisecondsSinceEpoch,
+          "location": "/backups/daily-1",
+        };
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
@@ -568,13 +608,12 @@ void main() {
   testWidgets(
     "backup sheet explains a corrupt backup catalog status in plain language",
     (tester) async {
-      final gateway =
-          FakeGateway(unlocked: true)
-            ..backupStatusValue = {
-              "health": "corrupt",
-              "last_verified_unix_ms": 0,
-              "location": "",
-            };
+      final gateway = FakeGateway(unlocked: true)
+        ..backupStatusValue = {
+          "health": "corrupt",
+          "last_verified_unix_ms": 0,
+          "location": "",
+        };
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
@@ -595,7 +634,12 @@ void main() {
       final gateway =
           FakeGateway(unlocked: true)
             ..backupsValue = [
-              {"id": "backup-1", "kind": 1, "created_unix_ms": 0, "corrupt": false},
+              {
+                "id": "backup-1",
+                "kind": 1,
+                "created_unix_ms": 0,
+                "corrupt": false,
+              },
             ]
             ..previewBackupValue = {
               "note_titles": ["Note A", "Note B"],
@@ -622,7 +666,9 @@ void main() {
       expect(find.text("Note A"), findsOneWidget);
       expect(find.text("Note B"), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(FilledButton, "Restore selected as new notes"));
+      await tester.tap(
+        find.widgetWithText(FilledButton, "Restore selected as new notes"),
+      );
       await tester.pumpAndSettle();
 
       // "unchanged" is not pre-selected, only "addition" is.
@@ -645,11 +691,10 @@ void main() {
     "restore options sheet requires an extra confirmation before replacing everything",
     (tester) async {
       var restoredBackupId = "";
-      final gateway =
-          FakeGateway(unlocked: true)
-            ..backupsValue = [
-              {"id": "backup-1", "kind": 1, "created_unix_ms": 0, "corrupt": false},
-            ];
+      final gateway = FakeGateway(unlocked: true)
+        ..backupsValue = [
+          {"id": "backup-1", "kind": 1, "created_unix_ms": 0, "corrupt": false},
+        ];
       gateway.onRestoreBackup = (id) => restoredBackupId = id;
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
@@ -658,7 +703,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(TextButton, "Restore"));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(OutlinedButton, "Replace from backup"));
+      await tester.tap(
+        find.widgetWithText(OutlinedButton, "Replace from backup"),
+      );
       await tester.pumpAndSettle();
 
       expect(restoredBackupId, "");
@@ -680,7 +727,8 @@ void main() {
   testWidgets(
     "backup sheet shows a storage-pressure estimate before backing up",
     (tester) async {
-      final gateway = FakeGateway(unlocked: true)..estimateBackupSizeValue = 1500000;
+      final gateway = FakeGateway(unlocked: true)
+        ..estimateBackupSizeValue = 1500000;
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
@@ -694,23 +742,33 @@ void main() {
   testWidgets(
     "backup sheet offers a change-destination remedy when backup fails from insufficient space",
     (tester) async {
-      final gateway =
-          FakeGateway(unlocked: true)
-            ..createBackupFailure = Exception("not enough space at the backup destination");
+      final gateway = FakeGateway(unlocked: true)
+        ..createBackupFailure = Exception(
+          "not enough space at the backup destination",
+        );
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byIcon(Icons.backup_outlined));
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(OutlinedButton, "Choose destination"), findsOneWidget);
+      expect(
+        find.widgetWithText(OutlinedButton, "Choose destination"),
+        findsOneWidget,
+      );
 
       await tester.tap(find.widgetWithText(FilledButton, "Back up now"));
       await tester.pumpAndSettle();
 
-      expect(find.text("Not enough free space. Existing backups were not changed."), findsOneWidget);
+      expect(
+        find.text("Not enough free space. Existing backups were not changed."),
+        findsOneWidget,
+      );
       // The top action row already has its own "Choose destination"
       // button; the remedy below the error message is a second one.
-      final remedyButtons = find.widgetWithText(OutlinedButton, "Choose destination");
+      final remedyButtons = find.widgetWithText(
+        OutlinedButton,
+        "Choose destination",
+      );
       expect(remedyButtons, findsNWidgets(2));
 
       await tester.tap(remedyButtons.last);
@@ -848,10 +906,24 @@ class FakeGateway implements CoreGateway {
     return note;
   }
 
+  // A fake stand-in for core/mobileapi's real base_revision (task 6.8):
+  // getNote hands out the current value, saveNoteCancelable mints and
+  // returns a new one on every successful save. A test asserting on
+  // ordering/threading (not real CRDT merge semantics, which the Go layer
+  // already covers) only needs these to be distinct and traceable, not
+  // structurally meaningful.
+  String noteBaseRevision = "base-0";
+  int _baseRevisionCounter = 0;
+  // baseRevisions saveNoteCancelable has actually been called with, in
+  // call order - lets a test assert that commit() threaded the right
+  // (possibly just-updated) base_revision into each save.
+  final List<String> saveBaseRevisions = [];
+
   @override
   Future<Map<String, dynamic>> getNote(String id) async => {
     "note": note,
     "body": savedBody,
+    "base_revision": noteBaseRevision,
   };
   // requestIds saveNoteCancelable has been called with, in call order -
   // lets a test assert on commit/cancellation ordering.
@@ -866,13 +938,15 @@ class FakeGateway implements CoreGateway {
   Object? nextSaveNoteFailure;
 
   @override
-  Future<void> saveNoteCancelable(
+  Future<String> saveNoteCancelable(
     String requestId,
     String id,
     String title,
     String body,
+    String baseRevision,
   ) async {
     saveRequestIds.add(requestId);
+    saveBaseRevisions.add(baseRevision);
     final hold = holdSaveNote;
     if (hold != null) await hold.future;
     if (canceledRequestIds.contains(requestId)) {
@@ -884,6 +958,8 @@ class FakeGateway implements CoreGateway {
       throw failure;
     }
     savedBody = body;
+    noteBaseRevision = "base-${++_baseRevisionCounter}";
+    return noteBaseRevision;
   }
 
   @override
@@ -992,9 +1068,10 @@ class FakeGateway implements CoreGateway {
       quarantineEntries;
   @override
   Future<void> retryQuarantined(String operationId) async {
-    quarantineEntries = quarantineEntries
-        .where((entry) => entry["operation_id"] != operationId)
-        .toList();
+    quarantineEntries =
+        quarantineEntries
+            .where((entry) => entry["operation_id"] != operationId)
+            .toList();
   }
 
   @override
@@ -1032,6 +1109,7 @@ class FakeGateway implements CoreGateway {
     final failure = capturePhotoFailure;
     if (failure != null) throw failure;
   }
+
   int selectBackupDestinationCalls = 0;
   @override
   Future<bool> selectBackupDestination() async {
@@ -1095,6 +1173,7 @@ class FakeGateway implements CoreGateway {
   Future<void> restoreBackup(String backupId) async {
     onRestoreBackup?.call(backupId);
   }
+
   @override
   Future<int> importBackups() async => 0;
   @override

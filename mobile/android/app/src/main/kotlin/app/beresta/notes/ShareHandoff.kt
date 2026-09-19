@@ -65,7 +65,11 @@ internal object ShareHandoff {
                 val noteId = created.getString("id")
                 if (capture.kind == 1) {
                     val text = capture.contents.toString(Charsets.UTF_8)
-                    service.saveNote("$requestBase-text", noteId, "Shared capture", text)
+                    // No prior getNote for a note this call just created, so
+                    // there is no known ancestor to merge against - "" falls
+                    // back to replacing whatever the note's (empty) live
+                    // state is, per SaveNote's own doc comment.
+                    service.saveNote("$requestBase-text", noteId, "Shared capture", text, "")
                 } else {
                     service.addAttachmentData("$requestBase-image", noteId, "shared-image", capture.mediaType, capture.contents)
                 }

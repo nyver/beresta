@@ -3,6 +3,7 @@ package mobileapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -374,49 +375,104 @@ func (s *Service) GetNote(requestID, noteID string) (string, error) {
 	if err != nil || note.WorkspaceID != workspaceID {
 		return "", coalesce(err, store.ErrWrongWorkspace)
 	}
-	body, err := noteText(ctx, value, workspaceID, id)
+	body, baseRevision, err := noteTextAndBaseRevision(ctx, value, workspaceID, id)
 	if err != nil {
 		return "", err
 	}
-	return marshal(map[string]any{"note": mobileNote(note), "body": body})
+	// base_revision lets a later SaveNote for this note express its edit
+	// as real CRDT operations against this exact, known-consistent
+	// ancestor (see SaveNote's doc comment) instead of a blind full-text
+	// replace that would erase a remote merge landing after this fetch.
+	return marshal(map[string]any{"note": mobileNote(note), "body": body, "base_revision": baseRevision})
 }
 
-func (s *Service) SaveNote(requestID, noteID, title, body string) error {
+// SaveNote replaces noteID's body from body, a Markdown string the mobile
+// editor produced from its own edit buffer - necessarily stale relative to
+// the note's live CRDT state, since Android holds no live CRDT binding
+// (specs/notes-management's "Remote merge during editing" scenario; see
+// also task 6.2's desktop-only fix for the equivalent problem there).
+//
+// baseRevision, when non-empty, must be the base64 FormatV2 state that
+// GetNote (or a prior SaveNote for the same note) returned as
+// base_revision when this edit began: the ancestor body actually reflects.
+// SaveNote replays the edit as real CRDT operations against a document
+// restored from exactly that ancestor, then merges the resulting update
+// into the note's live current state via ApplyUpdate — Yjs's own
+// interleaving of two histories sharing a common ancestor, immune to any
+// concurrent remote merge having shifted character positions — rather than
+// deleting and rebuilding the live document's entire text from body alone,
+// which would silently discard any remote content the caller never saw.
+//
+// An empty baseRevision falls back to that blind-replace-against-current-
+// state behavior: safe only when nothing else could plausibly have
+// touched the note between its creation and this call, which is why the
+// only callers that omit it (ShareHandoff, the quick-capture widget) both
+// create the note and save it in the same breath, with no intervening
+// GetNote.
+//
+// Returns the new base_revision to use for this note's next SaveNote
+// call, since a successful save also advances the note's live state past
+// whatever baseRevision was passed in.
+func (s *Service) SaveNote(requestID, noteID, title, body, baseRevision string) (string, error) {
 	ctx, done, err := s.begin(requestID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer done()
 	value, workspaceID, id, err := s.noteContext(noteID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	state, format, err := value.NoteDocumentState(ctx, workspaceID, id)
 	if err != nil {
-		return err
+		return "", err
 	}
-	doc, err := yjsadapter.Restore(format, state)
+	liveDoc, err := yjsadapter.Restore(format, state)
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer doc.Close()
-	// The mobile editor only ever sees the note's canonical Markdown
-	// projection (see noteText), so writing body back must parse it as
-	// Markdown rather than inserting it as plain text — otherwise a plain
-	// Insert would flatten any bold/italic/list/link formatting from other
-	// clients into literal, unrendered Markdown syntax.
-	if err := doc.ReplaceMarkdown("body", body); err != nil {
-		return err
+	defer liveDoc.Close()
+
+	if baseRevision == "" {
+		// The mobile editor only ever sees the note's canonical Markdown
+		// projection, so writing body back must parse it as Markdown
+		// rather than inserting it as plain text — otherwise a plain
+		// Insert would flatten any bold/italic/list/link formatting from
+		// other clients into literal, unrendered Markdown syntax.
+		if err := liveDoc.ReplaceMarkdown("body", body); err != nil {
+			return "", err
+		}
+	} else {
+		baseState, err := base64.StdEncoding.DecodeString(baseRevision)
+		if err != nil {
+			return "", fmt.Errorf("mobileapi: invalid base revision: %w", err)
+		}
+		baseDoc, err := yjsadapter.Restore(yjsadapter.FormatV2, baseState)
+		if err != nil {
+			return "", err
+		}
+		defer baseDoc.Close()
+		if err := baseDoc.ReplaceMarkdown("body", body); err != nil {
+			return "", err
+		}
+		editUpdate, err := baseDoc.EncodeStateAsUpdate(yjsadapter.FormatV2)
+		if err != nil {
+			return "", err
+		}
+		if err := liveDoc.ApplyUpdate(yjsadapter.FormatV2, editUpdate); err != nil {
+			return "", err
+		}
 	}
-	update, err := doc.EncodeStateAsUpdate(yjsadapter.FormatV2)
+
+	finalUpdate, err := liveDoc.EncodeStateAsUpdate(yjsadapter.FormatV2)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if err := value.CommitNoteBody(ctx, account.NoteBodyCommand{WorkspaceID: workspaceID, NoteID: id, Update: update, UpdateFormat: yjsadapter.FormatV2, Title: &title}); err != nil {
-		return err
+	if err := value.CommitNoteBody(ctx, account.NoteBodyCommand{WorkspaceID: workspaceID, NoteID: id, Update: finalUpdate, UpdateFormat: yjsadapter.FormatV2, Title: &title}); err != nil {
+		return "", err
 	}
 	s.emit("notes_changed", map[string]string{"note_id": id.String()})
-	return nil
+	return base64.StdEncoding.EncodeToString(finalUpdate), nil
 }
 
 func (s *Service) DeleteNote(requestID, noteID string, deleted bool) error {
@@ -1651,17 +1707,29 @@ func (s *Service) noteContext(raw string) (*account.Account, model.ID, model.ID,
 	return value, workspaceID, id, err
 }
 
-func noteText(ctx context.Context, value *account.Account, workspaceID, noteID model.ID) (string, error) {
+// noteTextAndBaseRevision returns a note's current Markdown projection
+// alongside the base64 FormatV2 CRDT state it was rendered from, for a
+// caller (GetNote) that must hand the latter back unchanged as SaveNote's
+// baseRevision so a later edit can be merged against this exact ancestor.
+func noteTextAndBaseRevision(ctx context.Context, value *account.Account, workspaceID, noteID model.ID) (text, baseRevision string, err error) {
 	state, format, err := value.NoteDocumentState(ctx, workspaceID, noteID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	doc, err := yjsadapter.Restore(format, state)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer doc.Close()
-	return doc.Markdown("body")
+	text, err = doc.Markdown("body")
+	if err != nil {
+		return "", "", err
+	}
+	update, err := doc.EncodeStateAsUpdate(yjsadapter.FormatV2)
+	if err != nil {
+		return "", "", err
+	}
+	return text, base64.StdEncoding.EncodeToString(update), nil
 }
 
 func optionalID(raw string) (model.ID, error) {

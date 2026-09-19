@@ -29,7 +29,7 @@ func TestPlanAndRestoreSelectiveImportsChosenNotesAsNew(t *testing.T) {
 		t.Fatalf("CreateNote A: %v", err)
 	}
 	noteA := decodeJSON[map[string]any](t, noteAJSON)
-	if err := service.SaveNote("save-a", noteA["id"].(string), "Note A", "content a"); err != nil {
+	if _, err := service.SaveNote("save-a", noteA["id"].(string), "Note A", "content a", ""); err != nil {
 		t.Fatalf("SaveNote A: %v", err)
 	}
 
@@ -38,7 +38,7 @@ func TestPlanAndRestoreSelectiveImportsChosenNotesAsNew(t *testing.T) {
 		t.Fatalf("CreateNote B: %v", err)
 	}
 	noteB := decodeJSON[map[string]any](t, noteBJSON)
-	if err := service.SaveNote("save-b", noteB["id"].(string), "Note B", "content b"); err != nil {
+	if _, err := service.SaveNote("save-b", noteB["id"].(string), "Note B", "content b", ""); err != nil {
 		t.Fatalf("SaveNote B: %v", err)
 	}
 

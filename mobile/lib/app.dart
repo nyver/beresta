@@ -43,9 +43,10 @@ const Set<String> knownQuarantineReasons = {
 /// does not recognize (server/client version skew) rather than showing
 /// nothing or the raw code.
 String quarantineReasonMessage(Strings strings, String reason) {
-  final key = knownQuarantineReasons.contains(reason)
-      ? "sync_quarantine_reason_$reason"
-      : "sync_quarantine_reason_unknown";
+  final key =
+      knownQuarantineReasons.contains(reason)
+          ? "sync_quarantine_reason_$reason"
+          : "sync_quarantine_reason_unknown";
   return strings(key);
 }
 
@@ -1561,7 +1562,8 @@ class _ServerSheetState extends State<ServerSheet> {
           // always-visible "no issues" row would push later sections (e.g.
           // the workspace list) further down for every ordinary user who
           // never hits an unsafe incoming operation.
-          if (quarantine.isNotEmpty || syncStatusValue == "action_required") ...[
+          if (quarantine.isNotEmpty ||
+              syncStatusValue == "action_required") ...[
             Text(
               widget.strings("sync_journal_title"),
               style: Theme.of(context).textTheme.titleMedium,
@@ -1572,9 +1574,7 @@ class _ServerSheetState extends State<ServerSheet> {
               for (final entry in quarantine)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: SelectableText(
-                    entry["operation_id"] as String? ?? "",
-                  ),
+                  title: SelectableText(entry["operation_id"] as String? ?? ""),
                   subtitle: Text(
                     quarantineReasonMessage(
                       widget.strings,
@@ -1583,8 +1583,7 @@ class _ServerSheetState extends State<ServerSheet> {
                   ),
                   trailing: TextButton(
                     onPressed:
-                        () =>
-                            retryQuarantine(entry["operation_id"] as String),
+                        () => retryQuarantine(entry["operation_id"] as String),
                     child: Text(widget.strings("retry")),
                   ),
                 ),
@@ -2076,7 +2075,11 @@ class _SettingsSheetState extends State<SettingsSheet> {
 /// load lazily, on first expand, so opening Settings for an unrelated
 /// reason never fetches diagnostics the user did not ask for.
 class DiagnosticsSection extends StatefulWidget {
-  const DiagnosticsSection({required this.gateway, required this.strings, super.key});
+  const DiagnosticsSection({
+    required this.gateway,
+    required this.strings,
+    super.key,
+  });
 
   final CoreGateway gateway;
   final Strings strings;
@@ -2210,8 +2213,7 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
                 ),
                 _diagnosticsRow(
                   widget.strings("diagnostics_last_successful_sync"),
-                  ((current["last_successful_sync_unix_ms"] as num?)
-                                  ?.toInt() ??
+                  ((current["last_successful_sync_unix_ms"] as num?)?.toInt() ??
                               0) >
                           0
                       ? DateTime.fromMillisecondsSinceEpoch(
@@ -2226,9 +2228,7 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
                 ),
                 _diagnosticsRow(
                   widget.strings("diagnostics_connection_state"),
-                  widget.strings(
-                    "sync_status_${current["connection_state"]}",
-                  ),
+                  widget.strings("sync_status_${current["connection_state"]}"),
                 ),
                 _diagnosticsRow(
                   widget.strings("diagnostics_backup"),
@@ -2278,7 +2278,9 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
                 if (copyError != null)
                   Text(
                     copyError!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 TextButton(
                   onPressed: () => unawaited(handleCopy()),
@@ -2348,8 +2350,7 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
         ),
         _diagnosticsRow(
           widget.strings("diagnostics_transport_security_mode"),
-          (technical["transport_security_mode"] as String?)?.isNotEmpty ==
-                  true
+          (technical["transport_security_mode"] as String?)?.isNotEmpty == true
               ? technical["transport_security_mode"] as String
               : widget.strings("diagnostics_none"),
         ),
@@ -2443,7 +2444,8 @@ class _BackupSheetState extends State<BackupSheet> {
       final value = snapshot.data;
       if (value == null) return const SizedBox.shrink();
       final health = value["health"] as String? ?? "unknown";
-      final lastVerifiedMS = (value["last_verified_unix_ms"] as num?)?.toInt() ?? 0;
+      final lastVerifiedMS =
+          (value["last_verified_unix_ms"] as num?)?.toInt() ?? 0;
       final location = value["location"] as String? ?? "";
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
@@ -2568,7 +2570,8 @@ class _BackupSheetState extends State<BackupSheet> {
                       ).toLocal().toString(),
                     ),
                     trailing: TextButton(
-                      onPressed: () => openRestoreOptions(backup["id"] as String),
+                      onPressed:
+                          () => openRestoreOptions(backup["id"] as String),
                       child: Text(widget.strings("restore")),
                     ),
                   );
@@ -2640,9 +2643,13 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
       error = null;
     });
     try {
-      final result = await widget.gateway.planRestore(widget.backupId, const []);
+      final result = await widget.gateway.planRestore(
+        widget.backupId,
+        const [],
+      );
       final entries =
-          (result["entries"] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+          (result["entries"] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
       if (!mounted) return;
       setState(() {
         plan = result;
@@ -2653,7 +2660,8 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
                 .toSet();
       });
     } catch (failure) {
-      if (mounted) setState(() => error = describeFailure(widget.strings, failure));
+      if (mounted)
+        setState(() => error = describeFailure(widget.strings, failure));
     } finally {
       if (mounted) setState(() => planning = false);
     }
@@ -2681,7 +2689,8 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
       );
       widget.onRestored();
     } catch (failure) {
-      if (mounted) setState(() => error = describeFailure(widget.strings, failure));
+      if (mounted)
+        setState(() => error = describeFailure(widget.strings, failure));
     } finally {
       if (mounted) setState(() => restoring = false);
     }
@@ -2714,12 +2723,13 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
     try {
       await widget.gateway.restoreBackup(widget.backupId);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(widget.strings("restore_success"))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(widget.strings("restore_success"))),
+      );
       widget.onRestored();
     } catch (failure) {
-      if (mounted) setState(() => error = describeFailure(widget.strings, failure));
+      if (mounted)
+        setState(() => error = describeFailure(widget.strings, failure));
     } finally {
       if (mounted) setState(() => restoring = false);
     }
@@ -2771,7 +2781,9 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
                 if (error != null)
                   Text(
                     error!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 if (plan == null)
                   FilledButton(
@@ -2810,12 +2822,15 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
                                   selected.remove(noteId);
                                 }
                               }),
-                          title: Text(title.isNotEmpty ? title : widget.strings("title")),
+                          title: Text(
+                            title.isNotEmpty ? title : widget.strings("title"),
+                          ),
                           subtitle: Text(widget.strings("restore_kind_$kind")),
                         );
                       })),
                   FilledButton(
-                    onPressed: restoring || selected.isEmpty ? null : restoreSelected,
+                    onPressed:
+                        restoring || selected.isEmpty ? null : restoreSelected,
                     child:
                         restoring
                             ? const SizedBox(
@@ -2953,6 +2968,13 @@ class _EditorScreenState extends State<EditorScreen> {
   String? _inFlightRequestId;
   final Set<String> _selfCanceledRequestIds = {};
   int _requestCounter = 0;
+  // The CRDT state commit() must build its next edit against (task 6.8):
+  // set from getNote's own base_revision on load and after a revision
+  // restore, then advanced to each successful saveNoteCancelable call's
+  // returned base_revision - never left stale, since a commit built
+  // against an outdated base_revision would still risk silently
+  // discarding a remote merge that landed since.
+  String _baseRevision = "";
 
   /// The closed local-save state for the status text in the app bar (see
   /// build()), or null before this note session's first commit attempt -
@@ -2976,6 +2998,7 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) return;
       final note = value["note"] as Map<String, dynamic>;
       title.text = note["title"] as String;
+      _baseRevision = value["base_revision"] as String;
       final quillBody = QuillController(
         document: Document.fromDelta(markdownToDelta(value["body"] as String)),
         selection: const TextSelection.collapsed(offset: 0),
@@ -2989,7 +3012,8 @@ class _EditorScreenState extends State<EditorScreen> {
         // body is next saved as Markdown.
         config: QuillControllerConfig(
           clipboardConfig: QuillClipboardConfig(
-            onRichTextPaste: (delta, isExternal) async => stripUnsupportedFormats(delta),
+            onRichTextPaste:
+                (delta, isExternal) async => stripUnsupportedFormats(delta),
           ),
         ),
       );
@@ -3049,15 +3073,18 @@ class _EditorScreenState extends State<EditorScreen> {
     if (mounted) setState(() => saveState = LocalSaveState.saving);
 
     final markdown = deltaToMarkdown(body!.document.toDelta());
+    final usedBaseRevision = _baseRevision;
     try {
-      await widget.gateway.saveNoteCancelable(
+      final newBaseRevision = await widget.gateway.saveNoteCancelable(
         requestId,
         widget.noteId,
         title.text,
         markdown,
+        usedBaseRevision,
       );
       if (_inFlightRequestId == requestId) _inFlightRequestId = null;
       if (_selfCanceledRequestIds.remove(requestId)) return;
+      _baseRevision = newBaseRevision;
       requestCurrentWorkspaceSync(widget.gateway);
       final accepted = _tracker.accept(generation, true);
       if (accepted != null && mounted) setState(() => saveState = accepted);
@@ -3434,6 +3461,7 @@ class _EditorScreenState extends State<EditorScreen> {
             onRestored: () async {
               Navigator.pop(sheetContext);
               final value = await widget.gateway.getNote(widget.noteId);
+              _baseRevision = value["base_revision"] as String;
               body?.document = Document.fromDelta(
                 markdownToDelta(value["body"] as String),
               );

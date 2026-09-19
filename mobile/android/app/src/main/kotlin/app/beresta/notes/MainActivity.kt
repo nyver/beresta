@@ -286,7 +286,7 @@ class MainActivity : FlutterFragmentActivity() {
             "listNotes" -> service.listNotes(requestId)
             "createNote" -> service.createNote(requestId, call.argument<String>("notebookId") ?: "", required(call, "title"))
             "getNote" -> service.getNote(requestId, required(call, "noteId"))
-            "saveNote" -> service.saveNote(requestId, required(call, "noteId"), required(call, "title"), required(call, "body"))
+            "saveNote" -> service.saveNote(requestId, required(call, "noteId"), required(call, "title"), required(call, "body"), call.argument<String>("baseRevision") ?: "")
             "deleteNote" -> service.deleteNote(requestId, required(call, "noteId"), call.argument<Boolean>("deleted") == true)
             "moveNote" -> service.moveNote(requestId, required(call, "noteId"), call.argument<String>("notebookId") ?: "")
             "search" -> service.search(requestId, required(call, "query"), 100L)

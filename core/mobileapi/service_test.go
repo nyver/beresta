@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/sync/yjsadapter"
 )
 
@@ -96,7 +97,7 @@ func TestListNotesOrdersByLastModified(t *testing.T) {
 		t.Fatalf("CreateNote(second): %v", err)
 	}
 	time.Sleep(2 * time.Millisecond)
-	if err := service.SaveNote("edit-first", firstID, "first", "edited last"); err != nil {
+	if _, err := service.SaveNote("edit-first", firstID, "first", "edited last", ""); err != nil {
 		t.Fatalf("SaveNote(first): %v", err)
 	}
 
@@ -139,7 +140,7 @@ func TestSearchReturnsAccurateLastModifiedTimestamp(t *testing.T) {
 
 	// A short gap so the edit's timestamp is distinguishable from creation.
 	time.Sleep(2 * time.Millisecond)
-	if err := service.SaveNote("edit-note", noteID, "Findable title", "edited body"); err != nil {
+	if _, err := service.SaveNote("edit-note", noteID, "Findable title", "edited body", ""); err != nil {
 		t.Fatalf("SaveNote: %v", err)
 	}
 
@@ -189,7 +190,7 @@ func TestSaveNotePreservesRichFormattingForOtherClients(t *testing.T) {
 	}
 
 	body := "**bold** and a list:\n- one\n- two"
-	if err := service.SaveNote("save-note", noteID, "Formatted", body); err != nil {
+	if _, err := service.SaveNote("save-note", noteID, "Formatted", body, ""); err != nil {
 		t.Fatalf("SaveNote: %v", err)
 	}
 
@@ -221,6 +222,95 @@ func TestSaveNotePreservesRichFormattingForOtherClients(t *testing.T) {
 	wantPlain := "bold and a list:\none\ntwo\n"
 	if plain != wantPlain {
 		t.Fatalf("underlying CRDT text = %q, want %q", plain, wantPlain)
+	}
+}
+
+// TestSaveNoteMergesAConcurrentRemoteChangeInsteadOfDiscardingIt covers task
+// 6.8: SaveNote used to rebuild the note's entire live CRDT text from the
+// mobile editor's own body alone, so a remote merge landing between the
+// client's last GetNote and its next SaveNote (something Android's editor,
+// with no live CRDT binding, has no way to notice) was silently erased
+// instead of preserved. Passing GetNote's base_revision back into SaveNote
+// must let the two changes converge instead.
+func TestSaveNoteMergesAConcurrentRemoteChangeInsteadOfDiscardingIt(t *testing.T) {
+	service, err := NewService(newTestServiceDeviceSecret(t))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	dbPath := filepath.Join(retryTempDir(t), "beresta.db")
+	t.Cleanup(service.Close)
+	if _, err := service.CreateAccount("create-account", dbPath, "correct horse battery staple"); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	noteJSON, err := service.CreateNote("create-note", "", "Shared")
+	if err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+	noteID, _ := decodeJSON[map[string]any](t, noteJSON)["id"].(string)
+	if noteID == "" {
+		t.Fatalf("unexpected CreateNote response: %v", noteJSON)
+	}
+
+	if _, err := service.SaveNote("save-base", noteID, "Shared", "original text", ""); err != nil {
+		t.Fatalf("SaveNote (base): %v", err)
+	}
+
+	// The mobile editor's normal flow: GetNote hands it the current body
+	// plus the base_revision it must pass back on the next SaveNote.
+	fetched := decodeJSON[map[string]any](t, must(service.GetNote("get-note", noteID)))
+	if fetched["body"] != "original text" {
+		t.Fatalf("GetNote body = %v, want %q", fetched["body"], "original text")
+	}
+	baseRevision, _ := fetched["base_revision"].(string)
+	if baseRevision == "" {
+		t.Fatal("GetNote did not return a base_revision")
+	}
+
+	// A remote merge lands after this GetNote but before the client's next
+	// SaveNote - simulated the same way sync's apply-page path would
+	// commit an incoming operation, bypassing the mobile Service entirely
+	// so the mobile client has no way to have observed it.
+	value, workspaceID, id, err := service.noteContext(noteID)
+	if err != nil {
+		t.Fatalf("noteContext: %v", err)
+	}
+	ctx := context.Background()
+	state, format, err := value.NoteDocumentState(ctx, workspaceID, id)
+	if err != nil {
+		t.Fatalf("NoteDocumentState: %v", err)
+	}
+	remoteDoc, err := yjsadapter.Restore(format, state)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if err := remoteDoc.Insert("body", 0, "REMOTE: ", nil); err != nil {
+		t.Fatalf("remoteDoc.Insert: %v", err)
+	}
+	remoteUpdate, err := remoteDoc.EncodeStateAsUpdate(yjsadapter.FormatV2)
+	remoteDoc.Close()
+	if err != nil {
+		t.Fatalf("remoteDoc.EncodeStateAsUpdate: %v", err)
+	}
+	if err := value.CommitNoteBody(ctx, account.NoteBodyCommand{
+		WorkspaceID: workspaceID, NoteID: id, Update: remoteUpdate, UpdateFormat: yjsadapter.FormatV2,
+	}); err != nil {
+		t.Fatalf("CommitNoteBody (simulated remote merge): %v", err)
+	}
+
+	// The mobile client, still holding its pre-merge body and baseRevision,
+	// now saves an edit built from that stale body.
+	editedBody := "original text, edited locally"
+	if _, err := service.SaveNote("save-edit", noteID, "Shared", editedBody, baseRevision); err != nil {
+		t.Fatalf("SaveNote (edit): %v", err)
+	}
+
+	final := decodeJSON[map[string]any](t, must(service.GetNote("get-note", noteID)))
+	finalBody, _ := final["body"].(string)
+	if !strings.Contains(finalBody, "REMOTE:") {
+		t.Fatalf("remote merge was discarded: final body = %q", finalBody)
+	}
+	if !strings.Contains(finalBody, "edited locally") {
+		t.Fatalf("local edit was discarded: final body = %q", finalBody)
 	}
 }
 
@@ -279,7 +369,7 @@ func TestServiceFullAccountLifecycle(t *testing.T) {
 		t.Fatalf("unexpected CreateNote response: %v", note)
 	}
 
-	if err := service.SaveNote("save-note", noteID, "My Note", "hello from the mobile facade"); err != nil {
+	if _, err := service.SaveNote("save-note", noteID, "My Note", "hello from the mobile facade", ""); err != nil {
 		t.Fatalf("SaveNote: %v", err)
 	}
 

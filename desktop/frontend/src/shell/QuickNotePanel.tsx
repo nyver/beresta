@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { createNote, unwrapError } from "../api";
 import { useI18n } from "../i18n";
@@ -11,6 +11,19 @@ export interface QuickNotePanelProps {
   onClosed: () => void;
 }
 
+export interface QuickNotePanelHandle {
+  /**
+   * Immediately hides this panel's live title/body and flushes them,
+   * without calling onClosed - used by Shell's handleLock (task 7.6's
+   * content-first lock ordering) so this panel's own note content
+   * disappears at the same instant the main editor's does, instead of
+   * staying visible and interactive through the rest of the async lock
+   * sequence. The caller remains responsible for unmounting this panel
+   * (closing the modal) once the returned promise settles.
+   */
+  beginLockTeardown: () => Promise<void>;
+}
+
 /**
  * QuickNotePanel is the "focused quick-note surface" the windows-desktop-
  * client spec's global-hotkey scenario asks for: a title field plus the
@@ -21,13 +34,21 @@ export interface QuickNotePanelProps {
  * typing commits through the same debounced CommitNoteBody path as any
  * other note instead of needing a separate "new note" code path.
  */
-export function QuickNotePanel({ onClosed }: QuickNotePanelProps) {
+export const QuickNotePanel = forwardRef<QuickNotePanelHandle, QuickNotePanelProps>(function QuickNotePanel(
+  { onClosed },
+  ref,
+) {
   const { t, errorMessage } = useI18n();
   const editorRef = useRef<NoteEditorHandle>(null);
   const [title, setTitle] = useState("");
   const [noteId, setNoteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
+  // Set by beginLockTeardown, never by the ordinary Done-button close
+  // path: replaces this panel's editable content with a blank surface the
+  // instant a lock begins, before its own flush (below) has even
+  // resolved.
+  const [obscured, setObscured] = useState(false);
 
   useEffect(() => {
     let canceled = false;
@@ -68,7 +89,12 @@ export function QuickNotePanel({ onClosed }: QuickNotePanelProps) {
   }, []);
 
   async function handleClose() {
-    if (closing) return;
+    // obscured means a lock is already tearing this panel down
+    // (beginLockTeardown) - Shell owns unmounting it once that settles, so
+    // a concurrent click on Modal's own close button/backdrop (still
+    // reachable during that brief window) must not also race it through
+    // onClosed here.
+    if (closing || obscured) return;
     setClosing(true);
     try {
       await editorRef.current?.flush(title.trim());
@@ -77,9 +103,23 @@ export function QuickNotePanel({ onClosed }: QuickNotePanelProps) {
     }
   }
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      beginLockTeardown: async () => {
+        setObscured(true);
+        // Called while this panel is still mounted (unlike the unmount
+        // cleanup above), so editorRef/its own ydoc are still live - the
+        // flush actually has content to commit.
+        await editorRef.current?.flush(titleRef.current.trim());
+      },
+    }),
+    [],
+  );
+
   return (
     <Modal title={t("quicknote.title")} onClose={() => void handleClose()}>
-      {error ? (
+      {obscured ? null : error ? (
         <p className="error" role="alert">
           {error}
         </p>
@@ -103,4 +143,4 @@ export function QuickNotePanel({ onClosed }: QuickNotePanelProps) {
       )}
     </Modal>
   );
-}
+});

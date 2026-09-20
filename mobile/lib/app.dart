@@ -234,6 +234,11 @@ class _AppLifecycleLockState extends State<AppLifecycleLock>
     with WidgetsBindingObserver {
   Timer? lockTimer;
   bool obscured = false;
+  // Invalidates a slow _armLockTimer settings fetch that is still in
+  // flight when the app resumes (or backgrounds again) before it
+  // resolves, so a stale arm attempt can never (re-)start lockTimer after
+  // the state it was computed for no longer applies.
+  int lockArmGeneration = 0;
 
   @override
   void initState() {
@@ -259,17 +264,43 @@ class _AppLifecycleLockState extends State<AppLifecycleLock>
         state == AppLifecycleState.hidden) {
       if (!obscured) setState(() => obscured = true);
       if (lockTimer?.isActive != true) {
-        lockTimer = Timer(const Duration(minutes: 5), () async {
-          await widget.gateway.lock();
-          if (mounted) widget.onSessionLocked();
-        });
+        unawaited(_armLockTimer(++lockArmGeneration));
       }
     } else if (state == AppLifecycleState.resumed) {
+      lockArmGeneration++;
       lockTimer?.cancel();
       unawaited(_resume());
     } else if (!obscured) {
       setState(() => obscured = true);
     }
+  }
+
+  /// Arms this Dart-owned background auto-lock using the same configured
+  /// `auto_lock_minutes` the native Android auto-lock
+  /// (MainActivity.onStop) enforces - this used to be a hardcoded 5
+  /// minutes regardless of that setting, so a user-configured longer
+  /// timeout was silently overridden by this safety net every time the
+  /// app was merely backgrounded. Falls back to the same 5-minute default
+  /// MainActivity.onStop uses if settings cannot be read, and, like the
+  /// native side, 0 minutes means lock immediately rather than "never".
+  Future<void> _armLockTimer(int generation) async {
+    int minutes;
+    try {
+      final settings = await widget.gateway.getSettings();
+      minutes = settings["auto_lock_minutes"] as int? ?? 5;
+    } catch (_) {
+      minutes = 5;
+    }
+    if (!mounted || generation != lockArmGeneration) return;
+    Future<void> lockNow() async {
+      await widget.gateway.lock();
+      if (mounted) widget.onSessionLocked();
+    }
+    if (minutes <= 0) {
+      await lockNow();
+      return;
+    }
+    lockTimer = Timer(Duration(minutes: minutes), lockNow);
   }
 
   Future<void> _resume() async {
@@ -934,6 +965,13 @@ class _NotesShellState extends State<NotesShell> {
           IconButton(
             tooltip: widget.strings("lock"),
             onPressed: () async {
+              // Content-first lock ordering (task 7.6): flush before
+              // wiping secrets, matching the automatic background lock
+              // path (AppLifecycleLock) - a no-op today since the editor
+              // route occludes this button while it is open, but this
+              // keeps that true by construction rather than by navigation
+              // topology alone.
+              await ActiveEditorFlush.flushIfAny();
               await widget.gateway.lock();
               widget.onLocked();
             },

@@ -30,7 +30,7 @@ import { Modal } from "../shell/Modal";
 import { NotebookTree } from "../shell/NotebookTree";
 import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPane";
 import { NoteList, type NoteListMeta } from "../shell/NoteList";
-import { QuickNotePanel } from "../shell/QuickNotePanel";
+import { QuickNotePanel, type QuickNotePanelHandle } from "../shell/QuickNotePanel";
 import { SearchBar, type SearchBarHandle } from "../shell/SearchBar";
 import { DiagnosticsPanel } from "../shell/DiagnosticsPanel";
 import { ShellIntegrationPanel } from "../shell/ShellIntegrationPanel";
@@ -104,6 +104,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
   const shellTitleId = useId();
   const [locking, setLocking] = useState(false);
   const editorPaneRef = useRef<NoteEditorPaneHandle>(null);
+  const quickNotePanelRef = useRef<QuickNotePanelHandle>(null);
   const searchBarRef = useRef<SearchBarHandle>(null);
   // null means "not yet loaded"; the auto-lock idle timer stays disarmed
   // until it knows the real value, so it can never fire early using a
@@ -580,9 +581,23 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
   }
 
   async function handleLock() {
+    // Content-first lock ordering (task 7.6): obscure and disable
+    // everything that could still show or accept note content, not just
+    // the main editor pane. Settings/Sync hold no live note content, so
+    // closing them immediately is enough; QuickNotePanel hosts its own
+    // live NoteEditor unrelated to editorPaneRef, so it needs the same
+    // "obscure now, flush, then tear down" treatment as the main pane
+    // (beginLockTeardown), not just an unmount - an unmount-time flush
+    // can no longer see this panel's document once its own child editor
+    // has already cleaned itself up.
+    setDataModalOpen(false);
+    setSyncModalOpen(false);
+    const quickNoteFlush = quickNoteOpen ? quickNotePanelRef.current?.beginLockTeardown() : undefined;
     setLocking(true);
     try {
       await editorPaneRef.current?.flush();
+      await quickNoteFlush;
+      setQuickNoteOpen(false);
       await lockAccount();
       onLocked();
       // Deliberately not reset to false here: the parent (App.tsx)
@@ -791,6 +806,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
       {quickNoteOpen ? (
         <QuickNotePanel
           key={quickNoteSession}
+          ref={quickNotePanelRef}
           onClosed={() => {
             setQuickNoteOpen(false);
             loadAll();

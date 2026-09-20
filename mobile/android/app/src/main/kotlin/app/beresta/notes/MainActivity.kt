@@ -21,7 +21,14 @@ import org.json.JSONObject
 class MainActivity : FlutterFragmentActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val lockRunnable = Runnable { runCatching { NativeCore.awaitService().lock() } }
+    // Runs the actual lock on `executor`, the same single-thread queue every
+    // Dart-initiated core call (including the saveNote a background flush
+    // sends - see onStop below) is dispatched onto, instead of calling
+    // lock() directly here on the main thread. That ordering is what makes
+    // this safe to run immediately for "lock now" (auto_lock_minutes == 0):
+    // a flush already enqueued ahead of this task still finishes first,
+    // rather than racing lock() for the account's in-memory reference.
+    private val lockRunnable = Runnable { executor.execute { runCatching { NativeCore.awaitService().lock() } } }
     private var pendingCapture: PendingCapture? = null
     private var pendingBackupDestination: MethodChannel.Result? = null
     @Volatile private var lifecycleGeneration = 0L
@@ -110,6 +117,16 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onStop() {
         val stoppedGeneration = lifecycleGeneration + 1
         lifecycleGeneration = stoppedGeneration
+        // super.onStop() first: it is what tells the Flutter engine the app
+        // is backgrounding (AppLifecycleState.paused), which is what starts
+        // Dart's own flush of any open editor (see AppLifecycleLock in
+        // mobile/lib/app.dart). Scheduling this activity's own lock check
+        // beforehand, as this used to, let it race ahead of that
+        // notification instead of behind it - content-first lock ordering
+        // (task 7.6) requires the flush to at least have a chance to be
+        // dispatched (and, for "lock now", enqueued onto `executor` ahead
+        // of lockRunnable - see its own comment) before any lock begins.
+        super.onStop()
         executor.execute {
             val delay = runCatching {
                 val requestId = "android-lock-policy-${System.nanoTime()}"
@@ -119,11 +136,18 @@ class MainActivity : FlutterFragmentActivity() {
             }.getOrDefault(DEFAULT_AUTO_LOCK_MINUTES * 60_000L)
             mainHandler.post {
                 if (lifecycleGeneration != stoppedGeneration) return@post
-                if (delay == 0L) lockRunnable.run()
-                else mainHandler.postDelayed(lockRunnable, delay)
+                // "Lock now" (auto_lock_minutes == 0) still waits out this
+                // short grace period rather than running lockRunnable
+                // synchronously: the flush this same backgrounding
+                // transition triggers on the Dart side (AppLifecycleLock)
+                // needs a moment to cross the platform channel and reach
+                // `executor` - without it, this activity's own lock policy
+                // check (also on `executor`, but with no engine/isolate
+                // round trip to wait on) can reliably win the race and
+                // enqueue lock() ahead of an in-flight saveNote.
+                mainHandler.postDelayed(lockRunnable, delay.coerceAtLeast(IMMEDIATE_LOCK_FLUSH_GRACE_MS))
             }
         }
-        super.onStop()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -499,6 +523,7 @@ class MainActivity : FlutterFragmentActivity() {
         private const val CORE_CHANNEL = "app.beresta.notes/core/v1"
         private const val DEFAULT_AUTO_LOCK_MINUTES = 5L
         private const val MAX_AUTO_LOCK_MINUTES = 24L * 60L
+        private const val IMMEDIATE_LOCK_FLUSH_GRACE_MS = 250L
         private const val MAX_CAPTURE_BYTES = 64 * 1024 * 1024
         private const val DEVICE_UNLOCK_SUFFIX = ".deviceunlock"
     }

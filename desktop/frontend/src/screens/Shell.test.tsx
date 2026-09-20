@@ -290,6 +290,47 @@ describe("Shell", () => {
     await waitFor(() => expect(appMock.LockAccount).toHaveBeenCalled());
   });
 
+  it("closes an open quick note (flushing its content) instead of leaving it visible while locking", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(fakeNote({ title: "" }));
+    let resolveLock: () => void = () => {};
+    appMock.LockAccount.mockReturnValue(new Promise<void>((resolve) => (resolveLock = resolve)));
+    renderShell();
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(runtimeMock.EventsOnMultiple).toHaveBeenCalled());
+    const [, onQuickNoteOpen] =
+      runtimeMock.EventsOnMultiple.mock.calls.find(([eventName]) => eventName === "quicknote:open") ?? [];
+    act(() => onQuickNoteOpen?.());
+    const dialog = await screen.findByRole("dialog", { name: "quicknote.title" });
+    // Wait for the Yjs-backed body editor to finish loading: flush()
+    // only has a document to act on once useNoteDocument's ydoc is set,
+    // matching how a real quick note is never locked/closed before its
+    // body editor has actually mounted.
+    await waitFor(() => expect(within(dialog).queryByText("common.loading")).not.toBeInTheDocument());
+    await user.type(screen.getByLabelText("shell.detail_title_label"), "Secret quick note");
+
+    await user.click(screen.getByRole("button", { name: "shell.lock_button" }));
+
+    // The quick-note dialog (and the note text it was still holding)
+    // disappears immediately, before LockAccount even resolves - matching
+    // the same "obscure before the async lock/flush chain completes"
+    // guarantee already proven for the main editor above.
+    expect(screen.queryByRole("dialog", { name: "quicknote.title" })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Secret quick note")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(appMock.CommitNoteBody).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Secret quick note" }),
+      ),
+    );
+
+    resolveLock();
+    await waitFor(() => expect(appMock.LockAccount).toHaveBeenCalled());
+  });
+
   it("shows a key-protection badge reflecting the account's actual protection mode", async () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);

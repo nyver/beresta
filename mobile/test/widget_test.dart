@@ -972,6 +972,45 @@ void main() {
 
     expect(gateway.syncNowCalls, greaterThan(syncCallsAfterOpen));
   });
+
+  testWidgets(
+    "background auto-lock waits for the configured duration instead of a hardcoded 5 minutes",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: true)..autoLockMinutesValue = 15;
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      // Lets the in-flight getSettings() call (a microtask, not a Timer)
+      // resolve and arm lockTimer with the real configured duration.
+      await tester.pump();
+      await tester.pump();
+
+      // Still well short of the configured 15 minutes: the account must
+      // still be unlocked, not locked after the old hardcoded 5 minutes.
+      await tester.pump(const Duration(minutes: 6));
+      expect(gateway.unlocked, isTrue);
+
+      await tester.pump(const Duration(minutes: 10));
+      expect(gateway.unlocked, isFalse);
+    },
+  );
+
+  testWidgets(
+    "background auto-lock locks immediately when auto_lock_minutes is 0",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)..autoLockMinutesValue = 0;
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      await tester.pump();
+
+      expect(gateway.unlocked, isFalse);
+    },
+  );
 }
 
 class FakeGateway implements CoreGateway {
@@ -1320,10 +1359,11 @@ class FakeGateway implements CoreGateway {
 
   @override
   Future<int> importBackups() async => 0;
+  int autoLockMinutesValue = 5;
   @override
   Future<Map<String, dynamic>> getSettings() async => {
     "language": "en",
-    "auto_lock_minutes": 5,
+    "auto_lock_minutes": autoLockMinutesValue,
     "backup_destination": "",
     "attachment_retention": "all",
     "selected_notebooks": <String>[],

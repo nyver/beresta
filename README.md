@@ -313,6 +313,22 @@ forbidden-word list (password, key, content, title, query, invite, clipboard,
 and similar) on every call, so it can never carry note content, titles, search
 queries, passwords, keys, tokens, invite codes, or clipboard data.
 
+Both clients now group every settings surface into the same six sections -
+General, Security, Synchronization, Data, Advanced, and About
+(specs/product-experience's "Stable cross-platform information architecture"
+requirement) - instead of scattering backup, sync/device, and diagnostic
+controls across permanent top-level buttons. Desktop's gear icon and the
+topbar's synchronization status pill both open one Settings modal
+(`desktop/frontend/src/shell/SettingsPanel.tsx`), landing on the matching
+group tab; auto-lock and the account's key-protection mode live under
+Security, backup/restore/import/export under Data, and the existing sync
+panel (connect/share/devices) under Synchronization. Android's app bar
+previously exposed separate backup, server, and settings buttons; these now
+open one grouped bottom sheet (`GroupedSettingsSheet` in `mobile/lib/app.dart`)
+with the same six sections, selectable as chips, so backup and
+server/device management are reachable only from Settings rather than as
+their own permanent icons.
+
 The completed phase-1 build matrix, test scope, review findings, and limitations
 are recorded in [the phase-1 delivery report](docs/phase-1-report.md).
 Cryptographic/platform protection verification is recorded in

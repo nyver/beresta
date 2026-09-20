@@ -1349,6 +1349,65 @@ li:hover > .tree-row-delete,
   border-radius: 0.35rem;
 }
 
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.settings-group-tabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.settings-group-tab {
+  background: #fff;
+  color: #1e1b18;
+  border-color: #d8d1c4;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.settings-group-tab.selected {
+  background: #6b4f2a;
+  color: #fff;
+  border-color: #6b4f2a;
+}
+
+.settings-group-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.about-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.about-version {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #5a5148;
+}
+
+.about-version div {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.about-version dt {
+  font-weight: 600;
+}
+
+.about-version dd {
+  margin: 0;
+}
+
 .shell-locking-overlay {
   display: flex;
   align-items: center;

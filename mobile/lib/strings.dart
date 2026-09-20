@@ -180,6 +180,17 @@ class Strings {
       "close": "Close",
       "cancel": "Cancel",
       "settings": "Settings",
+      "settings_group_general": "General",
+      "settings_group_security": "Security",
+      "settings_group_synchronization": "Synchronization",
+      "settings_group_data": "Data",
+      "settings_group_advanced": "Advanced",
+      "settings_group_about": "About",
+      "settings_general_empty": "No general settings on this device yet.",
+      "settings_privacy_defaults":
+          "Beresta enables no external product analytics, behavioral "
+          "tracking, remote telemetry, or third-party crash upload by "
+          "default.",
       "auto_lock": "Automatic lock",
       "attachment_retention": "Downloaded attachments",
       "retention_all": "Keep all",
@@ -416,6 +427,17 @@ class Strings {
       "close": "Закрыть",
       "cancel": "Отмена",
       "settings": "Настройки",
+      "settings_group_general": "Общие",
+      "settings_group_security": "Безопасность",
+      "settings_group_synchronization": "Синхронизация",
+      "settings_group_data": "Данные",
+      "settings_group_advanced": "Дополнительно",
+      "settings_group_about": "О программе",
+      "settings_general_empty": "На этом устройстве пока нет общих настроек.",
+      "settings_privacy_defaults":
+          "По умолчанию Beresta не использует внешнюю аналитику продукта, "
+          "отслеживание поведения, удалённую телеметрию и отправку "
+          "отчётов о сбоях сторонним сервисам.",
       "auto_lock": "Автоматическая блокировка",
       "attachment_retention": "Загруженные вложения",
       "retention_all": "Хранить все",

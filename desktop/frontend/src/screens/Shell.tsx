@@ -24,17 +24,13 @@ import {
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
-import { BackupsPanel } from "../shell/BackupsPanel";
-import { ImportExportPanel } from "../shell/ImportExportPanel";
 import { Modal } from "../shell/Modal";
 import { NotebookTree } from "../shell/NotebookTree";
 import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPane";
 import { NoteList, type NoteListMeta } from "../shell/NoteList";
 import { QuickNotePanel, type QuickNotePanelHandle } from "../shell/QuickNotePanel";
 import { SearchBar, type SearchBarHandle } from "../shell/SearchBar";
-import { DiagnosticsPanel } from "../shell/DiagnosticsPanel";
-import { ShellIntegrationPanel } from "../shell/ShellIntegrationPanel";
-import { SyncPanel } from "../shell/SyncPanel";
+import { SettingsPanel, type SettingsGroup } from "../shell/SettingsPanel";
 import { UndoSnackbar } from "../shell/UndoSnackbar";
 import { TagList } from "../shell/TagList";
 
@@ -143,8 +139,14 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
   // by SearchBar.clear() or by picking a notebook/tag from the sidebar.
   const [searchResults, setSearchResults] = useState<main.SearchResultDTO[] | null>(null);
   const [highlightTerms, setHighlightTerms] = useState<string[]>([]);
-  const [dataModalOpen, setDataModalOpen] = useState(false);
-  const [syncModalOpen, setSyncModalOpen] = useState(openSyncOnMount);
+  // Settings groups (task 7.9's stable cross-platform information
+  // architecture): one modal, one group active at a time, null when
+  // closed. Opening straight to "synchronization" covers both the
+  // topbar's sync pill and onboarding's post-create "Connect now" prompt
+  // (openSyncOnMount) - there is no separate Sync modal anymore.
+  const [settingsGroup, setSettingsGroup] = useState<SettingsGroup | null>(
+    openSyncOnMount ? "synchronization" : null,
+  );
   // Workspace-wide synchronization state, shared by the topbar's compact
   // pill and the open note's footer status line (SaveStatusLine) so the two
   // never disagree; loaded once and kept live via the same "sync:summary"
@@ -590,8 +592,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
     // (beginLockTeardown), not just an unmount - an unmount-time flush
     // can no longer see this panel's document once its own child editor
     // has already cleaned itself up.
-    setDataModalOpen(false);
-    setSyncModalOpen(false);
+    setSettingsGroup(null);
     const quickNoteFlush = quickNoteOpen ? quickNotePanelRef.current?.beginLockTeardown() : undefined;
     setLocking(true);
     try {
@@ -624,7 +625,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
       // even if event delivery is delayed.
       setSyncStatusValue("active");
     } catch {
-      setSyncModalOpen(true);
+      setSettingsGroup("synchronization");
     } finally {
       setForcingSync(false);
     }
@@ -730,7 +731,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
             className={`sync-status-pill sync-status-${syncStatusValue ?? "local_only"}`}
             aria-label={t("sync.open_button")}
             title={t("sync.open_button")}
-            onClick={() => setSyncModalOpen(true)}
+            onClick={() => setSettingsGroup("synchronization")}
           >
             <span className="sync-status-dot" aria-hidden="true" />
             {syncStatusValue ? t(`sync.status_${syncStatusValue}`) : t("sync.open_button")}
@@ -751,7 +752,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
             className="icon-button"
             aria-label={t("settings.title")}
             title={t("settings.title")}
-            onClick={() => setDataModalOpen(true)}
+            onClick={() => setSettingsGroup("general")}
           >
             ⚙
           </button>
@@ -768,33 +769,16 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
         </div>
       </header>
 
-      {dataModalOpen ? (
-        <Modal title={t("settings.title")} onClose={() => setDataModalOpen(false)}>
-          <label className="auto-lock-control">
-            <span>{t("shell.auto_lock_label")}</span>
-            <select
-              value={autoLockMinutes ?? ""}
-              disabled={autoLockMinutes === null}
-              onChange={(event) => void handleAutoLockChange(Number(event.target.value))}
-            >
-              <option value={0}>{t("shell.auto_lock_never")}</option>
-              <option value={5}>{t("shell.auto_lock_5min")}</option>
-              <option value={15}>{t("shell.auto_lock_15min")}</option>
-              <option value={30}>{t("shell.auto_lock_30min")}</option>
-              <option value={60}>{t("shell.auto_lock_60min")}</option>
-            </select>
-          </label>
-          <BackupsPanel onRestored={loadAll} />
-          <ImportExportPanel onImported={loadAll} />
-          <ShellIntegrationPanel />
-          <DiagnosticsPanel />
-        </Modal>
-      ) : null}
-
-      {syncModalOpen ? (
-        <Modal title={t("sync.title")} onClose={() => setSyncModalOpen(false)}>
-          <SyncPanel
-            deviceId={account.device_id}
+      {settingsGroup ? (
+        <Modal title={t("settings.title")} onClose={() => setSettingsGroup(null)}>
+          <SettingsPanel
+            activeGroup={settingsGroup}
+            onGroupChange={setSettingsGroup}
+            account={account}
+            autoLockMinutes={autoLockMinutes}
+            onAutoLockChange={(minutes) => void handleAutoLockChange(minutes)}
+            onRestored={loadAll}
+            onImported={loadAll}
             onWorkspaceChanged={loadAll}
             onBeforeWorkspaceSwitch={async () => {
               await editorPaneRef.current?.flush();
@@ -921,7 +905,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
               onDraftTouched={markDraftTouched}
               syncStatus={syncStatusValue}
               syncedAt={syncedAt}
-              onOpenSync={() => setSyncModalOpen(true)}
+              onOpenSync={() => setSettingsGroup("synchronization")}
             />
           </section>
         </div>

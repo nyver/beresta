@@ -339,6 +339,8 @@
   "settings.group_advanced": "Дополнительно",
   "settings.group_about": "О программе",
 
+  "about.privacy_defaults": "По умолчанию Beresta не использует внешнюю аналитику продукта, отслеживание поведения, удалённую телеметрию и отправку отчётов о сбоях сторонним сервисам.",
+
   "emptystate.notes_title": "Пока нет заметок",
   "emptystate.notes_description": "Заметки сохраняются на этом устройстве сразу же.",
   "emptystate.notes_action": "Создать заметку",

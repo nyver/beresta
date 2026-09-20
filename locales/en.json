@@ -339,6 +339,8 @@
   "settings.group_advanced": "Advanced",
   "settings.group_about": "About",
 
+  "about.privacy_defaults": "Beresta enables no external product analytics, behavioral tracking, remote telemetry, or third-party crash upload by default.",
+
   "emptystate.notes_title": "No notes yet",
   "emptystate.notes_description": "Notes are stored immediately on this device.",
   "emptystate.notes_action": "Create note",

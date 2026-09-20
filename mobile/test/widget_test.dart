@@ -708,11 +708,21 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.widgetWithText(TextField, "HTTPS server URL"), findsNothing);
+      final connectionCodeField = find.widgetWithText(
+        TextField,
+        "Connection code",
+      );
+      await tester.ensureVisible(connectionCodeField);
       await tester.enterText(
-        find.widgetWithText(TextField, "Connection code"),
+        connectionCodeField,
         "beresta://connect?url=https://code.example.com&invite=abc&fingerprint=cd34&mode=pinned",
       );
-      await tester.tap(find.widgetWithText(FilledButton, "Connect with code"));
+      final connectButton = find.widgetWithText(
+        FilledButton,
+        "Connect with code",
+      );
+      await tester.ensureVisible(connectButton);
+      await tester.tap(connectButton);
       await tester.pumpAndSettle();
 
       expect(gateway.connectedConfig, {
@@ -743,11 +753,20 @@ void main() {
       await tester.tap(find.byIcon(Icons.cloud_outlined));
       await tester.pumpAndSettle();
 
+      final identityField = find.widgetWithText(
+        TextField,
+        "Paste their identity code",
+      );
+      await tester.ensureVisible(identityField);
       await tester.enterText(
-        find.widgetWithText(TextField, "Paste their identity code"),
+        identityField,
         "beresta://identity?user=peer&key=00",
       );
-      await tester.tap(find.byKey(const Key("share-continue-button")));
+      final shareContinueButton = find.byKey(
+        const Key("share-continue-button"),
+      );
+      await tester.ensureVisible(shareContinueButton);
+      await tester.tap(shareContinueButton);
       await tester.pumpAndSettle();
 
       // Not shared yet: an explicit confirmation dialog sits between
@@ -756,9 +775,12 @@ void main() {
         find.textContaining("They will be able to read and change"),
         findsOneWidget,
       );
-      await tester.tap(
-        find.widgetWithText(FilledButton, "Confirm and generate code"),
+      final confirmShareButton = find.widgetWithText(
+        FilledButton,
+        "Confirm and generate code",
       );
+      await tester.ensureVisible(confirmShareButton);
+      await tester.tap(confirmShareButton);
       await tester.pumpAndSettle();
 
       expect(find.text("Ready to share."), findsOneWidget);
@@ -768,7 +790,11 @@ void main() {
         find.text("beresta://grant?workspace=fake&key=00&authority=00&sig=00"),
         findsNothing,
       );
-      await tester.tap(find.byKey(const Key("grant-show-code-button")));
+      final grantShowCodeButton = find.byKey(
+        const Key("grant-show-code-button"),
+      );
+      await tester.ensureVisible(grantShowCodeButton);
+      await tester.tap(grantShowCodeButton);
       await tester.pumpAndSettle();
 
       expect(
@@ -792,17 +818,29 @@ void main() {
       await tester.tap(find.byIcon(Icons.cloud_done_outlined));
       await tester.pumpAndSettle();
 
+      final grantCodeField = find.widgetWithText(
+        TextField,
+        "Paste their grant code",
+      );
+      await tester.ensureVisible(grantCodeField);
       await tester.enterText(
-        find.widgetWithText(TextField, "Paste their grant code"),
+        grantCodeField,
         "beresta://grant?workspace=w&key=k&authority=a&sig=s",
       );
-      await tester.tap(find.byKey(const Key("join-continue-button")));
+      final joinContinueButton = find.byKey(const Key("join-continue-button"));
+      await tester.ensureVisible(joinContinueButton);
+      await tester.tap(joinContinueButton);
       await tester.pumpAndSettle();
 
       // Not joined yet: an explicit confirmation dialog sits between
       // pasting the code and actually joining.
       expect(find.text("Join this workspace?"), findsOneWidget);
-      await tester.tap(find.widgetWithText(FilledButton, "Confirm and join"));
+      final confirmJoinButton = find.widgetWithText(
+        FilledButton,
+        "Confirm and join",
+      );
+      await tester.ensureVisible(confirmJoinButton);
+      await tester.tap(confirmJoinButton);
       await tester.pumpAndSettle();
 
       expect(find.text("You're connected."), findsOneWidget);
@@ -811,7 +849,9 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.tap(find.widgetWithText(FilledButton, "Close"));
+      final closeButton = find.widgetWithText(FilledButton, "Close");
+      await tester.ensureVisible(closeButton);
+      await tester.tap(closeButton);
       await tester.pumpAndSettle();
 
       // Dismissed the sheet instead of leaving the success state open.
@@ -896,7 +936,12 @@ void main() {
       await tester.tap(find.byIcon(Icons.cloud_outlined));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(TextButton, "Disconnect"));
+      final disconnectTextButton = find.widgetWithText(
+        TextButton,
+        "Disconnect",
+      );
+      await tester.ensureVisible(disconnectTextButton);
+      await tester.tap(disconnectTextButton);
       await tester.pumpAndSettle();
 
       expect(gateway.revokedSyncDeviceIds, isEmpty);
@@ -925,7 +970,11 @@ void main() {
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.backup_outlined));
+      // Backup no longer has its own app bar button (task 7.9's grouped
+      // settings); it lives under Settings > Data.
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Data"));
       await tester.pumpAndSettle();
 
       expect(find.text("Healthy"), findsOneWidget);
@@ -945,7 +994,11 @@ void main() {
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.backup_outlined));
+      // Backup no longer has its own app bar button (task 7.9's grouped
+      // settings); it lives under Settings > Data.
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Data"));
       await tester.pumpAndSettle();
 
       expect(find.text("Corrupt"), findsOneWidget);
@@ -986,9 +1039,15 @@ void main() {
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.backup_outlined));
+      // Backup no longer has its own app bar button (task 7.9's grouped
+      // settings); it lives under Settings > Data.
+      await tester.tap(find.byIcon(Icons.settings_outlined));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, "Restore"));
+      await tester.tap(find.text("Data"));
+      await tester.pumpAndSettle();
+      final restoreButton = find.widgetWithText(TextButton, "Restore");
+      await tester.ensureVisible(restoreButton);
+      await tester.tap(restoreButton);
       await tester.pumpAndSettle();
 
       expect(find.text("Note A"), findsOneWidget);
@@ -1027,9 +1086,15 @@ void main() {
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.backup_outlined));
+      // Backup no longer has its own app bar button (task 7.9's grouped
+      // settings); it lives under Settings > Data.
+      await tester.tap(find.byIcon(Icons.settings_outlined));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, "Restore"));
+      await tester.tap(find.text("Data"));
+      await tester.pumpAndSettle();
+      final restoreButton = find.widgetWithText(TextButton, "Restore");
+      await tester.ensureVisible(restoreButton);
+      await tester.tap(restoreButton);
       await tester.pumpAndSettle();
       await tester.tap(
         find.widgetWithText(OutlinedButton, "Replace from backup"),
@@ -1060,7 +1125,11 @@ void main() {
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.backup_outlined));
+      // Backup no longer has its own app bar button (task 7.9's grouped
+      // settings); it lives under Settings > Data.
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Data"));
       await tester.pumpAndSettle();
 
       expect(find.textContaining("Estimated size"), findsOneWidget);
@@ -1077,14 +1146,20 @@ void main() {
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.backup_outlined));
+      // Backup no longer has its own app bar button (task 7.9's grouped
+      // settings); it lives under Settings > Data.
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text("Data"));
       await tester.pumpAndSettle();
       expect(
         find.widgetWithText(OutlinedButton, "Choose destination"),
         findsOneWidget,
       );
 
-      await tester.tap(find.widgetWithText(FilledButton, "Back up now"));
+      final backUpNowButton = find.widgetWithText(FilledButton, "Back up now");
+      await tester.ensureVisible(backUpNowButton);
+      await tester.tap(backUpNowButton);
       await tester.pumpAndSettle();
 
       expect(
@@ -1099,6 +1174,7 @@ void main() {
       );
       expect(remedyButtons, findsNWidgets(2));
 
+      await tester.ensureVisible(remedyButtons.last);
       await tester.tap(remedyButtons.last);
       await tester.pumpAndSettle();
 

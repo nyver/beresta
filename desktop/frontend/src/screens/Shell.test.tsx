@@ -349,7 +349,10 @@ describe("Shell", () => {
 
     await userEvent.setup().click(await screen.findByRole("button", { name: "sync.open_button" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "sync.title" });
+    // The pill opens the same grouped Settings modal (task 7.9), landing
+    // directly on the Synchronization group instead of a separate Sync
+    // modal.
+    const dialog = await screen.findByRole("dialog", { name: "settings.title" });
     // The raw device ID is a protocol identifier and stays out of this
     // primary view (specs/identity-and-sharing's "Understandable device
     // inventory"); "This device" is what identifies it here.
@@ -361,14 +364,15 @@ describe("Shell", () => {
     expect(within(dialog).getByText("sync.status_local_only")).toBeInTheDocument();
   });
 
-  it("opens the Sync modal on mount when openSyncOnMount is set (task 7.1's post-create sync prompt)", async () => {
+  it("opens the Settings modal on the Synchronization group on mount when openSyncOnMount is set (task 7.1's post-create sync prompt)", async () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);
     appMock.ListNotes.mockResolvedValue([]);
     mockSyncSummary();
     renderShell({ openSyncOnMount: true });
 
-    expect(await screen.findByRole("dialog", { name: "sync.title" })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "settings.title" });
+    expect(within(dialog).getByText("sync.this_device")).toBeInTheDocument();
   });
 
   it("starts an immediate synchronization cycle for the active workspace", async () => {
@@ -418,14 +422,10 @@ describe("Shell", () => {
     await waitFor(() => expect(appMock.ListNotes).toHaveBeenCalledTimes(2));
   });
 
-  it("changes the auto-lock duration through the Settings modal and persists it", async () => {
+  it("changes the auto-lock duration through the Settings modal's Security group and persists it", async () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);
     appMock.ListNotes.mockResolvedValue([]);
-    // The Settings modal now also mounts BackupsPanel (auto-lock moved in
-    // alongside it), which needs its own ListBackups fetch mocked or it
-    // renders with backups still undefined.
-    appMock.ListBackups.mockResolvedValue([]);
     appMock.UpdateSettings.mockResolvedValue({
       language: "en",
       last_database_path: "",
@@ -435,7 +435,10 @@ describe("Shell", () => {
     renderShell();
     const user = userEvent.setup();
 
+    // The gear icon opens the General group by default; auto-lock now
+    // lives under Security (task 7.9's grouped settings).
     await user.click(await screen.findByRole("button", { name: "settings.title" }));
+    await user.click(await screen.findByRole("tab", { name: "settings.group_security" }));
     const select = await screen.findByLabelText("shell.auto_lock_label");
     // The control starts disabled until the initial GetSettings() fetch
     // resolves and arms autoLockMinutes; selecting an option before then

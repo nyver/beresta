@@ -780,7 +780,9 @@ class _NotesShellState extends State<NotesShell> {
     );
     if (widget.openServerOnMount) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) unawaited(showServer());
+        if (mounted) {
+          unawaited(showSettings(group: SettingsGroup.synchronization));
+        }
       });
     }
   }
@@ -977,7 +979,8 @@ class _NotesShellState extends State<NotesShell> {
             tooltip:
                 "${widget.strings("server")}: "
                 "${widget.strings("sync_status_$syncStatusValue")}",
-            onPressed: showServer,
+            onPressed:
+                () => showSettings(group: SettingsGroup.synchronization),
             icon: Icon(
               syncStatusIcon(syncStatusValue),
               color: syncStatusColor(context, syncStatusValue),
@@ -999,13 +1002,8 @@ class _NotesShellState extends State<NotesShell> {
             icon: const Icon(Icons.lock_outline),
           ),
           IconButton(
-            tooltip: widget.strings("backup"),
-            onPressed: showBackups,
-            icon: const Icon(Icons.backup_outlined),
-          ),
-          IconButton(
             tooltip: widget.strings("settings"),
-            onPressed: showSettings,
+            onPressed: () => showSettings(),
             icon: const Icon(Icons.settings_outlined),
           ),
         ],
@@ -1216,41 +1214,29 @@ class _NotesShellState extends State<NotesShell> {
     await refresh();
   }
 
-  Future<void> showBackups() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder:
-          (_) => BackupSheet(gateway: widget.gateway, strings: widget.strings),
-    );
-    await refresh();
-  }
-
-  Future<void> showSettings() async {
+  // showSettings is the single entry point for every settings surface
+  // (task 7.9): backup, server/sync, and diagnostics used to be three
+  // separate app bar buttons plus this one, which specs/product-
+  // experience's "Stable cross-platform information architecture"
+  // requirement no longer allows as permanent top-level controls. Joining
+  // or switching a shared workspace (inside the Synchronization group's
+  // ServerSheet) changes which notes/notebooks are visible, so refresh
+  // unconditionally rather than trying to track whether that happened.
+  Future<void> showSettings({
+    SettingsGroup group = SettingsGroup.general,
+  }) async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder:
-          (_) => SettingsSheet(
+          (_) => GroupedSettingsSheet(
             gateway: widget.gateway,
             strings: widget.strings,
             notebooks: notebooks,
+            initialGroup: group,
           ),
     );
-  }
-
-  Future<void> showServer() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder:
-          (_) => ServerSheet(gateway: widget.gateway, strings: widget.strings),
-    );
-    // Joining or switching a shared workspace (below, inside ServerSheet)
-    // changes which notes/notebooks are visible, so refresh unconditionally
-    // rather than trying to track whether that actually happened.
     await refresh();
     await refreshSyncSummary();
   }
@@ -1756,11 +1742,12 @@ class _ServerSheetState extends State<ServerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // GroupedSettingsSheet (task 7.9's Synchronization group, this
+    // widget's sole caller) already supplies the sheet's horizontal
+    // margin, so this list only pads for the on-screen keyboard.
     return SafeArea(
       child: ListView(
         padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
           bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
         ),
         shrinkWrap: true,
@@ -2327,17 +2314,27 @@ class _ServerSheetState extends State<ServerSheet> {
   }
 }
 
+/// SettingsSection selects which subset of the account-level settings
+/// object a SettingsSheet instance shows (task 7.9's grouped settings):
+/// auto-lock is a Security concern, while attachment retention and the
+/// local cache limit are Data/storage concerns. Both sections operate on
+/// the same underlying settings object, so saving from either section
+/// always round-trips the other section's fields unchanged.
+enum SettingsSection { security, data }
+
 class SettingsSheet extends StatefulWidget {
   const SettingsSheet({
     required this.gateway,
     required this.strings,
     required this.notebooks,
+    required this.section,
     super.key,
   });
 
   final CoreGateway gateway;
   final Strings strings;
   final List<Map<String, dynamic>> notebooks;
+  final SettingsSection section;
 
   @override
   State<SettingsSheet> createState() => _SettingsSheetState();
@@ -2378,101 +2375,103 @@ class _SettingsSheetState extends State<SettingsSheet> {
     final autoLockOptions =
         <int>{0, 1, 5, 15, 30, current["auto_lock_minutes"] as int}.toList()
           ..sort();
+    // GroupedSettingsSheet (task 7.9's Security/Data groups, this widget's
+    // sole caller) already supplies the sheet's horizontal margin, so
+    // this list only pads for the on-screen keyboard.
     return SafeArea(
       child: ListView(
         padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
           bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
         ),
         shrinkWrap: true,
         children: [
-          Text(
-            widget.strings("settings"),
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          DropdownButtonFormField<int>(
-            initialValue: current["auto_lock_minutes"] as int,
-            decoration: InputDecoration(labelText: widget.strings("auto_lock")),
-            items:
-                autoLockOptions
-                    .map(
-                      (value) => DropdownMenuItem(
-                        value: value,
-                        child: Text("$value min"),
-                      ),
-                    )
-                    .toList(),
-            onChanged:
-                (value) =>
-                    setState(() => current["auto_lock_minutes"] = value!),
-          ),
-          DropdownButtonFormField<String>(
-            initialValue: current["attachment_retention"] as String,
-            decoration: InputDecoration(
-              labelText: widget.strings("attachment_retention"),
+          if (widget.section == SettingsSection.security)
+            DropdownButtonFormField<int>(
+              initialValue: current["auto_lock_minutes"] as int,
+              decoration: InputDecoration(
+                labelText: widget.strings("auto_lock"),
+              ),
+              items:
+                  autoLockOptions
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text("$value min"),
+                        ),
+                      )
+                      .toList(),
+              onChanged:
+                  (value) =>
+                      setState(() => current["auto_lock_minutes"] = value!),
             ),
-            items: [
-              DropdownMenuItem(
-                value: "all",
-                child: Text(widget.strings("retention_all")),
+          if (widget.section == SettingsSection.data) ...[
+            DropdownButtonFormField<String>(
+              initialValue: current["attachment_retention"] as String,
+              decoration: InputDecoration(
+                labelText: widget.strings("attachment_retention"),
               ),
-              DropdownMenuItem(
-                value: "selected_notebooks",
-                child: Text(widget.strings("retention_selected")),
-              ),
-              DropdownMenuItem(
-                value: "metadata_only",
-                child: Text(widget.strings("retention_metadata")),
-              ),
-            ],
-            onChanged: (value) {
-              setState(() {
-                current["attachment_retention"] = value!;
-                if (value != "selected_notebooks") {
-                  current["selected_notebooks"] = <String>[];
-                }
-              });
-            },
-          ),
-          if (current["attachment_retention"] == "selected_notebooks")
-            ...widget.notebooks
-                .where((row) => row["deleted"] != true)
-                .map(
-                  (row) => CheckboxListTile(
-                    value: selected.contains(row["id"]),
-                    title: Text(row["name"] as String),
-                    onChanged: (checked) {
-                      final values = List<String>.from(
-                        current["selected_notebooks"] as List<dynamic>,
-                      );
-                      if (checked == true) {
-                        values.add(row["id"] as String);
-                      } else {
-                        values.remove(row["id"]);
-                      }
-                      setState(() {
-                        current["selected_notebooks"] =
-                            values.toSet().toList()..sort();
-                      });
-                    },
-                  ),
+              items: [
+                DropdownMenuItem(
+                  value: "all",
+                  child: Text(widget.strings("retention_all")),
                 ),
-          TextFormField(
-            initialValue:
-                ((current["cache_limit_bytes"] as int) ~/ (1024 * 1024))
-                    .toString(),
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: widget.strings("cache_limit"),
+                DropdownMenuItem(
+                  value: "selected_notebooks",
+                  child: Text(widget.strings("retention_selected")),
+                ),
+                DropdownMenuItem(
+                  value: "metadata_only",
+                  child: Text(widget.strings("retention_metadata")),
+                ),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  current["attachment_retention"] = value!;
+                  if (value != "selected_notebooks") {
+                    current["selected_notebooks"] = <String>[];
+                  }
+                });
+              },
             ),
-            onChanged: (value) {
-              final mebibytes = int.tryParse(value);
-              if (mebibytes != null) {
-                current["cache_limit_bytes"] = mebibytes * 1024 * 1024;
-              }
-            },
-          ),
+            if (current["attachment_retention"] == "selected_notebooks")
+              ...widget.notebooks
+                  .where((row) => row["deleted"] != true)
+                  .map(
+                    (row) => CheckboxListTile(
+                      value: selected.contains(row["id"]),
+                      title: Text(row["name"] as String),
+                      onChanged: (checked) {
+                        final values = List<String>.from(
+                          current["selected_notebooks"] as List<dynamic>,
+                        );
+                        if (checked == true) {
+                          values.add(row["id"] as String);
+                        } else {
+                          values.remove(row["id"]);
+                        }
+                        setState(() {
+                          current["selected_notebooks"] =
+                              values.toSet().toList()..sort();
+                        });
+                      },
+                    ),
+                  ),
+            TextFormField(
+              initialValue:
+                  ((current["cache_limit_bytes"] as int) ~/ (1024 * 1024))
+                      .toString(),
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: widget.strings("cache_limit"),
+              ),
+              onChanged: (value) {
+                final mebibytes = int.tryParse(value);
+                if (mebibytes != null) {
+                  current["cache_limit_bytes"] = mebibytes * 1024 * 1024;
+                }
+              },
+            ),
+          ],
           if (error != null)
             Text(
               error!,
@@ -2483,7 +2482,6 @@ class _SettingsSheetState extends State<SettingsSheet> {
             onPressed: () async {
               try {
                 await widget.gateway.updateSettings(current);
-                if (context.mounted) Navigator.pop(context);
               } catch (failure) {
                 if (mounted) {
                   setState(
@@ -2494,8 +2492,6 @@ class _SettingsSheetState extends State<SettingsSheet> {
             },
             child: Text(widget.strings("save")),
           ),
-          const Divider(height: 32),
-          DiagnosticsSection(gateway: widget.gateway, strings: widget.strings),
         ],
       ),
     );
@@ -2981,38 +2977,49 @@ class _BackupSheetState extends State<BackupSheet> {
             onPressed: widget.gateway.selectBackupDestination,
             child: Text(widget.strings("backup_destination")),
           ),
-        Expanded(
-          child: FutureBuilder<List<Map<String, dynamic>>>(
-            future: backups,
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.data!.isEmpty) {
-                return Center(child: Text(widget.strings("backup_empty")));
-              }
-              return ListView.builder(
-                itemCount: snapshot.data!.length,
-                itemBuilder: (context, index) {
-                  final backup = snapshot.data![index];
-                  return ListTile(
-                    enabled: backup["corrupt"] != true,
-                    leading: const Icon(Icons.shield_outlined),
-                    title: Text(
-                      DateTime.fromMillisecondsSinceEpoch(
-                        backup["created_unix_ms"] as int,
-                      ).toLocal().toString(),
-                    ),
-                    trailing: TextButton(
-                      onPressed:
-                          () => openRestoreOptions(backup["id"] as String),
-                      child: Text(widget.strings("restore")),
-                    ),
-                  );
-                },
+        FutureBuilder<List<Map<String, dynamic>>>(
+          future: backups,
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(child: CircularProgressIndicator()),
               );
-            },
-          ),
+            }
+            if (snapshot.data!.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: Text(widget.strings("backup_empty"))),
+              );
+            }
+            // shrinkWrap + non-scrollable physics: this list is one Column
+            // child among the settings/backup controls above it rather
+            // than the sheet's own scroll surface (task 7.9's grouped
+            // Data settings embed it alongside those controls in one
+            // shared scrollable).
+            return ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: snapshot.data!.length,
+              itemBuilder: (context, index) {
+                final backup = snapshot.data![index];
+                return ListTile(
+                  enabled: backup["corrupt"] != true,
+                  leading: const Icon(Icons.shield_outlined),
+                  title: Text(
+                    DateTime.fromMillisecondsSinceEpoch(
+                      backup["created_unix_ms"] as int,
+                    ).toLocal().toString(),
+                  ),
+                  trailing: TextButton(
+                    onPressed:
+                        () => openRestoreOptions(backup["id"] as String),
+                    child: Text(widget.strings("restore")),
+                  ),
+                );
+              },
+            );
+          },
         ),
       ],
     );
@@ -3040,6 +3047,166 @@ class _BackupSheetState extends State<BackupSheet> {
               reload();
             },
           ),
+    );
+  }
+}
+
+/// The stable cross-platform information architecture (specs/product-
+/// experience's "Stable cross-platform information architecture"
+/// requirement, task 7.9): every settings surface lives under one of these
+/// six groups on both Windows and Android, with platform-specific options
+/// nested under the matching group instead of scattered across permanent
+/// top-level app bar controls (backup, server/sync, and settings used to
+/// be three separate buttons here).
+enum SettingsGroup { general, security, synchronization, data, advanced, about }
+
+String _settingsGroupLabel(Strings strings, SettingsGroup group) {
+  switch (group) {
+    case SettingsGroup.general:
+      return strings("settings_group_general");
+    case SettingsGroup.security:
+      return strings("settings_group_security");
+    case SettingsGroup.synchronization:
+      return strings("settings_group_synchronization");
+    case SettingsGroup.data:
+      return strings("settings_group_data");
+    case SettingsGroup.advanced:
+      return strings("settings_group_advanced");
+    case SettingsGroup.about:
+      return strings("settings_group_about");
+  }
+}
+
+/// GroupedSettingsSheet is the single entry point for every Android
+/// settings surface (task 7.9). Only the active group's content mounts, so
+/// switching groups never forces an unrelated group's network calls -
+/// matching DiagnosticsSection's own lazy-load convention nested inside
+/// the Advanced group below.
+class GroupedSettingsSheet extends StatefulWidget {
+  const GroupedSettingsSheet({
+    required this.gateway,
+    required this.strings,
+    required this.notebooks,
+    this.initialGroup = SettingsGroup.general,
+    super.key,
+  });
+
+  final CoreGateway gateway;
+  final Strings strings;
+  final List<Map<String, dynamic>> notebooks;
+  final SettingsGroup initialGroup;
+
+  @override
+  State<GroupedSettingsSheet> createState() => _GroupedSettingsSheetState();
+}
+
+class _GroupedSettingsSheetState extends State<GroupedSettingsSheet> {
+  late SettingsGroup activeGroup = widget.initialGroup;
+
+  Widget _groupContent() {
+    switch (activeGroup) {
+      case SettingsGroup.general:
+        return Center(child: Text(widget.strings("settings_general_empty")));
+      case SettingsGroup.security:
+        return SettingsSheet(
+          gateway: widget.gateway,
+          strings: widget.strings,
+          notebooks: widget.notebooks,
+          section: SettingsSection.security,
+        );
+      case SettingsGroup.synchronization:
+        return ServerSheet(gateway: widget.gateway, strings: widget.strings);
+      case SettingsGroup.data:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SettingsSheet(
+              gateway: widget.gateway,
+              strings: widget.strings,
+              notebooks: widget.notebooks,
+              section: SettingsSection.data,
+            ),
+            const Divider(),
+            Text(
+              widget.strings("backup"),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            BackupSheet(gateway: widget.gateway, strings: widget.strings),
+          ],
+        );
+      case SettingsGroup.advanced:
+        return DiagnosticsSection(
+          gateway: widget.gateway,
+          strings: widget.strings,
+        );
+      case SettingsGroup.about:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // The product name is a brand, not translated content.
+            Text("Beresta", style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(widget.strings("tagline")),
+            const SizedBox(height: 8),
+            Text(widget.strings("settings_privacy_defaults")),
+          ],
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Every group's content (above) is a plain, non-scrolling Column/
+    // ListView(shrinkWrap: true) rather than its own bounded-height
+    // scrollable, so this single scroll view is the sheet's only
+    // scrolling surface - content shorter than the screen sizes the
+    // sheet to fit it, exactly like each group's sheet did on its own
+    // before task 7.9 grouped them together.
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+        ),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 12,
+              bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.strings("settings"),
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final group in SettingsGroup.values)
+                      ChoiceChip(
+                        label: Text(
+                          _settingsGroupLabel(widget.strings, group),
+                        ),
+                        selected: activeGroup == group,
+                        onSelected:
+                            (_) => setState(() => activeGroup = group),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _groupContent(),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

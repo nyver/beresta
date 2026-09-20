@@ -313,6 +313,21 @@ forbidden-word list (password, key, content, title, query, invite, clipboard,
 and similar) on every call, so it can never carry note content, titles, search
 queries, passwords, keys, tokens, invite codes, or clipboard data.
 
+Both clients also expose one Advanced "Check my data" action
+(specs/product-experience's "Routine maintenance and user data check"
+requirement): a single button that runs a consolidated, read-mostly
+verification pass over local database integrity, the local search index's
+consistency with saved notes (self-repairing it in place if it ever drifts),
+and backup health, then reports either "No problems found" or one
+actionable summary - never the individual internal maintenance jobs
+(full-text index maintenance, garbage collection, backup rotation, and so
+on) it checks on the user's behalf. `core/datacheck.Summarize` derives the
+single reported issue from `core/account.Account.RunDataCheck`'s raw result
+and the account's backup catalog, so desktop (`desktop/datacheck.go`) and
+Android (`core/mobileapi.Service.RunDataCheck`) always agree on which of the
+four possible outcomes (healthy, search index repaired, backup needs
+attention, or restore from backup) to show.
+
 Both clients now group every settings surface into the same six sections -
 General, Security, Synchronization, Data, Advanced, and About
 (specs/product-experience's "Stable cross-platform information architecture"

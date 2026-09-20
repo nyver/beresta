@@ -254,6 +254,10 @@ export function RevokeWorkspaceMember(arg1, arg2) {
   return window['go']['main']['App']['RevokeWorkspaceMember'](arg1, arg2);
 }
 
+export function RunDataCheck() {
+  return window['go']['main']['App']['RunDataCheck']();
+}
+
 export function RunGarbageCollection(arg1) {
   return window['go']['main']['App']['RunGarbageCollection'](arg1);
 }

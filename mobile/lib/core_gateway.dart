@@ -180,6 +180,12 @@ abstract interface class CoreGateway {
   /// the "Copy diagnostics" action places on the clipboard - see
   /// core/mobileapi.Service.CopyDiagnostics.
   Future<String> copyDiagnostics(String appVersion);
+
+  /// Runs the Advanced "Check my data" action's single, consolidated,
+  /// safe verification pass over local database integrity, search index
+  /// consistency, and backup health, matching desktop's identical
+  /// DataCheckReportDTO - see core/mobileapi.Service.RunDataCheck.
+  Future<Map<String, dynamic>> runDataCheck();
 }
 
 class MethodChannelCore implements CoreGateway {
@@ -483,4 +489,8 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<String> copyDiagnostics(String appVersion) async =>
       await _invoke("copyDiagnostics", {"appVersion": appVersion}) as String;
+
+  @override
+  Future<Map<String, dynamic>> runDataCheck() async =>
+      _object(await _invoke("runDataCheck"));
 }

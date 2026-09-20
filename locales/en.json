@@ -404,5 +404,11 @@
   "diagnostics.transport_security_mode_label": "Certificate verification",
   "diagnostics.transport_url_label": "Server URL",
   "diagnostics.migration_version_label": "Database schema version",
-  "diagnostics.none_label": "None"
+  "diagnostics.none_label": "None",
+
+  "data_check.action_button": "Check my data",
+  "data_check.issue_none": "No problems found.",
+  "data_check.issue_search_index_repaired": "No problems found. A minor search index issue was automatically repaired.",
+  "data_check.issue_backup_needs_attention": "Your backup needs attention. Create a new backup from Data settings.",
+  "data_check.issue_database_needs_restore": "A local data problem was found. Restore from a backup in Data settings."
 }

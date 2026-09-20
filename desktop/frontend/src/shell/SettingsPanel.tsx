@@ -4,6 +4,7 @@ import { diagnosticSummary, unwrapError, type DiagnosticSummary } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { BackupsPanel } from "./BackupsPanel";
+import { DataCheckPanel } from "./DataCheckPanel";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { ImportExportPanel } from "./ImportExportPanel";
 import { ShellIntegrationPanel } from "./ShellIntegrationPanel";
@@ -172,7 +173,12 @@ export function SettingsPanel({
           </>
         ) : null}
 
-        {activeGroup === "advanced" ? <DiagnosticsPanel /> : null}
+        {activeGroup === "advanced" ? (
+          <>
+            <DiagnosticsPanel />
+            <DataCheckPanel />
+          </>
+        ) : null}
 
         {activeGroup === "about" ? <AboutPanel /> : null}
       </div>

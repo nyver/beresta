@@ -1688,4 +1688,18 @@ class FakeGateway implements CoreGateway {
   @override
   Future<String> copyDiagnostics(String appVersion) async =>
       copyDiagnosticsValue;
+
+  Map<String, dynamic> dataCheckReportValue = {
+    "issue": "none",
+    "healthy": true,
+    "checked_at_unix_ms": 0,
+  };
+  Object? runDataCheckFailure;
+  int runDataCheckCallCount = 0;
+  @override
+  Future<Map<String, dynamic>> runDataCheck() async {
+    runDataCheckCallCount++;
+    if (runDataCheckFailure != null) throw runDataCheckFailure!;
+    return dataCheckReportValue;
+  }
 }

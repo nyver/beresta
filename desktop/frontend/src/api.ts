@@ -61,6 +61,7 @@ import {
   RevokeSyncDevice,
   RevokeWorkspaceMember,
   RevisionMarkdown,
+  RunDataCheck as RunDataCheckBridge,
   SaveAttachmentToFile,
   Search,
   SearchByTag,
@@ -395,6 +396,30 @@ export async function technicalDiagnostics(): Promise<TechnicalDiagnostics> {
 
 export async function copyDiagnostics(): Promise<string> {
   return CopyDiagnostics();
+}
+
+/** DataCheckIssue is the TypeScript projection of core/presentation.DataCheckIssue. */
+export type DataCheckIssue = "none" | "search_index_repaired" | "backup_needs_attention" | "database_needs_restore";
+
+/**
+ * DataCheckReport is the TypeScript projection of
+ * core/presentation.DataCheckReport: the result of the Advanced "Check my
+ * data" action.
+ */
+export interface DataCheckReport {
+  issue: DataCheckIssue;
+  healthy: boolean;
+  checked_at_unix_ms: number;
+}
+
+/**
+ * runDataCheck runs the Advanced "Check my data" action's single,
+ * consolidated, safe verification pass over local database integrity,
+ * search index consistency, and backup health, per specs/product-
+ * experience's "Routine maintenance and user data check" requirement.
+ */
+export async function runDataCheck(): Promise<DataCheckReport> {
+  return RunDataCheckBridge() as unknown as Promise<DataCheckReport>;
 }
 
 export interface WorkspaceSummary {

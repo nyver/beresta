@@ -404,5 +404,11 @@
   "diagnostics.transport_security_mode_label": "Проверка сертификата",
   "diagnostics.transport_url_label": "URL сервера",
   "diagnostics.migration_version_label": "Версия схемы базы данных",
-  "diagnostics.none_label": "Нет"
+  "diagnostics.none_label": "Нет",
+
+  "data_check.action_button": "Проверить мои данные",
+  "data_check.issue_none": "Проблем не найдено.",
+  "data_check.issue_search_index_repaired": "Проблем не найдено. Небольшая неполадка поиска была устранена автоматически.",
+  "data_check.issue_backup_needs_attention": "Резервная копия требует внимания. Создайте новую копию в разделе «Данные».",
+  "data_check.issue_database_needs_restore": "Обнаружена проблема с локальными данными. Восстановите их из резервной копии в разделе «Данные»."
 }

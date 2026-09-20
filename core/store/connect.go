@@ -94,6 +94,14 @@ func backupBeforePendingMigration(ctx context.Context, db *sql.DB, path string) 
 	return BackupDatabaseFile(ctx, db, path, backupPath)
 }
 
+// CheckIntegrity runs SQLCipher's authenticated page integrity check
+// against an already-open database. Open already runs this before and
+// after migration; CheckIntegrity lets a caller such as the Advanced
+// "Check my data" action re-verify on demand, long after Open returned.
+func CheckIntegrity(ctx context.Context, db *sql.DB) error {
+	return checkIntegrity(ctx, db)
+}
+
 // checkIntegrity runs SQLCipher's authenticated integrity check, which
 // verifies every page's HMAC in addition to SQLite's structural checks. A
 // wrong key would already have failed page decryption before this point;

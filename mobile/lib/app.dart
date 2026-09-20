@@ -2810,6 +2810,77 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
   );
 }
 
+/// DataCheckSection covers task 7.10's Advanced "Check my data" action: one
+/// button that runs core/mobileapi.Service.RunDataCheck's single,
+/// consolidated, safe verification pass and reports either a healthy
+/// result or one actionable summary - never the individual internal
+/// maintenance jobs (search index, backup rotation, and so on) it checks,
+/// per specs/product-experience's "Routine maintenance and user data
+/// check" requirement.
+class DataCheckSection extends StatefulWidget {
+  const DataCheckSection({required this.gateway, required this.strings, super.key});
+
+  final CoreGateway gateway;
+  final Strings strings;
+
+  @override
+  State<DataCheckSection> createState() => _DataCheckSectionState();
+}
+
+class _DataCheckSectionState extends State<DataCheckSection> {
+  bool running = false;
+  Map<String, dynamic>? result;
+  String? error;
+
+  Future<void> runCheck() async {
+    setState(() {
+      running = true;
+      error = null;
+    });
+    try {
+      final value = await widget.gateway.runDataCheck();
+      if (mounted) setState(() => result = value);
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
+    } finally {
+      if (mounted) setState(() => running = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = result;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton(
+          onPressed: running ? null : () => unawaited(runCheck()),
+          child: Text(widget.strings("data_check_action")),
+        ),
+        if (running)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: CircularProgressIndicator(),
+          )
+        else if (error != null)
+          Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error))
+        else if (current != null)
+          Text(
+            widget.strings("data_check_issue_${current["issue"]}"),
+            style: TextStyle(
+              color:
+                  current["healthy"] == true
+                      ? null
+                      : Theme.of(context).colorScheme.error,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 String _formatBytes(int bytes) {
   const units = ["B", "KB", "MB", "GB"];
   double value = bytes.toDouble();
@@ -3136,9 +3207,13 @@ class _GroupedSettingsSheetState extends State<GroupedSettingsSheet> {
           ],
         );
       case SettingsGroup.advanced:
-        return DiagnosticsSection(
-          gateway: widget.gateway,
-          strings: widget.strings,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DiagnosticsSection(gateway: widget.gateway, strings: widget.strings),
+            const Divider(),
+            DataCheckSection(gateway: widget.gateway, strings: widget.strings),
+          ],
         );
       case SettingsGroup.about:
         return Column(

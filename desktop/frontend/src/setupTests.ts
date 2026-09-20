@@ -92,6 +92,7 @@ export const appMock = {
   ImportEvernoteArchive: vi.fn(),
   WipeLocalAccount: vi.fn(),
   AutostartStatus: vi.fn(),
+  RunDataCheck: vi.fn(),
 };
 
 (globalThis as unknown as { go: { main: { App: typeof appMock } } }).go = {

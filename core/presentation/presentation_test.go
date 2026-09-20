@@ -134,6 +134,36 @@ func TestUpdateStatusValid(t *testing.T) {
 	}
 }
 
+func TestDataCheckIssueValid(t *testing.T) {
+	valid := []DataCheckIssue{
+		DataCheckIssueNone, DataCheckIssueSearchIndexRepaired,
+		DataCheckIssueBackupNeedsAttention, DataCheckIssueDatabaseNeedsRestore,
+	}
+	for _, i := range valid {
+		if !i.Valid() {
+			t.Errorf("DataCheckIssue(%q).Valid() = false, want true", i)
+		}
+	}
+	if (DataCheckIssue("unknown_issue")).Valid() {
+		t.Error("DataCheckIssue(\"unknown_issue\").Valid() = true, want false")
+	}
+}
+
+func TestDataCheckIssueHealthy(t *testing.T) {
+	healthy := []DataCheckIssue{DataCheckIssueNone, DataCheckIssueSearchIndexRepaired}
+	for _, i := range healthy {
+		if !i.Healthy() {
+			t.Errorf("DataCheckIssue(%q).Healthy() = false, want true", i)
+		}
+	}
+	actionable := []DataCheckIssue{DataCheckIssueBackupNeedsAttention, DataCheckIssueDatabaseNeedsRestore}
+	for _, i := range actionable {
+		if i.Healthy() {
+			t.Errorf("DataCheckIssue(%q).Healthy() = true, want false", i)
+		}
+	}
+}
+
 func TestDiagnosticSummaryZeroValueHasNoNoteData(t *testing.T) {
 	var summary DiagnosticSummary
 	if summary.AppVersion != "" || summary.Platform != "" {

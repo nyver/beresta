@@ -136,6 +136,23 @@ func newTechnicalDiagnosticsDTO(technical presentation.TechnicalDiagnostics) Tec
 	}
 }
 
+// DataCheckReportDTO is the desktop JS-bridge projection of
+// presentation.DataCheckReport, for the Advanced "Check my data" action
+// (task 7.10).
+type DataCheckReportDTO struct {
+	Issue           presentation.DataCheckIssue `json:"issue"`
+	Healthy         bool                        `json:"healthy"`
+	CheckedAtUnixMS int64                       `json:"checked_at_unix_ms"`
+}
+
+func newDataCheckReportDTO(report presentation.DataCheckReport) DataCheckReportDTO {
+	return DataCheckReportDTO{
+		Issue:           report.Issue,
+		Healthy:         report.Issue.Healthy(),
+		CheckedAtUnixMS: unixMS(report.CheckedAt),
+	}
+}
+
 // unixMS renders t in the bridge's millisecond-epoch convention. The zero
 // time.Time (never happened) renders as 0, matching the "never" sentinel
 // every other bridge timestamp field already uses.

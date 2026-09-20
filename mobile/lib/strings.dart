@@ -242,6 +242,14 @@ class Strings {
       "database_health_ok": "Healthy",
       "database_health_degraded": "Needs attention",
       "database_health_unknown": "Not yet checked",
+      "data_check_action": "Check my data",
+      "data_check_issue_none": "No problems found.",
+      "data_check_issue_search_index_repaired":
+          "No problems found. A minor search index issue was automatically repaired.",
+      "data_check_issue_backup_needs_attention":
+          "Your backup needs attention. Create a new backup from Data settings.",
+      "data_check_issue_database_needs_restore":
+          "A local data problem was found. Restore from a backup in Data settings.",
       "update_status_up_to_date": "Up to date",
       "update_status_available": "Update available",
       "update_status_downloading": "Downloading update",
@@ -489,6 +497,14 @@ class Strings {
       "database_health_ok": "В порядке",
       "database_health_degraded": "Требует внимания",
       "database_health_unknown": "Ещё не проверена",
+      "data_check_action": "Проверить мои данные",
+      "data_check_issue_none": "Проблем не найдено.",
+      "data_check_issue_search_index_repaired":
+          "Проблем не найдено. Небольшая неполадка поиска была устранена автоматически.",
+      "data_check_issue_backup_needs_attention":
+          "Резервная копия требует внимания. Создайте новую копию в разделе «Данные».",
+      "data_check_issue_database_needs_restore":
+          "Обнаружена проблема с локальными данными. Восстановите их из резервной копии в разделе «Данные».",
       "update_status_up_to_date": "Установлена последняя версия",
       "update_status_available": "Доступно обновление",
       "update_status_downloading": "Загрузка обновления",

@@ -274,6 +274,22 @@ export namespace main {
 	        this.passphrase = source["passphrase"];
 	    }
 	}
+	export class DataCheckReportDTO {
+	    issue: string;
+	    healthy: boolean;
+	    checked_at_unix_ms: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DataCheckReportDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.issue = source["issue"];
+	        this.healthy = source["healthy"];
+	        this.checked_at_unix_ms = source["checked_at_unix_ms"];
+	    }
+	}
 	export class DiagnosticSummaryDTO {
 	    app_version: string;
 	    platform: string;
@@ -939,8 +955,11 @@ export namespace transport {
 	    user_id: string;
 	    display_name: string;
 	    signing_public: number[];
+	    platform?: string;
 	    // Go type: time
 	    created_at: any;
+	    // Go type: time
+	    last_seen_at?: any;
 	    // Go type: time
 	    revoked_at?: any;
 	
@@ -954,7 +973,9 @@ export namespace transport {
 	        this.user_id = source["user_id"];
 	        this.display_name = source["display_name"];
 	        this.signing_public = source["signing_public"];
+	        this.platform = source["platform"];
 	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.last_seen_at = this.convertValues(source["last_seen_at"], null);
 	        this.revoked_at = this.convertValues(source["revoked_at"], null);
 	    }
 	

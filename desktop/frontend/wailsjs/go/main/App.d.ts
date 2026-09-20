@@ -129,6 +129,8 @@ export function RevokeSyncDevice(arg1:string):Promise<void>;
 
 export function RevokeWorkspaceMember(arg1:string,arg2:string):Promise<void>;
 
+export function RunDataCheck():Promise<main.DataCheckReportDTO>;
+
 export function RunGarbageCollection(arg1:boolean):Promise<main.GCReportDTO>;
 
 export function SaveAttachmentToFile(arg1:string,arg2:string):Promise<main.AttachmentSaveResult>;

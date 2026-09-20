@@ -364,6 +364,7 @@ class MainActivity : FlutterFragmentActivity() {
             "diagnosticSummary" -> service.diagnosticSummary(required(call, "appVersion"))
             "technicalDiagnostics" -> service.technicalDiagnostics()
             "copyDiagnostics" -> service.copyDiagnostics(required(call, "appVersion"))
+            "runDataCheck" -> service.runDataCheck()
             else -> error("unsupported core method: ${call.method}")
         }
     }

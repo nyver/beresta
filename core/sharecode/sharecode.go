@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/beresta-app/beresta/core/model"
 )
@@ -47,6 +48,65 @@ func DecodeIdentity(code string) (userID model.ID, identityPublicKey []byte, err
 		return model.Nil, nil, fmt.Errorf("sharecode: invalid identity key in identity code")
 	}
 	return userID, identityPublicKey, nil
+}
+
+// ConnectCode bundles everything a client needs to register with and connect
+// to a home sync server, so a server administrator can hand it over as one
+// pasteable string (via a QR image or copied text) instead of separate URL,
+// invite, TLS policy, and fingerprint fields.
+type ConnectCode struct {
+	URL          string
+	InviteCode   string
+	Fingerprint  string
+	SecurityMode string
+}
+
+// EncodeConnect renders code as a beresta://connect code. SecurityMode
+// defaults to "pinned" (the default TLS policy for a server's self-signed
+// identity) when empty.
+func EncodeConnect(code ConnectCode) (string, error) {
+	if code.URL == "" {
+		return "", fmt.Errorf("sharecode: connect code requires a server URL")
+	}
+	mode := code.SecurityMode
+	if mode == "" {
+		mode = "pinned"
+	}
+	values := url.Values{}
+	values.Set("url", code.URL)
+	if code.InviteCode != "" {
+		values.Set("invite", code.InviteCode)
+	}
+	if code.Fingerprint != "" {
+		values.Set("fingerprint", code.Fingerprint)
+	}
+	values.Set("mode", mode)
+	encoded := url.URL{Scheme: "beresta", Host: "connect", RawQuery: values.Encode()}
+	return encoded.String(), nil
+}
+
+// DecodeConnect parses a code produced by EncodeConnect (or an equivalent
+// connection QR/link built by a server administrator). SecurityMode
+// defaults to "pinned" when the code omits it.
+func DecodeConnect(code string) (ConnectCode, error) {
+	parsed, err := url.Parse(strings.TrimSpace(code))
+	if err != nil || parsed.Scheme != "beresta" || parsed.Host != "connect" {
+		return ConnectCode{}, fmt.Errorf("sharecode: not a valid connection code")
+	}
+	query := parsed.Query()
+	result := ConnectCode{
+		URL:          query.Get("url"),
+		InviteCode:   query.Get("invite"),
+		Fingerprint:  query.Get("fingerprint"),
+		SecurityMode: query.Get("mode"),
+	}
+	if result.SecurityMode == "" {
+		result.SecurityMode = "pinned"
+	}
+	if result.URL == "" {
+		return ConnectCode{}, fmt.Errorf("sharecode: connection code does not contain a server URL")
+	}
+	return result, nil
 }
 
 // EncodeGrant renders a sealed workspace-membership grant as a

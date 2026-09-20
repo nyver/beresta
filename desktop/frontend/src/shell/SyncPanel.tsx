@@ -17,6 +17,7 @@ import {
   shareWorkspace,
   syncConnectionInfo,
   syncSummary,
+  type ConnectServerRequest,
   type QuarantineEntry,
   type ServerConnectionInfo,
   type ServerDiagnostics,
@@ -82,8 +83,12 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
   const [url, setUrl] = useState("");
   const [invite, setInvite] = useState("");
   const [fingerprint, setFingerprint] = useState("");
-  const [qr, setQr] = useState("");
+  const [connectionCode, setConnectionCode] = useState("");
   const [securityMode, setSecurityMode] = useState<"pinned" | "trusted">("pinned");
+  // Server setup prefers the single pasted connection code (task 7.3):
+  // URL, TLS policy, fingerprint, and technical diagnostics only appear
+  // once a user explicitly expands this manual/advanced branch.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [connection, setConnection] = useState<ServerConnectionInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [diagnostics, setDiagnostics] = useState<ServerDiagnostics | null>(null);
@@ -228,21 +233,41 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
     }
   }
 
-  async function connect() {
+  async function performConnect(payload: Omit<ConnectServerRequest, "device_name">) {
     setBusy(true);
     setError(null);
     try {
-      const info = await connectServer({ url, invite_code: invite, fingerprint, security_mode: securityMode, qr_code: qr, device_name: "Windows desktop" });
+      const info = await connectServer({ ...payload, device_name: "Windows desktop" });
       setConnection(info);
       setUrl(info.url);
       setFingerprint(info.fingerprint ?? "");
       setSecurityMode(info.security_mode);
-      setInvite("");
-      setQr("");
       loadStatus();
+      return true;
     } catch (thrown) {
       setError(errorMessage(unwrapError(thrown)));
+      return false;
     } finally { setBusy(false); }
+  }
+
+  // The simple path: a pasted connection code (from a QR scan or copied
+  // text) carries the server URL, invite, TLS policy, and fingerprint
+  // together, so it never touches the advanced manual fields below.
+  async function connectWithCode() {
+    const ok = await performConnect({
+      url: "", invite_code: "", fingerprint: "", security_mode: "",
+      qr_code: connectionCode.trim(),
+    });
+    if (ok) setConnectionCode("");
+  }
+
+  // The advanced path: URL, invite, TLS policy, and fingerprint are all
+  // entered manually, for setups without a connection code to paste.
+  async function connectManually() {
+    const ok = await performConnect({
+      url, invite_code: invite, fingerprint, security_mode: securityMode, qr_code: "",
+    });
+    if (ok) setInvite("");
   }
 
   async function disconnect() {
@@ -292,32 +317,57 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
           </dl>
         ) : null}
         <div className="sync-connect-form">
-          <label>{t("sync.qr_label")}<textarea value={qr} onChange={(event) => setQr(event.target.value)} /></label>
-          <label>{t("sync.url_label")}<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} /></label>
-          <label>{t("sync.invite_label")}<input type="password" value={invite} onChange={(event) => setInvite(event.target.value)} /></label>
-          <label>{t("sync.verification_label")}
-            <select aria-label={t("sync.verification_label")} value={securityMode} onChange={(event) => setSecurityMode(event.target.value as "pinned" | "trusted")}>
-              <option value="pinned">{t("sync.verification_pinned")}</option>
-              <option value="trusted">{t("sync.verification_trusted")}</option>
-            </select>
+          <label>
+            {t("sync.qr_label")}
+            <textarea value={connectionCode} onChange={(event) => setConnectionCode(event.target.value)} />
           </label>
-          {securityMode === "pinned" ? <>
-            <label>{t("sync.server_fingerprint_label")}<input value={fingerprint} onChange={(event) => setFingerprint(event.target.value)} /></label>
-            <p>{t("sync.server_fingerprint_warning")}</p>
-          </> : null}
+          <p className="hint">{t("sync.connection_code_hint")}</p>
           <button
-            className={connection?.enabled ? "sync-connection-primary-action" : undefined}
             type="button"
-            disabled={busy || (!qr && !url)}
-            onClick={() => void connect()}
+            disabled={busy || !connectionCode.trim()}
+            onClick={() => void connectWithCode()}
           >
-            {connection?.enabled ? t("sync.change_server_button") : t("sync.connect_button")}
+            {t("sync.connect_code_button")}
           </button>
-          {connection?.enabled ? <div className="sync-connection-actions">
-            <button type="button" disabled={busy} onClick={() => void runDiagnostics()}>{t("sync.diagnose_button")}</button>
-            <button type="button" disabled={busy} onClick={() => void disconnect()}>{t("sync.disconnect_button")}</button>
-            {diagnostics && <p role="status">{diagnostics.authenticated ? t("sync.diagnostics_ok") : t("sync.diagnostics_failed")} ({diagnostics.latency_ms} ms)</p>}
-          </div> : null}
+          {connection?.enabled ? (
+            <button type="button" disabled={busy} onClick={() => void disconnect()}>
+              {t("sync.disconnect_button")}
+            </button>
+          ) : null}
+        </div>
+
+        <div className="sync-advanced">
+          <button type="button" onClick={() => setAdvancedOpen((current) => !current)} aria-expanded={advancedOpen}>
+            {t("sync.advanced_setup_title")}
+          </button>
+          {!advancedOpen ? null : (
+            <div className="sync-connect-form">
+              <label>{t("sync.url_label")}<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} /></label>
+              <label>{t("sync.invite_label")}<input type="password" value={invite} onChange={(event) => setInvite(event.target.value)} /></label>
+              <label>{t("sync.verification_label")}
+                <select aria-label={t("sync.verification_label")} value={securityMode} onChange={(event) => setSecurityMode(event.target.value as "pinned" | "trusted")}>
+                  <option value="pinned">{t("sync.verification_pinned")}</option>
+                  <option value="trusted">{t("sync.verification_trusted")}</option>
+                </select>
+              </label>
+              {securityMode === "pinned" ? <>
+                <label>{t("sync.server_fingerprint_label")}<input value={fingerprint} onChange={(event) => setFingerprint(event.target.value)} /></label>
+                <p>{t("sync.server_fingerprint_warning")}</p>
+              </> : null}
+              <button
+                className={connection?.enabled ? "sync-connection-primary-action" : undefined}
+                type="button"
+                disabled={busy || !url}
+                onClick={() => void connectManually()}
+              >
+                {connection?.enabled ? t("sync.change_server_button") : t("sync.connect_button")}
+              </button>
+              {connection?.enabled ? <div className="sync-connection-actions">
+                <button type="button" disabled={busy} onClick={() => void runDiagnostics()}>{t("sync.diagnose_button")}</button>
+                {diagnostics && <p role="status">{diagnostics.authenticated ? t("sync.diagnostics_ok") : t("sync.diagnostics_failed")} ({diagnostics.latency_ms} ms)</p>}
+              </div> : null}
+            </div>
+          )}
         </div>
       </section>
 

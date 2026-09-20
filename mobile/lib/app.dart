@@ -1470,12 +1470,17 @@ class ServerSheet extends StatefulWidget {
 }
 
 class _ServerSheetState extends State<ServerSheet> {
+  final connectionCode = TextEditingController();
   final url = TextEditingController();
   final invite = TextEditingController();
   final fingerprint = TextEditingController();
   final peerIdentity = TextEditingController();
   final peerGrant = TextEditingController();
   String securityMode = "pinned";
+  // Server setup prefers the single pasted connection code (task 7.3): URL,
+  // TLS policy, and fingerprint only appear once a user explicitly expands
+  // this manual/advanced branch.
+  bool advancedOpen = false;
   String? error;
   bool busy = false;
   String identityCode = "";
@@ -1600,6 +1605,7 @@ class _ServerSheetState extends State<ServerSheet> {
   @override
   void dispose() {
     syncStatusTimer?.cancel();
+    connectionCode.dispose();
     url.dispose();
     invite.dispose();
     fingerprint.dispose();
@@ -1705,56 +1711,77 @@ class _ServerSheetState extends State<ServerSheet> {
               ),
             ),
           TextField(
-            controller: url,
-            keyboardType: TextInputType.url,
+            controller: connectionCode,
+            maxLines: 3,
             decoration: InputDecoration(
-              labelText: widget.strings("server_url"),
-            ),
-          ),
-          TextField(
-            controller: invite,
-            decoration: InputDecoration(
-              labelText: widget.strings("invite_code"),
+              labelText: widget.strings("connection_code"),
+              helperText: widget.strings("connection_code_hint"),
+              helperMaxLines: 4,
             ),
           ),
           const SizedBox(height: 12),
-          Text(widget.strings("certificate_verification")),
-          SegmentedButton<String>(
-            segments: [
-              ButtonSegment(
-                value: "pinned",
-                label: Text(widget.strings("pinned")),
-              ),
-              ButtonSegment(
-                value: "trusted",
-                label: Text(widget.strings("trusted")),
-              ),
-            ],
-            selected: {securityMode},
-            onSelectionChanged:
-                (value) => setState(() => securityMode = value.first),
+          FilledButton(
+            onPressed: busy ? null : connectWithCode,
+            child: Text(widget.strings("connect_with_code")),
           ),
-          if (securityMode == "pinned")
-            TextField(
-              controller: fingerprint,
-              decoration: InputDecoration(
-                labelText: widget.strings("fingerprint"),
-              ),
-            ),
           if (error != null)
             Text(
               error!,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           const SizedBox(height: 12),
-          FilledButton(
-            onPressed: busy ? null : connect,
-            child: Text(
-              widget.strings(
-                connectionEnabled ? "apply_server_changes" : "connect",
+          TextButton(
+            onPressed: () => setState(() => advancedOpen = !advancedOpen),
+            child: Text(widget.strings("advanced_server_setup")),
+          ),
+          if (advancedOpen) ...[
+            TextField(
+              controller: url,
+              keyboardType: TextInputType.url,
+              decoration: InputDecoration(
+                labelText: widget.strings("server_url"),
               ),
             ),
-          ),
+            TextField(
+              controller: invite,
+              decoration: InputDecoration(
+                labelText: widget.strings("invite_code"),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(widget.strings("certificate_verification")),
+            SegmentedButton<String>(
+              segments: [
+                ButtonSegment(
+                  value: "pinned",
+                  label: Text(widget.strings("pinned")),
+                ),
+                ButtonSegment(
+                  value: "trusted",
+                  label: Text(widget.strings("trusted")),
+                ),
+              ],
+              selected: {securityMode},
+              onSelectionChanged:
+                  (value) => setState(() => securityMode = value.first),
+            ),
+            if (securityMode == "pinned")
+              TextField(
+                controller: fingerprint,
+                decoration: InputDecoration(
+                  labelText: widget.strings("fingerprint"),
+                ),
+              ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: busy ? null : connectManually,
+              child: Text(
+                widget.strings(
+                  connectionEnabled ? "apply_server_changes" : "connect",
+                ),
+              ),
+            ),
+          ],
           TextButton(
             onPressed:
                 busy
@@ -1944,25 +1971,50 @@ class _ServerSheetState extends State<ServerSheet> {
     }
   }
 
-  Future<void> connect() async {
+  // The simple path: a pasted connection code (from a QR scan or copied
+  // text) carries the server URL, invite, TLS policy, and fingerprint
+  // together, so it never touches the advanced manual fields below.
+  Future<void> connectWithCode() => performConnect({
+    "url": "",
+    "invite_code": "",
+    "fingerprint": "",
+    "security_mode": "",
+    "qr_code": connectionCode.text.trim(),
+    "device_name": "Android",
+  });
+
+  // The advanced path: URL, invite, TLS policy, and fingerprint are all
+  // entered manually, for setups without a connection code to paste.
+  Future<void> connectManually() => performConnect({
+    "url": url.text.trim(),
+    "invite_code": invite.text.trim(),
+    "fingerprint": fingerprint.text.trim(),
+    "security_mode": securityMode,
+    "qr_code": "",
+    "device_name": "Android",
+  });
+
+  Future<void> performConnect(Map<String, dynamic> config) async {
     setState(() {
       busy = true;
       error = null;
     });
     try {
-      await widget.gateway.connectServer({
-        "url": url.text.trim(),
-        "invite_code": invite.text.trim(),
-        "fingerprint": fingerprint.text.trim(),
-        "security_mode": securityMode,
-        "device_name": "Android",
-      });
+      await widget.gateway.connectServer(config);
+      // The connection code path leaves url/fingerprint/securityMode empty
+      // locally (the server derives them from the pasted code), so read
+      // the actual resulting connection back instead of assuming the
+      // request's own fields describe it.
+      final info = await widget.gateway.syncConnectionInfo();
       if (mounted) {
         setState(() {
           connectionEnabled = true;
-          connectedURL = url.text.trim();
-          connectedProtocol = "https";
-          connectedSecurityMode = securityMode;
+          connectedURL = info["url"] as String? ?? "";
+          connectedProtocol = info["protocol"] as String? ?? "https";
+          connectedSecurityMode = info["security_mode"] as String? ?? "pinned";
+          securityMode = connectedSecurityMode;
+          url.text = connectedURL;
+          fingerprint.text = info["fingerprint"] as String? ?? "";
         });
       }
       await loadWorkspaces();

@@ -16,6 +16,7 @@ import (
 
 	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/model"
+	"github.com/beresta-app/beresta/core/sharecode"
 	"github.com/beresta-app/beresta/core/store"
 	coresync "github.com/beresta-app/beresta/core/sync"
 	"github.com/beresta-app/beresta/core/sync/yjsadapter"
@@ -1234,7 +1235,12 @@ type connectConfig struct {
 	InviteCode   string `json:"invite_code"`
 	Fingerprint  string `json:"fingerprint"`
 	SecurityMode string `json:"security_mode"`
-	DeviceName   string `json:"device_name"`
+	// QRCode is the simple server-setup path (task 7.3): a pasted
+	// beresta://connect code that already bundles URL, invite, TLS policy,
+	// and fingerprint. Any field set explicitly above takes precedence,
+	// mirroring the desktop client's equivalent QRCode handling.
+	QRCode     string `json:"qr_code"`
+	DeviceName string `json:"device_name"`
 }
 
 func (s *Service) ConnectServer(requestID, encoded string) error {
@@ -1246,6 +1252,27 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 	var config connectConfig
 	if err := strictJSON(encoded, &config); err != nil {
 		return err
+	}
+	if config.QRCode != "" {
+		parsed, err := sharecode.DecodeConnect(config.QRCode)
+		if err != nil {
+			return err
+		}
+		if config.URL == "" {
+			config.URL = parsed.URL
+		}
+		if config.InviteCode == "" {
+			config.InviteCode = parsed.InviteCode
+		}
+		if config.Fingerprint == "" {
+			config.Fingerprint = parsed.Fingerprint
+		}
+		if config.SecurityMode == "" {
+			config.SecurityMode = parsed.SecurityMode
+		}
+	}
+	if config.SecurityMode == "" {
+		config.SecurityMode = string(transport.HTTPSecurityPinned)
 	}
 	value, workspaceID, err := s.accountState()
 	if err != nil {

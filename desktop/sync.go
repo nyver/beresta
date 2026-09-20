@@ -3,12 +3,11 @@ package main
 import (
 	"context"
 	"errors"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/model"
+	"github.com/beresta-app/beresta/core/sharecode"
 	"github.com/beresta-app/beresta/core/store"
 	coresync "github.com/beresta-app/beresta/core/sync"
 	"github.com/beresta-app/beresta/core/syncsummary"
@@ -42,7 +41,7 @@ type SyncQuarantineDTO struct {
 
 func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo, error) {
 	if request.QRCode != "" {
-		parsed, err := parseConnectionQR(request.QRCode)
+		parsed, err := sharecode.DecodeConnect(request.QRCode)
 		if err != nil {
 			return ServerConnectionInfo{}, mapError(err)
 		}
@@ -557,20 +556,4 @@ func (a *App) SyncNow() error {
 		return &AppError{Code: ErrCodeInternal, Message: "synchronization worker is not running"}
 	}
 	return nil
-}
-
-func parseConnectionQR(encoded string) (ConnectServerRequest, error) {
-	parsed, err := url.Parse(strings.TrimSpace(encoded))
-	if err != nil || parsed.Scheme != "beresta" || parsed.Host != "connect" {
-		return ConnectServerRequest{}, errors.New("invalid Beresta connection QR")
-	}
-	query := parsed.Query()
-	request := ConnectServerRequest{URL: query.Get("url"), InviteCode: query.Get("invite"), Fingerprint: query.Get("fingerprint"), SecurityMode: query.Get("mode")}
-	if request.SecurityMode == "" {
-		request.SecurityMode = string(transport.HTTPSecurityPinned)
-	}
-	if request.URL == "" {
-		return ConnectServerRequest{}, errors.New("connection QR does not contain a server URL")
-	}
-	return request, nil
 }

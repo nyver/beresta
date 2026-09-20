@@ -54,7 +54,8 @@ describe("SyncPanel", () => {
 
     expect(await screen.findByText("https://old.example.com")).toBeInTheDocument();
     expect(screen.getByText("sync.protocol_https")).toBeInTheDocument();
-    expect(screen.getAllByText("sync.verification_trusted")).toHaveLength(2);
+    expect(screen.getAllByText("sync.verification_trusted")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "sync.advanced_setup_title" }));
     const urlField = screen.getByLabelText("sync.url_label");
     await user.clear(urlField);
     await user.type(urlField, "https://new.example.com");
@@ -68,6 +69,40 @@ describe("SyncPanel", () => {
       fingerprint: "ab12",
     }));
     expect(await screen.findByText("https://new.example.com")).toBeInTheDocument();
+  });
+
+  it("connects from a pasted connection code without exposing the advanced fields", async () => {
+    mockLocaleCatalog();
+    mockSyncSummary("local_only");
+    appMock.ConnectServer.mockResolvedValue({
+      enabled: true,
+      url: "https://code.example.com",
+      protocol: "https",
+      security_mode: "pinned",
+      fingerprint: "cd34",
+    });
+    render(
+      <I18nProvider>
+        <SyncPanel deviceId="device-123" />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+
+    expect(screen.queryByLabelText("sync.url_label")).not.toBeInTheDocument();
+    await user.type(
+      screen.getByLabelText("sync.qr_label"),
+      "beresta://connect?url=https://code.example.com&invite=abc&fingerprint=cd34&mode=pinned",
+    );
+    await user.click(screen.getByRole("button", { name: "sync.connect_code_button" }));
+
+    expect(appMock.ConnectServer).toHaveBeenCalledWith(expect.objectContaining({
+      url: "",
+      invite_code: "",
+      fingerprint: "",
+      security_mode: "",
+      qr_code: "beresta://connect?url=https://code.example.com&invite=abc&fingerprint=cd34&mode=pinned",
+    }));
+    expect(await screen.findByText("https://code.example.com")).toBeInTheDocument();
   });
 
   it("updates from the shared synchronization event", async () => {
@@ -103,6 +138,9 @@ describe("SyncPanel", () => {
 
     expect(await screen.findByText("device-123")).toBeInTheDocument();
     expect(screen.getByText("sync.journal_empty")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "sync.connect_code_button" })).toBeDisabled();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "sync.advanced_setup_title" }));
     expect(screen.getByRole("button", { name: "sync.connect_button" })).toBeDisabled();
   });
 

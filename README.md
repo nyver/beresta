@@ -326,11 +326,16 @@ The desktop and Android clients store complete local collections and can attach
 to the optional server without migrating data. Network failure changes only the
 visible synchronization state; local editing and queued operations remain available.
 Both clients show the configured server URL and HTTPS/TLS 1.3 certificate
-verification policy in their synchronization settings. The URL and policy can
-be replaced while synchronization is enabled; the client validates and starts
-the replacement before detaching the previous connection, so a failed change
-does not discard a working server configuration. Unencrypted HTTP is not a
-supported client protocol.
+verification policy in their synchronization settings. Server setup prefers a
+single pasted connection code (a `beresta://connect` link bundling the URL,
+invite, TLS policy, and certificate fingerprint together, delivered as a QR
+image or copied text); the URL, TLS policy, invite code, fingerprint, and
+connection diagnostics remain available individually behind an explicit
+"Advanced connection setup" branch for self-hosted troubleshooting. The URL
+and policy can be replaced while synchronization is enabled; the client
+validates and starts the replacement before detaching the previous
+connection, so a failed change does not discard a working server
+configuration. Unencrypted HTTP is not a supported client protocol.
 
 ## Security Model
 

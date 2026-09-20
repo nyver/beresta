@@ -138,7 +138,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(TextField, "HTTPS server URL"),
+        find.widgetWithText(TextField, "Connection code"),
         findsOneWidget,
       );
     },
@@ -604,14 +604,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text("Sync status: Up to date"), findsOneWidget);
+    expect(find.text("Connection protocol"), findsOneWidget);
+    expect(find.text("HTTPS / TLS 1.3"), findsOneWidget);
+    expect(find.text("Certificate verification"), findsOneWidget);
+    expect(find.text("Pinned certificate"), findsOneWidget);
+    expect(find.widgetWithText(TextField, "HTTPS server URL"), findsNothing);
+
+    await tester.ensureVisible(find.text("Advanced connection setup"));
+    await tester.tap(find.text("Advanced connection setup"));
+    await tester.pumpAndSettle();
+
     expect(find.widgetWithText(TextField, "HTTPS server URL"), findsOneWidget);
     final urlFinder = find.widgetWithText(TextField, "HTTPS server URL");
     final urlField = tester.widget<TextField>(urlFinder);
     expect(urlField.controller!.text, "https://sync.example.com");
-    expect(find.text("Connection protocol"), findsOneWidget);
-    expect(find.text("HTTPS / TLS 1.3"), findsOneWidget);
-    expect(find.text("Certificate verification"), findsNWidgets(2));
-    expect(find.text("Pinned certificate"), findsNWidgets(2));
+    // The summary card above may have scrolled out of the list's cache
+    // extent by now (a normal virtualized ListView, not a bug), so this
+    // only asserts on the freshly revealed advanced section itself rather
+    // than an exact count shared with a widget that can be unmounted.
+    expect(find.text("Certificate verification"), findsWidgets);
+    expect(find.text("Pinned certificate"), findsWidgets);
     expect(
       find.widgetWithText(FilledButton, "Apply server changes"),
       findsOneWidget,
@@ -632,6 +644,44 @@ void main() {
     expect(gateway.connectedConfig?["url"], "https://new.example.com");
     expect(gateway.connectedConfig?["security_mode"], "trusted");
   });
+
+  testWidgets(
+    "connects from a pasted connection code without exposing the advanced fields",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: true)
+            ..connectionInfo = {
+              "enabled": true,
+              "url": "https://code.example.com",
+              "protocol": "https",
+              "security_mode": "pinned",
+              "fingerprint": "cd34",
+            };
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.cloud_outlined));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextField, "HTTPS server URL"), findsNothing);
+      await tester.enterText(
+        find.widgetWithText(TextField, "Connection code"),
+        "beresta://connect?url=https://code.example.com&invite=abc&fingerprint=cd34&mode=pinned",
+      );
+      await tester.tap(find.widgetWithText(FilledButton, "Connect with code"));
+      await tester.pumpAndSettle();
+
+      expect(gateway.connectedConfig, {
+        "url": "",
+        "invite_code": "",
+        "fingerprint": "",
+        "security_mode": "",
+        "qr_code":
+            "beresta://connect?url=https://code.example.com&invite=abc&fingerprint=cd34&mode=pinned",
+        "device_name": "Android",
+      });
+    },
+  );
 
   testWidgets(
     "backup sheet shows the catalog's health, last verified time, and location",

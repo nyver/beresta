@@ -245,7 +245,9 @@ export interface ConnectServerRequest {
   url: string;
   invite_code: string;
   fingerprint: string;
-  security_mode: "pinned" | "trusted";
+  // "" defers to the pasted connection code (or the server's default)
+  // instead of forcing a TLS policy the user never chose (task 7.3).
+  security_mode: "pinned" | "trusted" | "";
   qr_code: string;
   device_name: string;
 }

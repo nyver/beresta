@@ -62,6 +62,11 @@ class Strings {
       "server": "Synchronization server",
       "server_optional":
           "Optional. Your complete collection stays on this device.",
+      "connection_code": "Connection code",
+      "connection_code_hint":
+          "Paste the connection code your server administrator shared (from a QR code or copied text). It already includes the server address, invite, and certificate verification.",
+      "connect_with_code": "Connect with code",
+      "advanced_server_setup": "Advanced connection setup",
       "server_url": "HTTPS server URL",
       "current_server": "Connected server",
       "connection_protocol": "Connection protocol",
@@ -263,6 +268,11 @@ class Strings {
       "server": "Сервер синхронизации",
       "server_optional":
           "Необязательно. Полная коллекция останется на этом устройстве.",
+      "connection_code": "Код подключения",
+      "connection_code_hint":
+          "Вставьте код подключения, который прислал администратор сервера (из QR-кода или скопированного текста). Он уже содержит адрес сервера, приглашение и проверку сертификата.",
+      "connect_with_code": "Подключиться по коду",
+      "advanced_server_setup": "Расширенная настройка подключения",
       "server_url": "HTTPS-адрес сервера",
       "current_server": "Подключённый сервер",
       "connection_protocol": "Протокол подключения",

@@ -24,10 +24,14 @@ WorkManager jobs trigger pending synchronization when a server is configured.
 Android may defer background work for battery or network policy; opening the
 app always resumes it.
 
-Use the cloud action to attach an optional HTTPS server. A first connection
-accepts an invite code plus either a pinned SHA-256 certificate fingerprint or
-a certificate trusted by Android. Disabling the server removes only runtime
-transport state; the local collection and queued operations remain intact.
+Use the cloud action to attach an optional HTTPS server. The simple path
+accepts one pasted connection code (a `beresta://connect` link bundling the
+server URL, invite, TLS policy, and certificate fingerprint, delivered as a QR
+image or copied text); an "Advanced connection setup" section reveals the URL,
+invite code, and pinned SHA-256 fingerprint/Android-trusted certificate choice
+individually for setups without a connection code to paste. Disabling the
+server removes only runtime transport state; the local collection and queued
+operations remain intact.
 The server URL, certificate fingerprint, and pinned/trusted choice are saved
 on the device (not the one-time invite code), so reopening the server sheet
 shows the same connection instead of a blank form, and a previously enabled

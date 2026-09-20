@@ -65,6 +65,82 @@ func TestDecodeIdentityRejectsMalformedInput(t *testing.T) {
 	}
 }
 
+func TestConnectCodeRoundTrip(t *testing.T) {
+	code, err := EncodeConnect(ConnectCode{
+		URL: "https://sync.example.com", InviteCode: "invite-1",
+		Fingerprint: "ab12cd34", SecurityMode: "trusted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(code, "beresta://connect?") {
+		t.Fatalf("unexpected code shape: %q", code)
+	}
+	decoded, err := DecodeConnect(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.URL != "https://sync.example.com" {
+		t.Fatalf("url mismatch: got %q", decoded.URL)
+	}
+	if decoded.InviteCode != "invite-1" {
+		t.Fatalf("invite code mismatch: got %q", decoded.InviteCode)
+	}
+	if decoded.Fingerprint != "ab12cd34" {
+		t.Fatalf("fingerprint mismatch: got %q", decoded.Fingerprint)
+	}
+	if decoded.SecurityMode != "trusted" {
+		t.Fatalf("security mode mismatch: got %q", decoded.SecurityMode)
+	}
+}
+
+func TestConnectCodeDefaultsSecurityModeToPinned(t *testing.T) {
+	code, err := EncodeConnect(ConnectCode{URL: "https://sync.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeConnect(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.SecurityMode != "pinned" {
+		t.Fatalf("expected default security mode pinned, got %q", decoded.SecurityMode)
+	}
+	if decoded.InviteCode != "" || decoded.Fingerprint != "" {
+		t.Fatalf("expected empty optional fields, got invite=%q fingerprint=%q", decoded.InviteCode, decoded.Fingerprint)
+	}
+}
+
+func TestDecodeConnectRejectsMalformedInput(t *testing.T) {
+	valid, err := EncodeConnect(ConnectCode{URL: "https://sync.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		"empty":            "",
+		"wrong scheme":     "https://connect?url=https://sync.example.com",
+		"wrong host":       "beresta://identity?url=https://sync.example.com",
+		"missing url":      "beresta://connect?invite=x",
+		"not a uri at all": "\x00\x01",
+	}
+	for name, code := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeConnect(code); err == nil {
+				t.Fatalf("expected DecodeConnect to reject %q", code)
+			}
+		})
+	}
+	if _, err := DecodeConnect(valid); err != nil {
+		t.Fatalf("expected the valid fixture to still decode: %v", err)
+	}
+}
+
+func TestEncodeConnectRejectsEmptyURL(t *testing.T) {
+	if _, err := EncodeConnect(ConnectCode{}); err == nil {
+		t.Fatal("expected EncodeConnect to reject an empty server URL")
+	}
+}
+
 func TestGrantCodeRoundTrip(t *testing.T) {
 	workspaceID := mustID(t)
 	keyID := []byte{9, 8, 7, 6}

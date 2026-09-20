@@ -353,3 +353,53 @@ func TestServiceExportIdentityRoundTripsAccountIdentity(t *testing.T) {
 		t.Fatalf("ExportIdentity while locked error = %v, want %v", err, account.ErrAccountLocked)
 	}
 }
+
+// TestServiceConnectServerAcceptsAConnectionCode proves the simple
+// server-setup path (task 7.3): a single pasted beresta://connect code
+// bundling the URL, invite, TLS policy, and fingerprint connects on its own,
+// without the caller separately filling in any of those fields.
+func TestServiceConnectServerAcceptsAConnectionCode(t *testing.T) {
+	runtime, baseURL := startMobileE2EServer(t)
+	dbPath := filepath.Join(retryTempDir(t), "beresta.db")
+	service, err := NewService(newTestServiceDeviceSecret(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(service.Close)
+	if _, err := service.CreateAccount("create-code", dbPath, "correct horse battery staple code"); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	invite, err := runtime.Storage.CreateInvite(context.Background(), "code", time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	connectionCode, err := sharecode.EncodeConnect(sharecode.ConnectCode{
+		URL: baseURL, InviteCode: invite.Code, Fingerprint: runtime.TLSIdentity.Fingerprint,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := json.Marshal(connectConfig{QRCode: connectionCode, DeviceName: "code-device"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ConnectServer("connect-code", string(config)); err != nil {
+		t.Fatalf("ConnectServer: %v", err)
+	}
+
+	infoResponse, err := service.SyncConnectionInfo("info")
+	if err != nil {
+		t.Fatalf("SyncConnectionInfo: %v", err)
+	}
+	info := decodeJSON[map[string]any](t, infoResponse)
+	if info["url"] != baseURL {
+		t.Fatalf("connected url = %v, want %v", info["url"], baseURL)
+	}
+	if info["security_mode"] != "pinned" {
+		t.Fatalf("connected security mode = %v, want pinned", info["security_mode"])
+	}
+	if info["fingerprint"] != runtime.TLSIdentity.Fingerprint {
+		t.Fatalf("connected fingerprint = %v, want %v", info["fingerprint"], runtime.TLSIdentity.Fingerprint)
+	}
+}

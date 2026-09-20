@@ -22,8 +22,13 @@ type App struct {
 	ctx   context.Context
 	ready bool // set once startup(ctx) has wired the Wails runtime dispatcher
 
-	account         *account.Account
-	keyProtection   string // keystore.Protection.String() for the active account, "" when locked
+	account       *account.Account
+	keyProtection string // keystore.Protection.String() for the active account, "" when locked
+	// unlocking is set for the duration of one UnlockAccount call so a
+	// second overlapping call (duplicate Enter/click before the frontend's
+	// own busy state disables the form) is rejected instead of opening a
+	// second database connection and racing the first to set a.account.
+	unlocking       bool
 	transport       transport.SyncTransport
 	httpTransport   *transport.HTTP
 	syncCoordinator *coresync.Coordinator
@@ -264,8 +269,23 @@ type UnlockAccountRequest struct {
 }
 
 // UnlockAccount opens an existing local account and makes it the active
-// account.
+// account. Request-idempotent: a call that overlaps another already in
+// flight is rejected immediately rather than racing it to open a second
+// database connection and set a.account.
 func (a *App) UnlockAccount(req UnlockAccountRequest) (AccountInfo, error) {
+	a.mu.Lock()
+	if a.unlocking {
+		a.mu.Unlock()
+		return AccountInfo{}, mapError(errUnlockInProgress)
+	}
+	a.unlocking = true
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.unlocking = false
+		a.mu.Unlock()
+	}()
+
 	ctx := a.requestContext()
 	wrapper, protection, err := a.keyWrapper(ctx, "Unlock your Beresta account.")
 	if err != nil {

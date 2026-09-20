@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/beresta-app/beresta/core/keystore"
 	"github.com/beresta-app/beresta/core/presentation"
 	"github.com/beresta-app/beresta/locales"
 )
@@ -158,6 +159,46 @@ func TestUnlockAccountRoundTrip(t *testing.T) {
 	}
 	if unlocked.AccountID != created.AccountID || unlocked.WorkspaceID != created.WorkspaceID {
 		t.Fatalf("UnlockAccount = %+v, want matching %+v", unlocked, created)
+	}
+}
+
+// TestUnlockAccountRejectsAnOverlappingCall proves UnlockAccount is
+// request-idempotent (task 7.4): a second call that arrives while an
+// earlier one is still opening the database is rejected immediately
+// instead of racing it to set a.account, which would otherwise leak
+// whichever *account.Account lost the race's open database handle.
+func TestUnlockAccountRejectsAnOverlappingCall(t *testing.T) {
+	a := newTestApp(t)
+	dbPath := testDatabasePath(t, a)
+	if _, err := a.CreateAccount(CreateAccountRequest{DatabasePath: dbPath, Passphrase: "correct horse battery staple"}); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	if err := a.LockAccount(); err != nil {
+		t.Fatalf("LockAccount: %v", err)
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	a.keyWrapperFactory = func(ctx context.Context, prompt string) (keystore.Wrapper, string, error) {
+		close(entered)
+		<-release
+		return fakeKeyWrapperFactory(ctx, prompt)
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := a.UnlockAccount(UnlockAccountRequest{DatabasePath: dbPath, Passphrase: "correct horse battery staple"})
+		firstDone <- err
+	}()
+
+	<-entered
+	if _, err := a.UnlockAccount(UnlockAccountRequest{DatabasePath: dbPath, Passphrase: "correct horse battery staple"}); !isAppErrorCode(err, ErrCodeInternal) {
+		t.Fatalf("overlapping UnlockAccount error = %v, want %s", err, ErrCodeInternal)
+	}
+
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first UnlockAccount: %v", err)
 	}
 }
 

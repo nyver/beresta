@@ -27,6 +27,45 @@ function renderUnlock(databasePath = "C:\\Users\\test\\Beresta\\beresta.db") {
 }
 
 describe("Unlock", () => {
+  it("focuses the passphrase field on mount", async () => {
+    renderUnlock();
+
+    expect(await screen.findByLabelText("onboarding.passphrase_label")).toHaveFocus();
+  });
+
+  it("returns focus to the passphrase field after a failed unlock attempt", async () => {
+    appMock.UnlockAccount.mockRejectedValue(
+      new Error(JSON.stringify({ code: "unlock_failed", message: "wrong" })),
+    );
+    renderUnlock();
+    const user = userEvent.setup();
+
+    const passphraseField = await screen.findByLabelText("onboarding.passphrase_label");
+    await user.type(passphraseField, "wrong passphrase");
+    await user.click(screen.getByRole("button", { name: "unlock.button" }));
+
+    await screen.findByRole("alert");
+    expect(passphraseField).toHaveFocus();
+  });
+
+  it("does not steal focus into the passphrase field when a wipe attempt finishes", async () => {
+    appMock.WipeLocalAccount.mockRejectedValue(
+      new Error(JSON.stringify({ code: "internal", message: "disk error" })),
+    );
+    renderUnlock();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "unlock.wipe_start_link" }));
+    const confirmInput = screen.getByLabelText("unlock.wipe_confirm_instructions");
+    await user.type(confirmInput, "ERASE");
+    const confirmButton = screen.getByRole("button", { name: "unlock.wipe_confirm_button" });
+    await user.click(confirmButton);
+
+    await screen.findByRole("alert");
+    expect(screen.getByLabelText("onboarding.passphrase_label")).not.toHaveFocus();
+    expect(confirmButton).toHaveFocus();
+  });
+
   it("unlocks and reports the account ready on success", async () => {
     const account = fakeAccountInfo();
     appMock.UnlockAccount.mockResolvedValue(account);

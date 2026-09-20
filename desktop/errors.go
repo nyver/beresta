@@ -69,6 +69,14 @@ const (
 // called while the app has no account open.
 var ErrLocked = errors.New("app: account is locked")
 
+// errUnlockInProgress reports that UnlockAccount was called again while an
+// earlier call for the same App instance was still running (see App.unlocking
+// in app.go). It intentionally falls through to mapError's default,
+// ErrCodeInternal case: the frontend already disables the unlock form while
+// busy, so a user should practically never see this, and its generic
+// "something went wrong" message is a fine backstop when they do.
+var errUnlockInProgress = errors.New("app: an unlock attempt is already in progress")
+
 // mapError translates a core-layer error into a stable AppError the
 // frontend can branch on. Errors already carrying an *AppError (from an
 // inner call) pass through unchanged. A nil error stays nil, and an

@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { unlockAccount, unwrapError, wipeLocalAccount } from "../api";
 import { useI18n } from "../i18n";
@@ -21,6 +21,7 @@ export function Unlock({ databasePath, onAccountReady, onSwitchToOnboarding }: U
   const [passphrase, setPassphrase] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const passphraseRef = useRef<HTMLInputElement | null>(null);
 
   const [confirmingWipe, setConfirmingWipe] = useState(false);
   const [wipeConfirmText, setWipeConfirmText] = useState("");
@@ -34,6 +35,20 @@ export function Unlock({ databasePath, onAccountReady, onSwitchToOnboarding }: U
   // requires no open *Account for databasePath, and interleaving with a
   // just-opened UnlockAccount would race the deletion against it).
   const busy = submitting || wiping;
+
+  // The passphrase input is disabled while submitting, which browsers
+  // respond to by blurring it if it held focus - so once an unlock attempt
+  // finishes (in particular a failed one, the common retry case),
+  // explicitly return focus there instead of leaving it stranded on the
+  // document body. Keyed on `submitting` rather than the wider `busy` so a
+  // wipe attempt (which also sets `busy`) never yanks focus away from the
+  // wipe confirmation section. This also covers the field's very first
+  // focus, in place of the HTML `autoFocus` attribute: Wails' WebView does
+  // not reliably act on it any more than it reliably turns Enter into a
+  // form submit (see handlePassphraseKeyDown below).
+  useEffect(() => {
+    if (!submitting) passphraseRef.current?.focus();
+  }, [submitting]);
 
   async function submitUnlock() {
     if (busy) return;
@@ -86,12 +101,12 @@ export function Unlock({ databasePath, onAccountReady, onSwitchToOnboarding }: U
         <label>
           {t("onboarding.passphrase_label")}
           <input
+            ref={passphraseRef}
             type="password"
             value={passphrase}
             onChange={(event) => setPassphrase(event.target.value)}
             onKeyDown={handlePassphraseKeyDown}
             autoComplete="current-password"
-            autoFocus
             required
             disabled={busy}
           />

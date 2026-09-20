@@ -74,7 +74,12 @@ Create button does (Wails' WebView does not reliably treat Enter in a text
 input as a native form submit, so this is handled explicitly rather than
 left to the surrounding `<form>`). A returning-user unlock screen is chosen
 automatically when a previous local account is on record, and submits with
-either its Unlock button or Enter in the passphrase field. A main shell
+either its Unlock button or Enter in the passphrase field. The passphrase
+field explicitly regains focus once an attempt finishes (including a failed
+one, so the next attempt can start by typing immediately) rather than
+relying on the same unreliable `autoFocus`/native-submit behavior, and the
+backend rejects a second `UnlockAccount` call that overlaps one already in
+flight instead of racing it to open a second database connection. A main shell
 follows, with a keyboard-
 accessible notebook tree, tag navigation (via a dedicated `SearchByTag`
 binding that reuses the same search index as the search box, without its

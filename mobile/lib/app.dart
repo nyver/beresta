@@ -484,6 +484,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     try {
       await widget.onDeviceUnlock!();
     } catch (failure) {
+      // The user backing out of the biometric/device-credential prompt is
+      // navigation, not an account error (specs/mobile-clients' "Biometric
+      // prompt is cancelled" scenario): the account remains valid and
+      // password unlock is still right there, so this must not show a
+      // credential-failure message - only a genuine authentication failure
+      // does.
+      if (failure is PlatformException &&
+          failure.code == "device_authentication_canceled") {
+        return;
+      }
       if (mounted) {
         setState(() => error = describeFailure(widget.strings, failure));
       }

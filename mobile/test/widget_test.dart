@@ -219,6 +219,49 @@ void main() {
   });
 
   testWidgets(
+    "cancelling the biometric prompt from the manual retry button shows no credential error (task 7.5)",
+    (tester) async {
+      final gateway =
+          FakeGateway(unlocked: false)
+            ..accountExists = true
+            ..deviceUnlockAvailable = true
+            ..deviceUnlockError = PlatformException(
+              code: "device_authentication_canceled",
+            );
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      // The automatic attempt on cold start (loadSession) also cancels,
+      // and falls through to the ordinary unlock screen without an error.
+      expect(gateway.deviceUnlockCalls, 1);
+      expect(
+        find.textContaining("Could not complete the action"),
+        findsNothing,
+      );
+      final deviceUnlockButton = find.widgetWithText(
+        OutlinedButton,
+        "Unlock with biometrics or PIN",
+      );
+      expect(deviceUnlockButton, findsOneWidget);
+
+      await tester.tap(deviceUnlockButton);
+      await tester.pumpAndSettle();
+
+      expect(gateway.deviceUnlockCalls, 2);
+      expect(
+        find.textContaining("Could not complete the action"),
+        findsNothing,
+      );
+      // The account is still valid and password unlock remains available.
+      expect(
+        find.widgetWithText(TextField, "Passphrase"),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(FilledButton, "Unlock"), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     "an existing empty-titled note displays as Untitled in the list",
     (tester) async {
       final gateway = FakeGateway(unlocked: true)
@@ -938,6 +981,7 @@ class FakeGateway implements CoreGateway {
   bool accountExists = false;
   bool deviceUnlockAvailable = false;
   int deviceUnlockCalls = 0;
+  Object? deviceUnlockError;
   String savedBody = "";
   String createdNoteTitle = "";
   String createdNoteNotebookId = "";
@@ -987,6 +1031,7 @@ class FakeGateway implements CoreGateway {
   @override
   Future<Map<String, dynamic>> unlockWithDeviceAuthentication() async {
     deviceUnlockCalls++;
+    if (deviceUnlockError != null) throw deviceUnlockError!;
     unlocked = true;
     return {};
   }

@@ -39,6 +39,11 @@ func TestValidateCatalogs(t *testing.T) {
 			russian:   `{"action.save":"Save"}`,
 			wantError: `localization key "action.save" is untranslated`,
 		},
+		{
+			name:    "identical brand name is not flagged as untranslated",
+			english: `{"sync.device_platform_windows":"Windows"}`,
+			russian: `{"sync.device_platform_windows":"Windows"}`,
+		},
 	}
 
 	for _, test := range tests {

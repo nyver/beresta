@@ -12,6 +12,19 @@ import (
 	"strings"
 )
 
+// brandNameValues lists English values that are proper nouns with no
+// distinct Russian spelling. Beresta's own Russian catalog already keeps
+// these in Latin script inside translated sentences (for example
+// "shell.key_protection_dpapi": "Защищено Windows"), so an identical bare
+// value here is a correct rendering, not a forgotten translation; without
+// this allowance, ValidateCatalogs' "identical means untranslated"
+// heuristic would reject the one correct Russian rendering of these
+// values.
+var brandNameValues = map[string]bool{
+	"Windows": true,
+	"Android": true,
+}
+
 // ValidateCatalogs checks that both catalogs contain the same unique keys and
 // that every value is non-empty and translated.
 func ValidateCatalogs(englishPath, russianPath string) error {
@@ -38,7 +51,7 @@ func ValidateCatalogs(englishPath, russianPath string) error {
 		if russianValue == "" {
 			return fmt.Errorf("localization key %q has an empty Russian value", key)
 		}
-		if englishValue == russianValue {
+		if englishValue == russianValue && !brandNameValues[englishValue] {
 			return fmt.Errorf("localization key %q is untranslated", key)
 		}
 	}

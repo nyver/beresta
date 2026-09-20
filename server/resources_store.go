@@ -35,7 +35,9 @@ type Device struct {
 	UserID      string     `json:"user_id"`
 	DisplayName string     `json:"display_name"`
 	PublicKey   []byte     `json:"signing_public"`
+	Platform    string     `json:"platform,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
+	LastSeenAt  *time.Time `json:"last_seen_at,omitempty"`
 	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
 }
 
@@ -360,7 +362,7 @@ func (s *Storage) ListWorkspaceMemberDevices(ctx context.Context, principal Prin
 
 func (s *Storage) ListDevices(ctx context.Context, principal Principal) ([]Device, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT device_id, user_id, display_name, signing_public, created_at, revoked_at
+		SELECT device_id, user_id, display_name, signing_public, platform, created_at, last_seen_at, revoked_at
 		FROM devices WHERE user_id = ? ORDER BY created_at, device_id`, principal.UserID)
 	if err != nil {
 		return nil, err
@@ -369,12 +371,15 @@ func (s *Storage) ListDevices(ctx context.Context, principal Principal) ([]Devic
 	var result []Device
 	for rows.Next() {
 		var item Device
+		var platform sql.NullString
 		var created int64
-		var revoked sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.UserID, &item.DisplayName, &item.PublicKey, &created, &revoked); err != nil {
+		var lastSeen, revoked sql.NullInt64
+		if err := rows.Scan(&item.ID, &item.UserID, &item.DisplayName, &item.PublicKey, &platform, &created, &lastSeen, &revoked); err != nil {
 			return nil, err
 		}
+		item.Platform = platform.String
 		item.CreatedAt = time.Unix(created, 0).UTC()
+		item.LastSeenAt = nullableTime(lastSeen)
 		item.RevokedAt = nullableTime(revoked)
 		result = append(result, item)
 	}

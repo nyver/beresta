@@ -7,6 +7,7 @@ import "package:flutter/services.dart"
     show AutofillHints, Clipboard, ClipboardData, PlatformException;
 import "package:flutter_localizations/flutter_localizations.dart";
 import "package:flutter_quill/flutter_quill.dart";
+import "package:qr_flutter/qr_flutter.dart";
 
 import "commit_tracker.dart";
 import "core_gateway.dart";
@@ -48,6 +49,26 @@ String quarantineReasonMessage(Strings strings, String reason) {
           ? "sync_quarantine_reason_$reason"
           : "sync_quarantine_reason_unknown";
   return strings(key);
+}
+
+/// knownDevicePlatforms is the closed set core/mobileapi/desktop currently
+/// send at registration; an absent or unrecognized value degrades to
+/// "unknown platform" instead of showing a raw string.
+const Set<String> knownDevicePlatforms = {"windows", "android"};
+
+String devicePlatformLabel(Strings strings, String? platform) {
+  final known = platform != null && knownDevicePlatforms.contains(platform);
+  return strings("device_platform_${known ? platform : "unknown"}");
+}
+
+/// deviceLastSeenLabel renders a device's last authenticated session time
+/// (specs/identity-and-sharing's "last-seen time when available"): a device
+/// that has never refreshed a session since this field was added reports no
+/// value, which reads as "Never" rather than a missing/blank field.
+String deviceLastSeenLabel(Strings strings, String? lastSeenAt) {
+  if (lastSeenAt == null || lastSeenAt.isEmpty) return strings("diagnostics_never");
+  final parsed = DateTime.tryParse(lastSeenAt);
+  return parsed == null ? strings("diagnostics_never") : parsed.toLocal().toString();
 }
 
 /// Renders a localized error with the underlying platform failure appended
@@ -1535,6 +1556,18 @@ class _ServerSheetState extends State<ServerSheet> {
   String grantCode = "";
   String? copied;
   bool sharingBusy = false;
+  // Guided pairing wizard state (task 7.7): the raw identity/grant codes
+  // are hidden behind these toggles rather than shown as primary-flow
+  // content (specs/identity-and-sharing's "hides key envelopes and public
+  // keys from the primary flow"); a QR rendering is the primary view.
+  // requestShareConfirmation/requestJoinConfirmation gate the actual
+  // shareWorkspace()/acceptWorkspaceGrant() core calls behind the same
+  // AlertDialog confirmation pattern used elsewhere in this file (see
+  // e.g. the delete-notebook confirmation above), rather than a Row of
+  // inline buttons that risks overflowing on a narrow phone screen.
+  bool showIdentityCode = false;
+  bool showGrantCode = false;
+  bool joinSucceeded = false;
   String syncStatusValue = "local_only";
   bool connectionEnabled = false;
   String connectedURL = "";
@@ -1542,6 +1575,8 @@ class _ServerSheetState extends State<ServerSheet> {
   String connectedSecurityMode = "pinned";
   List<Map<String, dynamic>> workspaces = const [];
   List<Map<String, dynamic>> quarantine = const [];
+  List<Map<String, dynamic>> syncDevices = const [];
+  String localDeviceId = "";
   Timer? syncStatusTimer;
 
   @override
@@ -1575,8 +1610,20 @@ class _ServerSheetState extends State<ServerSheet> {
         .catchError((_) {
           // No account context yet - the form simply stays empty.
         });
+    widget.gateway
+        .status()
+        .then((status) {
+          if (mounted) {
+            setState(() => localDeviceId = status["device_id"] as String? ?? "");
+          }
+        })
+        .catchError((_) {
+          // No account context yet - the current-device marker simply
+          // stays unset until this sheet is reopened.
+        });
     refreshSyncSummary();
     loadWorkspaces();
+    loadSyncDevices();
     syncStatusTimer = Timer.periodic(
       const Duration(seconds: 3),
       (_) => refreshSyncSummary(),
@@ -1629,6 +1676,51 @@ class _ServerSheetState extends State<ServerSheet> {
     } catch (_) {
       // The account may not be unlocked yet. Keep any already loaded list
       // visible and retry the next time this sheet is opened.
+    }
+  }
+
+  Future<void> loadSyncDevices() async {
+    try {
+      final values = await widget.gateway.listSyncDevices();
+      if (mounted) setState(() => syncDevices = values);
+    } catch (_) {
+      // Sync may not be enabled yet - the section simply stays empty.
+    }
+  }
+
+  // Shows the future-access-only disclosure before revokeSyncDevice ever
+  // runs (specs/identity-and-sharing's "Revocation limitation disclosure"),
+  // matching requestShareConfirmation/requestJoinConfirmation's AlertDialog
+  // pattern above.
+  Future<void> requestRevokeDevice(Map<String, dynamic> device) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(
+              "${widget.strings("revoke_confirm_title")}: ${device["display_name"] as String? ?? ""}",
+            ),
+            content: Text(widget.strings("revoke_confirm_description")),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(widget.strings("revoke_confirm_button")),
+              ),
+            ],
+          ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.gateway.revokeSyncDevice(device["device_id"] as String);
+      await loadSyncDevices();
+    } catch (failure) {
+      if (mounted) {
+        setState(() => error = describeFailure(widget.strings, failure));
+      }
     }
   }
 
@@ -1840,6 +1932,41 @@ class _ServerSheetState extends State<ServerSheet> {
                     },
             child: Text(widget.strings("disconnect")),
           ),
+          if (syncDevices.isNotEmpty) ...[
+            const Divider(height: 32),
+            Text(
+              widget.strings("devices_title"),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            for (final device in syncDevices)
+              ListTile(
+                key: Key("sync-device-${device["device_id"]}"),
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.devices_other),
+                // The raw device ID is a protocol identifier and stays out
+                // of this primary list (specs/identity-and-sharing's
+                // "Understandable device inventory").
+                title: Text(
+                  device["device_id"] == localDeviceId
+                      ? widget.strings("this_device")
+                      : (device["display_name"] as String? ?? ""),
+                ),
+                subtitle: Text(
+                  "${devicePlatformLabel(widget.strings, device["platform"] as String?)}"
+                  " · ${widget.strings("device_last_seen")}: "
+                  "${deviceLastSeenLabel(widget.strings, device["last_seen_at"] as String?)}",
+                ),
+                trailing:
+                    device["device_id"] == localDeviceId
+                        ? Text(widget.strings("device_local"))
+                        : device["revoked_at"] != null
+                        ? Text(widget.strings("device_revoked"))
+                        : TextButton(
+                          onPressed: () => requestRevokeDevice(device),
+                          child: Text(widget.strings("device_disconnect_button")),
+                        ),
+              ),
+          ],
           if (workspaces.isNotEmpty) ...[
             const Divider(height: 32),
             Text(
@@ -1879,40 +2006,84 @@ class _ServerSheetState extends State<ServerSheet> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           Text(widget.strings("your_identity_hint")),
-          SelectableText(identityCode),
+          if (identityCode.isNotEmpty)
+            Center(
+              child: QrImageView(
+                data: identityCode,
+                size: 220,
+                semanticsLabel: widget.strings("qr_alt_identity"),
+              ),
+            ),
           TextButton(
+            key: const Key("identity-show-code-button"),
             onPressed:
                 identityCode.isEmpty
                     ? null
-                    : () => copyToClipboard(identityCode),
+                    : () => setState(() => showIdentityCode = !showIdentityCode),
             child: Text(
-              widget.strings(copied == identityCode ? "copied" : "copy"),
+              widget.strings(
+                showIdentityCode ? "hide_code" : "show_code_to_copy",
+              ),
             ),
           ),
+          if (showIdentityCode) ...[
+            SelectableText(identityCode),
+            TextButton(
+              onPressed: () => copyToClipboard(identityCode),
+              child: Text(
+                widget.strings(copied == identityCode ? "copied" : "copy"),
+              ),
+            ),
+          ],
           const Divider(height: 32),
           Text(
             widget.strings("share_workspace"),
             style: Theme.of(context).textTheme.titleMedium,
           ),
-          TextField(
-            controller: peerIdentity,
-            decoration: InputDecoration(
-              labelText: widget.strings("paste_identity"),
-            ),
-          ),
-          FilledButton(
-            onPressed: sharingBusy ? null : shareWorkspace,
-            child: Text(widget.strings("generate_share_code")),
-          ),
           if (grantCode.isNotEmpty) ...[
-            Text(widget.strings("grant_code")),
-            SelectableText(grantCode),
-            Text(widget.strings("grant_code_hint")),
-            TextButton(
-              onPressed: () => copyToClipboard(grantCode),
-              child: Text(
-                widget.strings(copied == grantCode ? "copied" : "copy"),
+            Text(
+              widget.strings("share_success_title"),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            Text(widget.strings("share_success_description")),
+            Center(
+              child: QrImageView(
+                data: grantCode,
+                size: 220,
+                semanticsLabel: widget.strings("qr_alt_grant"),
               ),
+            ),
+            TextButton(
+              key: const Key("grant-show-code-button"),
+              onPressed: () => setState(() => showGrantCode = !showGrantCode),
+              child: Text(
+                widget.strings(showGrantCode ? "hide_code" : "show_code_to_copy"),
+              ),
+            ),
+            if (showGrantCode) ...[
+              SelectableText(grantCode),
+              TextButton(
+                onPressed: () => copyToClipboard(grantCode),
+                child: Text(
+                  widget.strings(copied == grantCode ? "copied" : "copy"),
+                ),
+              ),
+            ],
+            TextButton(
+              onPressed: resetShareFlow,
+              child: Text(widget.strings("share_another")),
+            ),
+          ] else ...[
+            TextField(
+              controller: peerIdentity,
+              decoration: InputDecoration(
+                labelText: widget.strings("paste_identity"),
+              ),
+            ),
+            FilledButton(
+              key: const Key("share-continue-button"),
+              onPressed: sharingBusy ? null : requestShareConfirmation,
+              child: Text(widget.strings("generate_share_code")),
             ),
           ],
           const Divider(height: 32),
@@ -1920,16 +2091,29 @@ class _ServerSheetState extends State<ServerSheet> {
             widget.strings("join_workspace"),
             style: Theme.of(context).textTheme.titleMedium,
           ),
-          TextField(
-            controller: peerGrant,
-            decoration: InputDecoration(
-              labelText: widget.strings("paste_grant"),
+          if (joinSucceeded) ...[
+            Text(
+              widget.strings("join_success_title"),
+              style: Theme.of(context).textTheme.titleSmall,
             ),
-          ),
-          FilledButton(
-            onPressed: sharingBusy ? null : acceptWorkspaceGrant,
-            child: Text(widget.strings("join")),
-          ),
+            Text(widget.strings("join_success_description")),
+            FilledButton(
+              onPressed: finishJoinFlow,
+              child: Text(widget.strings("close")),
+            ),
+          ] else ...[
+            TextField(
+              controller: peerGrant,
+              decoration: InputDecoration(
+                labelText: widget.strings("paste_grant"),
+              ),
+            ),
+            FilledButton(
+              key: const Key("join-continue-button"),
+              onPressed: sharingBusy ? null : requestJoinConfirmation,
+              child: Text(widget.strings("join")),
+            ),
+          ],
         ],
       ),
     );
@@ -1938,6 +2122,32 @@ class _ServerSheetState extends State<ServerSheet> {
   Future<void> copyToClipboard(String text) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) setState(() => copied = text);
+  }
+
+  // Confirms granting access before shareWorkspace() ever runs - matching
+  // the delete-notebook AlertDialog confirmation pattern above rather
+  // than an inline button that could grant access on a single tap.
+  Future<void> requestShareConfirmation() async {
+    if (peerIdentity.text.trim().isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(widget.strings("share_confirm_title")),
+            content: Text(widget.strings("share_confirm_description")),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(widget.strings("share_confirm_button")),
+              ),
+            ],
+          ),
+    );
+    if (confirmed == true) await shareWorkspace();
   }
 
   Future<void> shareWorkspace() async {
@@ -1964,6 +2174,38 @@ class _ServerSheetState extends State<ServerSheet> {
     }
   }
 
+  void resetShareFlow() {
+    setState(() {
+      grantCode = "";
+      showGrantCode = false;
+    });
+  }
+
+  // Confirms joining before acceptWorkspaceGrant() ever runs - same
+  // AlertDialog pattern as requestShareConfirmation above.
+  Future<void> requestJoinConfirmation() async {
+    if (peerGrant.text.trim().isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: Text(widget.strings("join_confirm_title")),
+            content: Text(widget.strings("join_confirm_description")),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(widget.strings("cancel")),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(widget.strings("join_confirm_button")),
+              ),
+            ],
+          ),
+    );
+    if (confirmed == true) await acceptWorkspaceGrant();
+  }
+
   Future<void> acceptWorkspaceGrant() async {
     setState(() {
       sharingBusy = true;
@@ -1973,13 +2215,12 @@ class _ServerSheetState extends State<ServerSheet> {
       await widget.gateway.acceptWorkspaceGrant(peerGrant.text.trim());
       final synchronized = await waitForInitialWorkspaceSync();
       if (!mounted) return;
-      setState(() => peerGrant.clear());
+      setState(() {
+        peerGrant.clear();
+        joinSucceeded = true;
+        error = synchronized ? null : widget.strings("workspace_sync_pending");
+      });
       await loadWorkspaces();
-      if (!mounted) return;
-      if (synchronized && context.mounted) Navigator.pop(context);
-      if (!synchronized) {
-        setState(() => error = widget.strings("workspace_sync_pending"));
-      }
     } catch (failure) {
       if (mounted) {
         setState(() => error = describeFailure(widget.strings, failure));
@@ -1987,6 +2228,15 @@ class _ServerSheetState extends State<ServerSheet> {
     } finally {
       if (mounted) setState(() => sharingBusy = false);
     }
+  }
+
+  // Dismisses the sheet from the join wizard's plain-language success
+  // state, once the user has actually seen it - replacing the previous
+  // behavior of popping the sheet immediately and silently on a
+  // successful join, with no success state ever shown to the user.
+  void finishJoinFlow() {
+    setState(() => joinSucceeded = false);
+    if (context.mounted) Navigator.pop(context);
   }
 
   Future<void> setActiveWorkspace(String workspaceID) async {

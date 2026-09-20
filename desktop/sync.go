@@ -85,7 +85,7 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 		if err != nil {
 			return ServerConnectionInfo{}, mapError(err)
 		}
-		if err := httpTransport.Register(ctx, transport.RegistrationRequest{InviteCode: request.InviteCode, DeviceName: request.DeviceName, Data: registration}); err != nil {
+		if err := httpTransport.Register(ctx, transport.RegistrationRequest{InviteCode: request.InviteCode, DeviceName: request.DeviceName, Platform: "windows", Data: registration}); err != nil {
 			return ServerConnectionInfo{}, mapError(err)
 		}
 	}

@@ -350,7 +350,10 @@ describe("Shell", () => {
     await userEvent.setup().click(await screen.findByRole("button", { name: "sync.open_button" }));
 
     const dialog = await screen.findByRole("dialog", { name: "sync.title" });
-    expect(within(dialog).getByText("device-local")).toBeInTheDocument();
+    // The raw device ID is a protocol identifier and stays out of this
+    // primary view (specs/identity-and-sharing's "Understandable device
+    // inventory"); "This device" is what identifies it here.
+    expect(within(dialog).getByText("sync.this_device")).toBeInTheDocument();
     // The topbar's own compact status pill (task: passive sync status
     // instead of a plain button) now shows this same
     // "sync.status_local_only" text outside the dialog too, so this must

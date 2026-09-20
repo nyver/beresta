@@ -341,6 +341,8 @@ class MainActivity : FlutterFragmentActivity() {
             "acceptWorkspaceGrant" -> service.acceptWorkspaceGrant(requestId, required(call, "grantCode"))
             "listWorkspaces" -> service.listWorkspaces(requestId)
             "setActiveWorkspace" -> service.setActiveWorkspace(requestId, required(call, "workspaceId"))
+            "listSyncDevices" -> service.listSyncDevices(requestId)
+            "revokeSyncDevice" -> service.revokeSyncDevice(requestId, required(call, "deviceId"))
             "pollEvents" -> service.pollEvents((call.argument<Number>("afterSequence")?.toLong() ?: 0L), 64L)
             "createBackup" -> BackupDestination.createManual(this, service, requestId)
             "estimateBackupSize" -> service.estimateBackupSize()

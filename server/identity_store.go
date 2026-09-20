@@ -32,6 +32,11 @@ type Registration struct {
 	AuthorityPublic   []byte `json:"authority_public"`
 	DeviceID          string `json:"device_id"`
 	DeviceName        string `json:"device_name"`
+	// Platform is a coarse, closed-set client OS identifier ("windows",
+	// "android") shown in the understandable device inventory; it carries
+	// no protocol meaning and is never validated against a fixed list here,
+	// since an unrecognized value only degrades to "unknown platform" in UI.
+	Platform          string `json:"platform"`
 	SigningPublic     []byte `json:"signing_public"`
 	WorkspaceID       string `json:"workspace_id"`
 	WorkspaceKeyID    string `json:"workspace_key_id"`
@@ -146,10 +151,14 @@ func (s *Storage) Register(ctx context.Context, request Registration, now time.T
 			request.AuthorityPublic, s.config.Limits.UserQuotaBytes, unixNow(now)); err != nil {
 			return RegistrationResult{}, classifyConstraint(err)
 		}
+		var platform any
+		if request.Platform != "" {
+			platform = request.Platform
+		}
 		if _, err := transaction.ExecContext(ctx, `
-			INSERT INTO devices(device_id, user_id, display_name, signing_public, created_at)
-			VALUES (?, ?, ?, ?, ?)`, request.DeviceID, request.UserID, request.DeviceName,
-			request.SigningPublic, unixNow(now)); err != nil {
+			INSERT INTO devices(device_id, user_id, display_name, signing_public, platform, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, request.DeviceID, request.UserID, request.DeviceName,
+			request.SigningPublic, platform, unixNow(now)); err != nil {
 			return RegistrationResult{}, classifyConstraint(err)
 		}
 		if _, err := transaction.ExecContext(ctx, `
@@ -189,6 +198,7 @@ func validateRegistration(request Registration) error {
 		return err
 	}
 	if len(request.InviteCode) < 40 || len(request.InviteCode) > 128 || len(request.DeviceName) == 0 || len(request.DeviceName) > 200 ||
+		len(request.Platform) > 32 ||
 		len(request.IdentityPublic) != 32 || len(request.AuthorityPublic) != 32 || len(request.SigningPublic) != ed25519.PublicKeySize ||
 		allZero(request.IdentityPublic) || allZero(request.AuthorityPublic) || allZero(request.SigningPublic) ||
 		len(request.WorkspaceEnvelope) == 0 || len(request.KeybagCiphertext) == 0 {
@@ -291,6 +301,13 @@ func (s *Storage) verifyChallenge(ctx context.Context, proof ChallengeProof, rep
 		}
 		if !ed25519.Verify(ed25519.PublicKey(signingPublic), message, proof.Signature) {
 			return Session{}, ErrUnauthorized
+		}
+		// Every successful challenge verification issues (or refreshes) a
+		// session, so this is the natural point to record device activity
+		// for the understandable device inventory's "last seen" column.
+		if _, err := transaction.ExecContext(ctx, `
+			UPDATE devices SET last_seen_at = ? WHERE device_id = ?`, unixNow(now), proof.DeviceID); err != nil {
+			return Session{}, err
 		}
 		result, err := transaction.ExecContext(ctx, `
 			UPDATE challenges SET consumed_at = ? WHERE challenge_id = ? AND consumed_at IS NULL`, unixNow(now), proof.ChallengeID)

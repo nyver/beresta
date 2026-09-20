@@ -100,6 +100,17 @@ abstract interface class CoreGateway {
   Future<List<Map<String, dynamic>>> listWorkspaces();
   Future<void> setActiveWorkspace(String workspaceId);
 
+  /// Lists this account's own registered devices for the understandable
+  /// device inventory (task 7.8) - name, platform, last-seen time, and
+  /// revocation state, matching desktop's SyncDevice. Never a raw device ID
+  /// or public key: those are protocol identifiers kept out of this list.
+  Future<List<Map<String, dynamic>>> listSyncDevices();
+
+  /// Disconnects deviceId from this account. Callers must show the
+  /// future-access-only disclosure and get explicit confirmation first -
+  /// this call itself performs no confirmation.
+  Future<void> revokeSyncDevice(String deviceId);
+
   /// Launches the Android content-URI picker (Storage Access Framework)
   /// and, once an image is chosen, stages/encrypts/publishes it as an
   /// attachment on noteId. Throws a PlatformException with code "canceled"
@@ -384,6 +395,14 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<void> setActiveWorkspace(String workspaceId) =>
       _invoke("setActiveWorkspace", {"workspaceId": workspaceId});
+
+  @override
+  Future<List<Map<String, dynamic>>> listSyncDevices() async =>
+      _list(await _invoke("listSyncDevices"));
+
+  @override
+  Future<void> revokeSyncDevice(String deviceId) =>
+      _invoke("revokeSyncDevice", {"deviceId": deviceId});
 
   @override
   Future<void> capturePhoto(String noteId) =>

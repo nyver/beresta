@@ -1290,7 +1290,7 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 		if err != nil {
 			return err
 		}
-		if err := remote.Register(ctx, transport.RegistrationRequest{InviteCode: config.InviteCode, DeviceName: config.DeviceName, Data: registration}); err != nil {
+		if err := remote.Register(ctx, transport.RegistrationRequest{InviteCode: config.InviteCode, DeviceName: config.DeviceName, Platform: "android", Data: registration}); err != nil {
 			return err
 		}
 	}

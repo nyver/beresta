@@ -6,6 +6,7 @@ import "package:flutter/material.dart";
 import "package:flutter/services.dart" show PlatformException;
 import "package:flutter_quill/flutter_quill.dart";
 import "package:flutter_test/flutter_test.dart";
+import "package:qr_flutter/qr_flutter.dart";
 
 void main() {
   testWidgets("onboarding is local-first and switches language", (
@@ -727,6 +728,191 @@ void main() {
   );
 
   testWidgets(
+    "shares the workspace from a pasted identity code only after explicit confirmation, then shows a QR success state (task 7.7)",
+    (tester) async {
+      // A tall surface keeps every section of this long sheet already
+      // built (a plain ListView only builds visible + cache-extent
+      // children), so this test can assert on later sections without a
+      // brittle sequence of scroll-then-tap steps.
+      await tester.binding.setSurfaceSize(const Size(400, 3000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final gateway = FakeGateway(unlocked: true);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.cloud_outlined));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextField, "Paste their identity code"),
+        "beresta://identity?user=peer&key=00",
+      );
+      await tester.tap(find.byKey(const Key("share-continue-button")));
+      await tester.pumpAndSettle();
+
+      // Not shared yet: an explicit confirmation dialog sits between
+      // pasting the code and actually granting access.
+      expect(
+        find.textContaining("They will be able to read and change"),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.widgetWithText(FilledButton, "Confirm and generate code"),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text("Ready to share."), findsOneWidget);
+      expect(find.byType(QrImageView), findsWidgets);
+      // The grant code text itself stays behind "Show code".
+      expect(
+        find.text("beresta://grant?workspace=fake&key=00&authority=00&sig=00"),
+        findsNothing,
+      );
+      await tester.tap(find.byKey(const Key("grant-show-code-button")));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text("beresta://grant?workspace=fake&key=00&authority=00&sig=00"),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    "joins a shared workspace from a pasted grant code only after explicit confirmation, then shows a plain-language success state (task 7.7)",
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(400, 3000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final gateway = FakeGateway(unlocked: true)..syncStatusValue = "current";
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      // "current" status renders as a filled cloud icon, not the default
+      // outlined one - see syncStatusIcon in app.dart.
+      await tester.tap(find.byIcon(Icons.cloud_done_outlined));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextField, "Paste their grant code"),
+        "beresta://grant?workspace=w&key=k&authority=a&sig=s",
+      );
+      await tester.tap(find.byKey(const Key("join-continue-button")));
+      await tester.pumpAndSettle();
+
+      // Not joined yet: an explicit confirmation dialog sits between
+      // pasting the code and actually joining.
+      expect(find.text("Join this workspace?"), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, "Confirm and join"));
+      await tester.pumpAndSettle();
+
+      expect(find.text("You're connected."), findsOneWidget);
+      expect(
+        find.text("This device now has access to the shared workspace."),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.widgetWithText(FilledButton, "Close"));
+      await tester.pumpAndSettle();
+
+      // Dismissed the sheet instead of leaving the success state open.
+      expect(find.text("You're connected."), findsNothing);
+    },
+  );
+
+  testWidgets(
+    "shows understandable device names, platform, last seen, and access state, hiding the raw device ID (task 7.8)",
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(400, 3000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final gateway = FakeGateway(unlocked: true)
+        ..syncDevicesToReturn = [
+          {
+            "device_id": "device-local",
+            "display_name": "This device",
+            "platform": "android",
+            "created_at": "2026-01-01T00:00:00Z",
+          },
+          {
+            "device_id": "device-remote",
+            "display_name": "Kitchen tablet",
+            "platform": "android",
+            "created_at": "2026-01-01T00:00:00Z",
+            "last_seen_at": "2026-02-03T04:05:00Z",
+          },
+          {
+            "device_id": "device-old",
+            "display_name": "Old laptop",
+            "platform": "windows",
+            "created_at": "2026-01-01T00:00:00Z",
+            "revoked_at": "2026-02-01T00:00:00Z",
+          },
+        ];
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.cloud_outlined));
+      await tester.pumpAndSettle();
+
+      expect(find.text("This device"), findsOneWidget);
+      expect(find.text("Local"), findsOneWidget);
+      expect(find.text("Kitchen tablet"), findsOneWidget);
+      expect(find.text("Old laptop"), findsOneWidget);
+      expect(find.text("Revoked"), findsOneWidget);
+      expect(
+        find.widgetWithText(TextButton, "Disconnect"),
+        findsOneWidget,
+      );
+      // The device_id itself is a protocol identifier and must not appear
+      // in this primary list (specs/identity-and-sharing's "Understandable
+      // device inventory").
+      expect(find.text("device-remote"), findsNothing);
+      expect(find.text("device-old"), findsNothing);
+    },
+  );
+
+  testWidgets(
+    "disconnects a device only after confirming the revocation limitation disclosure (task 7.8)",
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(400, 3000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final gateway = FakeGateway(unlocked: true)
+        ..syncDevicesToReturn = [
+          {
+            "device_id": "device-local",
+            "display_name": "This device",
+            "platform": "android",
+            "created_at": "2026-01-01T00:00:00Z",
+          },
+          {
+            "device_id": "device-remote",
+            "display_name": "Kitchen tablet",
+            "platform": "android",
+            "created_at": "2026-01-01T00:00:00Z",
+          },
+        ];
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.cloud_outlined));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, "Disconnect"));
+      await tester.pumpAndSettle();
+
+      expect(gateway.revokedSyncDeviceIds, isEmpty);
+      expect(
+        find.textContaining("cannot erase notes or keys"),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.widgetWithText(FilledButton, "Disconnect"));
+      await tester.pumpAndSettle();
+
+      expect(gateway.revokedSyncDeviceIds, ["device-remote"]);
+    },
+  );
+
+  testWidgets(
     "backup sheet shows the catalog's health, last verified time, and location",
     (tester) async {
       final gateway = FakeGateway(unlocked: true)
@@ -1019,6 +1205,7 @@ class FakeGateway implements CoreGateway {
   bool unlocked;
   bool accountExists = false;
   bool deviceUnlockAvailable = false;
+  String deviceId = "device-local";
   int deviceUnlockCalls = 0;
   Object? deviceUnlockError;
   String savedBody = "";
@@ -1052,6 +1239,7 @@ class FakeGateway implements CoreGateway {
   @override
   Future<Map<String, dynamic>> status() async => {
     "unlocked": unlocked,
+    "device_id": deviceId,
     "account_exists": accountExists,
     "device_unlock_available": deviceUnlockAvailable,
   };
@@ -1279,6 +1467,16 @@ class FakeGateway implements CoreGateway {
   @override
   Future<void> setActiveWorkspace(String workspaceId) async {
     onSetActiveWorkspace?.call(workspaceId);
+  }
+
+  List<Map<String, dynamic>> syncDevicesToReturn = [];
+  final List<String> revokedSyncDeviceIds = [];
+  @override
+  Future<List<Map<String, dynamic>>> listSyncDevices() async =>
+      syncDevicesToReturn;
+  @override
+  Future<void> revokeSyncDevice(String deviceId) async {
+    revokedSyncDeviceIds.add(deviceId);
   }
 
   int capturePhotoCalls = 0;

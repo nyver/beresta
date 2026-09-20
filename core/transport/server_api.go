@@ -14,7 +14,12 @@ import (
 type RegistrationRequest struct {
 	InviteCode string
 	DeviceName string
-	Data       account.ServerRegistration
+	// Platform is a coarse, closed-set client identifier ("windows",
+	// "android") the understandable device inventory shows next to a
+	// device's name. Optional: an empty value degrades to "unknown
+	// platform" in UI rather than failing registration.
+	Platform string
+	Data     account.ServerRegistration
 }
 
 func (h *HTTP) Register(ctx context.Context, request RegistrationRequest) error {
@@ -28,6 +33,7 @@ func (h *HTTP) Register(ctx context.Context, request RegistrationRequest) error 
 		AuthorityPublic   []byte `json:"authority_public"`
 		DeviceID          string `json:"device_id"`
 		DeviceName        string `json:"device_name"`
+		Platform          string `json:"platform"`
 		SigningPublic     []byte `json:"signing_public"`
 		WorkspaceID       string `json:"workspace_id"`
 		WorkspaceKeyID    string `json:"workspace_key_id"`
@@ -35,7 +41,7 @@ func (h *HTTP) Register(ctx context.Context, request RegistrationRequest) error 
 		KeybagCiphertext  []byte `json:"keybag_ciphertext"`
 	}{
 		request.InviteCode, request.Data.UserID.String(), request.Data.IdentityPublic, request.Data.AuthorityPublic,
-		request.Data.DeviceID.String(), request.DeviceName, request.Data.SigningPublic, request.Data.WorkspaceID.String(),
+		request.Data.DeviceID.String(), request.DeviceName, request.Platform, request.Data.SigningPublic, request.Data.WorkspaceID.String(),
 		hex.EncodeToString(request.Data.WorkspaceKeyID), request.Data.WorkspaceEnvelope, request.Data.KeybagCiphertext,
 	}
 	var response struct {
@@ -83,7 +89,9 @@ type RemoteDevice struct {
 	UserID        string     `json:"user_id"`
 	DisplayName   string     `json:"display_name"`
 	SigningPublic []byte     `json:"signing_public"`
+	Platform      string     `json:"platform,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
+	LastSeenAt    *time.Time `json:"last_seen_at,omitempty"`
 	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
 }
 

@@ -22,8 +22,8 @@ func TestInitializeCreatesDurableServerStateAndIsIdempotent(t *testing.T) {
 	if err := first.Database.QueryRow("SELECT count(*) FROM server_schema_migrations").Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if migrations != 3 {
-		t.Fatalf("migration count = %d, want 3", migrations)
+	if migrations != 4 {
+		t.Fatalf("migration count = %d, want 4", migrations)
 	}
 	if concurrent, err := Initialize(context.Background(), cfg); err == nil {
 		concurrent.Close()

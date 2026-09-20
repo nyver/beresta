@@ -29,6 +29,8 @@ import {
 } from "../api";
 import { useI18n } from "../i18n";
 import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
+import { Modal } from "./Modal";
+import { QrCode } from "./QrCode";
 
 const EVENT_SYNC_SUMMARY = "sync:summary";
 const EVENT_WORKSPACE_CHANGED = "workspace:changed";
@@ -58,6 +60,26 @@ const KNOWN_QUARANTINE_REASONS = [
 function quarantineReasonMessage(t: (key: string) => string, reason: string): string {
   const known = (KNOWN_QUARANTINE_REASONS as readonly string[]).includes(reason);
   return t(`sync.quarantine_reason_${known ? reason : "unknown"}`);
+}
+
+// KNOWN_DEVICE_PLATFORMS is the closed set core/transport.RegistrationRequest
+// currently sends (see desktop/sync.go and core/mobileapi/service.go); an
+// absent or unrecognized value degrades to "unknown platform" rather than
+// showing a raw string, matching quarantineReasonMessage's pattern above.
+const KNOWN_DEVICE_PLATFORMS = ["windows", "android"] as const;
+
+function devicePlatformLabel(t: (key: string) => string, platform: string | undefined): string {
+  const known = !!platform && (KNOWN_DEVICE_PLATFORMS as readonly string[]).includes(platform);
+  return t(`sync.device_platform_${known ? platform : "unknown"}`);
+}
+
+// deviceLastSeenLabel renders a device's last authenticated session time
+// (specs/identity-and-sharing's "last-seen time when available"): older
+// server deployments and devices that have not refreshed a session since
+// this field was added report no value, which reads as "Never" rather than
+// a missing/blank field.
+function deviceLastSeenLabel(t: (key: string) => string, lastSeenAt: string | undefined): string {
+  return lastSeenAt ? new Date(lastSeenAt).toLocaleString() : t("diagnostics.never_label");
 }
 
 export interface SyncPanelProps {
@@ -102,6 +124,24 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
   const [peerGrantCode, setPeerGrantCode] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [sharingBusy, setSharingBusy] = useState(false);
+  // Guided pairing wizard state (task 7.7): "Your identity code" and the
+  // resulting grant code are QR-first, with the raw opaque text hidden
+  // behind these toggles rather than shown as primary-flow content (see
+  // specs/identity-and-sharing's "hides key envelopes and public keys
+  // from the primary flow"). Sharing/joining stage through an explicit
+  // confirmation before the corresponding core call ever runs.
+  const [showIdentityCode, setShowIdentityCode] = useState(false);
+  const [showGrantCode, setShowGrantCode] = useState(false);
+  const [shareStage, setShareStage] = useState<"input" | "confirm" | "success">("input");
+  const [joinStage, setJoinStage] = useState<"input" | "confirm" | "success">("input");
+  // Revoking a device or a workspace member always shows the same
+  // disclosure before it runs (specs/identity-and-sharing's "Revocation
+  // limitation disclosure": future access only, cannot erase already-
+  // downloaded data) - see confirmRevoke below, which is the only caller
+  // of revokeSyncDevice/revokeWorkspaceMember in this component.
+  const [revokeTarget, setRevokeTarget] = useState<
+    { kind: "device"; deviceId: string; name: string } | { kind: "member"; workspaceId: string; userId: string; name: string } | null
+  >(null);
 
   const loadDetails = useCallback(async (nextStatus: SyncState) => {
     if (nextStatus === "local_only") {
@@ -173,6 +213,18 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
     return () => { EventsOff(EVENT_SYNC_SUMMARY); EventsOff(EVENT_WORKSPACE_CHANGED); };
   }, [loadConnection, loadStatus, onWorkspaceChanged]);
 
+  // Moves the share wizard from "input" to an explicit confirmation step
+  // without granting anything yet - shareWorkspace() only ever runs from
+  // handleShareWorkspace below, after the user confirms.
+  function requestShareConfirmation() {
+    if (!peerIdentityCode.trim()) return;
+    setShareStage("confirm");
+  }
+
+  function cancelShareConfirmation() {
+    setShareStage("input");
+  }
+
   async function handleShareWorkspace() {
     setSharingBusy(true);
     setError(null);
@@ -180,9 +232,26 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
       const code = await shareWorkspace(peerIdentityCode.trim());
       setGrantCode(code);
       setPeerIdentityCode("");
+      setShareStage("success");
     } catch (thrown) {
       setError(errorMessage(unwrapError(thrown)));
+      setShareStage("input");
     } finally { setSharingBusy(false); }
+  }
+
+  function resetShareFlow() {
+    setShareStage("input");
+    setGrantCode("");
+    setShowGrantCode(false);
+  }
+
+  function requestJoinConfirmation() {
+    if (!peerGrantCode.trim()) return;
+    setJoinStage("confirm");
+  }
+
+  function cancelJoinConfirmation() {
+    setJoinStage("input");
   }
 
   async function handleAcceptWorkspaceGrant() {
@@ -191,11 +260,17 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
     try {
       await acceptWorkspaceGrant(peerGrantCode.trim());
       setPeerGrantCode("");
+      setJoinStage("success");
       loadStatus();
       onWorkspaceChanged?.();
     } catch (thrown) {
       setError(errorMessage(unwrapError(thrown)));
+      setJoinStage("input");
     } finally { setSharingBusy(false); }
+  }
+
+  function resetJoinFlow() {
+    setJoinStage("input");
   }
 
   async function handleSwitchWorkspace(workspaceId: string) {
@@ -211,11 +286,17 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
     } finally { setSharingBusy(false); }
   }
 
-  async function handleRevokeWorkspaceMember(workspaceId: string, memberUserId: string) {
+  async function confirmRevoke() {
+    if (!revokeTarget) return;
     setSharingBusy(true);
     setError(null);
     try {
-      await revokeWorkspaceMember(workspaceId, memberUserId);
+      if (revokeTarget.kind === "device") {
+        await revokeSyncDevice(revokeTarget.deviceId);
+      } else {
+        await revokeWorkspaceMember(revokeTarget.workspaceId, revokeTarget.userId);
+      }
+      setRevokeTarget(null);
       await loadStatus();
     } catch (thrown) {
       setError(errorMessage(unwrapError(thrown)));
@@ -380,9 +461,32 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
 
       <section aria-labelledby="sync-devices-title">
         <h3 id="sync-devices-title">{t("sync.devices_title")}</h3>
-        <div className="sync-device-row"><div><strong>{t("sync.this_device")}</strong><code>{deviceId}</code></div><span>{t("sync.device_local_badge")}</span></div>
+        <div className="sync-device-row">
+          <div>
+            <strong>{t("sync.this_device")}</strong>
+            <p>{devicePlatformLabel(t, devices.find((device) => device.device_id === deviceId)?.platform)}</p>
+          </div>
+          <span>{t("sync.device_local_badge")}</span>
+        </div>
         {devices.filter((device) => device.device_id !== deviceId).map((device) => (
-          <div className="sync-device-row" key={device.device_id}><div><strong>{device.display_name}</strong><code>{device.device_id}</code></div>{device.revoked_at ? <span>{t("sync.device_revoked_badge")}</span> : <button type="button" onClick={() => void revokeSyncDevice(device.device_id).then(loadStatus)}>{t("sync.revoke_device_button")}</button>}</div>
+          <div className="sync-device-row" key={device.device_id}>
+            <div>
+              <strong>{device.display_name}</strong>
+              <p>
+                {devicePlatformLabel(t, device.platform)} · {t("sync.device_last_seen_label")}: {deviceLastSeenLabel(t, device.last_seen_at)}
+              </p>
+            </div>
+            {device.revoked_at ? (
+              <span>{t("sync.device_revoked_badge")}</span>
+            ) : (
+              <>
+                <span>{t("sync.device_active_badge")}</span>
+                <button type="button" onClick={() => setRevokeTarget({ kind: "device", deviceId: device.device_id, name: device.display_name })}>
+                  {t("sync.revoke_device_button")}
+                </button>
+              </>
+            )}
+          </div>
         ))}
         {status === "local_only" && <p>{t("sync.devices_unavailable")}</p>}
       </section>
@@ -410,16 +514,24 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
                   </button>
                 )}
               </div>
-              {workspace.role === "owner" && workspaceMembers[workspace.workspace_id]
-                ?.filter((member) => !member.revoked_at)
-                .map((member) => (
+              {workspace.role === "owner" && workspaceMembers[workspace.workspace_id]?.map((member) => (
                   <div className="sync-device-row" key={member.user_id}>
                     <div>
                       <strong>{member.display_name || t("sync.workspace_client_unnamed")}</strong>
-                      <code>{member.user_id}</code>
                     </div>
-                    {member.role === "owner" ? <span>{t("sync.workspace_owner_badge")}</span> : (
-                      <button type="button" disabled={sharingBusy} onClick={() => void handleRevokeWorkspaceMember(workspace.workspace_id, member.user_id)}>
+                    {member.role === "owner" ? (
+                      <span>{t("sync.workspace_owner_badge")}</span>
+                    ) : member.revoked_at ? (
+                      <span>{t("sync.device_revoked_badge")}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={sharingBusy}
+                        onClick={() => setRevokeTarget({
+                          kind: "member", workspaceId: workspace.workspace_id, userId: member.user_id,
+                          name: member.display_name || t("sync.workspace_client_unnamed"),
+                        })}
+                      >
                         {t("sync.workspace_remove_member_button")}
                       </button>
                     )}
@@ -431,49 +543,129 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
           <div className="sync-connect-form">
             <h4>{t("sync.export_identity_title")}</h4>
             <p>{t("sync.export_identity_description")}</p>
-            <label>
-              {t("sync.export_identity_title")}
-              <textarea readOnly value={identityCode} onFocus={(event) => event.currentTarget.select()} />
-            </label>
-            <button type="button" onClick={() => void handleCopy(identityCode)} disabled={!identityCode}>
-              {copied === identityCode ? t("sync.copied_label") : t("sync.copy_button")}
+            {identityCode ? <QrCode value={identityCode} alt={t("sync.qr_alt_identity")} /> : null}
+            <button type="button" onClick={() => setShowIdentityCode((current) => !current)} disabled={!identityCode}>
+              {showIdentityCode ? t("sync.hide_code_button") : t("sync.show_code_button")}
             </button>
-          </div>
-
-          <div className="sync-connect-form">
-            <h4>{t("sync.share_workspace_title")}</h4>
-            <label>
-              {t("sync.paste_identity_label")}
-              <textarea value={peerIdentityCode} onChange={(event) => setPeerIdentityCode(event.target.value)} />
-            </label>
-            <button type="button" disabled={sharingBusy || !peerIdentityCode} onClick={() => void handleShareWorkspace()}>
-              {t("sync.share_workspace_button")}
-            </button>
-            {grantCode ? (
+            {showIdentityCode ? (
               <>
                 <label>
-                  {t("sync.grant_code_label")}
-                  <textarea readOnly value={grantCode} onFocus={(event) => event.currentTarget.select()} />
+                  {t("sync.export_identity_title")}
+                  <textarea readOnly value={identityCode} onFocus={(event) => event.currentTarget.select()} />
                 </label>
-                <p>{t("sync.grant_code_description")}</p>
-                <button type="button" onClick={() => void handleCopy(grantCode)}>
-                  {copied === grantCode ? t("sync.copied_label") : t("sync.copy_button")}
+                <button type="button" onClick={() => void handleCopy(identityCode)} disabled={!identityCode}>
+                  {copied === identityCode ? t("sync.copied_label") : t("sync.copy_button")}
                 </button>
               </>
             ) : null}
           </div>
 
           <div className="sync-connect-form">
+            <h4>{t("sync.share_workspace_title")}</h4>
+            {shareStage === "success" ? (
+              <>
+                <p role="status">
+                  <strong>{t("sync.share_success_title")}</strong> {t("sync.share_success_description")}
+                </p>
+                <QrCode value={grantCode} alt={t("sync.qr_alt_grant")} />
+                <button type="button" onClick={() => setShowGrantCode((current) => !current)}>
+                  {showGrantCode ? t("sync.hide_code_button") : t("sync.show_code_button")}
+                </button>
+                {showGrantCode ? (
+                  <>
+                    <label>
+                      {t("sync.grant_code_label")}
+                      <textarea readOnly value={grantCode} onFocus={(event) => event.currentTarget.select()} />
+                    </label>
+                    <button type="button" onClick={() => void handleCopy(grantCode)}>
+                      {copied === grantCode ? t("sync.copied_label") : t("sync.copy_button")}
+                    </button>
+                  </>
+                ) : null}
+                <button type="button" onClick={resetShareFlow}>
+                  {t("sync.share_another_button")}
+                </button>
+              </>
+            ) : shareStage === "confirm" ? (
+              <>
+                <p role="alert">
+                  <strong>{t("sync.share_confirm_title")}</strong> {t("sync.share_confirm_description")}
+                </p>
+                <button type="button" disabled={sharingBusy} onClick={() => void handleShareWorkspace()}>
+                  {t("sync.share_confirm_button")}
+                </button>
+                <button type="button" disabled={sharingBusy} onClick={cancelShareConfirmation}>
+                  {t("common.cancel")}
+                </button>
+              </>
+            ) : (
+              <>
+                <label>
+                  {t("sync.paste_identity_label")}
+                  <textarea value={peerIdentityCode} onChange={(event) => setPeerIdentityCode(event.target.value)} />
+                </label>
+                <button type="button" disabled={sharingBusy || !peerIdentityCode} onClick={requestShareConfirmation}>
+                  {t("sync.share_workspace_button")}
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="sync-connect-form">
             <h4>{t("sync.join_workspace_title")}</h4>
-            <label>
-              {t("sync.paste_grant_label")}
-              <textarea value={peerGrantCode} onChange={(event) => setPeerGrantCode(event.target.value)} />
-            </label>
-            <button type="button" disabled={sharingBusy || !peerGrantCode} onClick={() => void handleAcceptWorkspaceGrant()}>
-              {t("sync.join_workspace_button")}
-            </button>
+            {joinStage === "success" ? (
+              <>
+                <p role="status">
+                  <strong>{t("sync.join_success_title")}</strong> {t("sync.join_success_description")}
+                </p>
+                <button type="button" onClick={resetJoinFlow}>
+                  {t("common.close")}
+                </button>
+              </>
+            ) : joinStage === "confirm" ? (
+              <>
+                <p role="alert">
+                  <strong>{t("sync.join_confirm_title")}</strong> {t("sync.join_confirm_description")}
+                </p>
+                <button type="button" disabled={sharingBusy} onClick={() => void handleAcceptWorkspaceGrant()}>
+                  {t("sync.join_confirm_button")}
+                </button>
+                <button type="button" disabled={sharingBusy} onClick={cancelJoinConfirmation}>
+                  {t("common.cancel")}
+                </button>
+              </>
+            ) : (
+              <>
+                <label>
+                  {t("sync.paste_grant_label")}
+                  <textarea value={peerGrantCode} onChange={(event) => setPeerGrantCode(event.target.value)} />
+                </label>
+                <button type="button" disabled={sharingBusy || !peerGrantCode} onClick={requestJoinConfirmation}>
+                  {t("sync.join_workspace_button")}
+                </button>
+              </>
+            )}
           </div>
         </section>
+      ) : null}
+
+      {revokeTarget ? (
+        <Modal title={`${t("sync.revoke_confirm_title")}: ${revokeTarget.name}`} onClose={() => setRevokeTarget(null)}>
+          <p>{t("sync.revoke_confirm_description")}</p>
+          <div className="dialog-actions">
+            <button type="button" disabled={sharingBusy} onClick={() => void confirmRevoke()}>
+              {sharingBusy ? t("sync.revoking_label") : t("sync.revoke_confirm_button")}
+            </button>
+            <button type="button" className="link-button" disabled={sharingBusy} onClick={() => setRevokeTarget(null)}>
+              {t("common.cancel")}
+            </button>
+          </div>
+          {error ? (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </Modal>
       ) : null}
     </div>
   );

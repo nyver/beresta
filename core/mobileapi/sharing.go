@@ -3,6 +3,7 @@ package mobileapi
 import (
 	"errors"
 	"sort"
+	"time"
 
 	"github.com/beresta-app/beresta/core/sharecode"
 	"github.com/beresta-app/beresta/core/transport"
@@ -180,6 +181,69 @@ func (s *Service) ListWorkspaces(requestID string) (string, error) {
 		summaries[i] = summary
 	}
 	return marshal(summaries)
+}
+
+// syncDevice is one of this account's own registered devices, mirroring
+// desktop's transport.RemoteDevice fields the understandable device
+// inventory needs (task 7.8). SigningPublic/UserID are intentionally
+// omitted: they are protocol identifiers that belong only in technical
+// diagnostics, never this primary list.
+type syncDevice struct {
+	DeviceID    string `json:"device_id"`
+	DisplayName string `json:"display_name"`
+	Platform    string `json:"platform,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	LastSeenAt  string `json:"last_seen_at,omitempty"`
+	RevokedAt   string `json:"revoked_at,omitempty"`
+}
+
+// ListSyncDevices returns every device registered under this account (see
+// desktop's App.ListSyncDevices for the equivalent).
+func (s *Service) ListSyncDevices(requestID string) (string, error) {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	s.mu.Lock()
+	remote := s.remote
+	s.mu.Unlock()
+	if remote == nil {
+		return "", errors.New("mobileapi: server synchronization is disabled")
+	}
+	devices, err := remote.ListDevices(ctx)
+	if err != nil {
+		return "", err
+	}
+	result := make([]syncDevice, len(devices))
+	for i, device := range devices {
+		result[i] = syncDevice{DeviceID: device.ID, DisplayName: device.DisplayName, Platform: device.Platform, CreatedAt: device.CreatedAt.Format(time.RFC3339)}
+		if device.LastSeenAt != nil {
+			result[i].LastSeenAt = device.LastSeenAt.Format(time.RFC3339)
+		}
+		if device.RevokedAt != nil {
+			result[i].RevokedAt = device.RevokedAt.Format(time.RFC3339)
+		}
+	}
+	return marshal(result)
+}
+
+// RevokeSyncDevice disconnects deviceID from this account (see desktop's
+// App.RevokeSyncDevice for the equivalent). The caller is responsible for
+// confirming the future-access-only disclosure before calling this.
+func (s *Service) RevokeSyncDevice(requestID, deviceID string) error {
+	ctx, done, err := s.begin(requestID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	s.mu.Lock()
+	remote := s.remote
+	s.mu.Unlock()
+	if remote == nil {
+		return errors.New("mobileapi: server synchronization is disabled")
+	}
+	return remote.RevokeDevice(ctx, deviceID)
 }
 
 // SetActiveWorkspace changes which of the account's workspaces

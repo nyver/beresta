@@ -272,7 +272,9 @@ export interface ServerConnectionInfo {
 export interface SyncDevice {
   device_id: string;
   display_name: string;
+  platform?: string;
   created_at: string;
+  last_seen_at?: string;
   revoked_at?: string;
 }
 

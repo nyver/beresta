@@ -13,6 +13,11 @@ import "commit_tracker.dart";
 import "core_gateway.dart";
 import "markdown_delta.dart";
 import "paste_format.dart";
+import "shell/language_control.dart";
+import "shell/note_list_view.dart";
+import "shell/notes_app_bar.dart";
+import "shell/notes_navigation_drawer.dart";
+import "shell/sync_status.dart";
 import "strings.dart";
 
 /// appVersion is this Flutter app's display version, matching
@@ -143,46 +148,6 @@ bool containsQueryToken(String text) {
             word.startsWith("before:") ||
             word == "deleted:true",
       );
-}
-
-/// Maps a core/presentation.SyncState value ("local_only", "current",
-/// "active", "offline", "pending", "retrying", "action_required") - the
-/// same seven-state model desktop renders (see core/syncsummary.Summarize)
-/// - to the icon shown next to it in the sync UI.
-IconData syncStatusIcon(String status) {
-  switch (status) {
-    case "current":
-      return Icons.cloud_done_outlined;
-    case "active":
-      return Icons.cloud_sync_outlined;
-    case "offline":
-    case "retrying":
-      return Icons.cloud_off_outlined;
-    case "pending":
-      return Icons.cloud_upload_outlined;
-    case "action_required":
-      return Icons.error_outline;
-    default:
-      return Icons.cloud_outlined;
-  }
-}
-
-Color syncStatusColor(BuildContext context, String status) {
-  final scheme = Theme.of(context).colorScheme;
-  switch (status) {
-    case "current":
-      return Colors.green;
-    case "active":
-      return scheme.primary;
-    case "offline":
-    case "retrying":
-    case "pending":
-      return Colors.orange;
-    case "action_required":
-      return scheme.error;
-    default:
-      return scheme.onSurfaceVariant;
-  }
 }
 
 class BerestaApp extends StatefulWidget {
@@ -681,7 +646,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       ),
                     ),
                   ),
-                _LanguageControl(
+                LanguageControl(
                   language: widget.language,
                   onChanged: widget.onLanguageChanged,
                 ),
@@ -689,27 +654,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _LanguageControl extends StatelessWidget {
-  const _LanguageControl({required this.language, required this.onChanged});
-
-  final String language;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      child: SegmentedButton<String>(
-        segments: const [
-          ButtonSegment(value: "en", label: Text("EN")),
-          ButtonSegment(value: "ru", label: Text("RU")),
-        ],
-        selected: {language},
-        onSelectionChanged: (value) => onChanged(value.first),
       ),
     );
   }
@@ -960,207 +904,64 @@ class _NotesShellState extends State<NotesShell> {
             )
             .toList();
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.strings("notes")),
-        actions: [
-          IconButton(
-            tooltip: widget.strings("sync"),
-            onPressed: syncingWorkspace ? null : syncCurrentWorkspace,
-            icon:
-                syncingWorkspace
-                    ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                    : const Icon(Icons.sync),
-          ),
-          IconButton(
-            tooltip:
-                "${widget.strings("server")}: "
-                "${widget.strings("sync_status_$syncStatusValue")}",
-            onPressed:
-                () => showSettings(group: SettingsGroup.synchronization),
-            icon: Icon(
-              syncStatusIcon(syncStatusValue),
-              color: syncStatusColor(context, syncStatusValue),
-            ),
-          ),
-          IconButton(
-            tooltip: widget.strings("lock"),
-            onPressed: () async {
-              // Content-first lock ordering (task 7.6): flush before
-              // wiping secrets, matching the automatic background lock
-              // path (AppLifecycleLock) - a no-op today since the editor
-              // route occludes this button while it is open, but this
-              // keeps that true by construction rather than by navigation
-              // topology alone.
-              await ActiveEditorFlush.flushIfAny();
-              await widget.gateway.lock();
-              widget.onLocked();
-            },
-            icon: const Icon(Icons.lock_outline),
-          ),
-          IconButton(
-            tooltip: widget.strings("settings"),
-            onPressed: () => showSettings(),
-            icon: const Icon(Icons.settings_outlined),
-          ),
-        ],
+      appBar: NotesAppBar(
+        strings: widget.strings,
+        syncingWorkspace: syncingWorkspace,
+        syncStatusValue: syncStatusValue,
+        onSync: syncCurrentWorkspace,
+        onShowSyncSettings:
+            () => showSettings(group: SettingsGroup.synchronization),
+        onLock: () async {
+          // Content-first lock ordering (task 7.6): flush before wiping
+          // secrets, matching the automatic background lock path
+          // (AppLifecycleLock) - a no-op today since the editor route
+          // occludes this button while it is open, but this keeps that
+          // true by construction rather than by navigation topology alone.
+          await ActiveEditorFlush.flushIfAny();
+          await widget.gateway.lock();
+          widget.onLocked();
+        },
+        onShowSettings: () => showSettings(),
       ),
-      drawer: NavigationDrawer(
-        onDestinationSelected: (index) {
-          // The only NavigationDrawerDestination below is "Notes" (index 0);
-          // every other drawer row is a plain ListTile and does not count
-          // toward this index.
-          if (index == 0) {
-            setState(() {
+      drawer: NotesNavigationDrawer(
+        strings: widget.strings,
+        notebooks: notebooks,
+        tags: tags,
+        selectedNotebook: selectedNotebook,
+        selectedTag: selectedTag,
+        language: widget.language,
+        onLanguageChanged: widget.onLanguageChanged,
+        onSelectAllNotes:
+            () => setState(() {
               selectedNotebook = null;
               selectedTag = null;
-            });
-            Navigator.pop(context);
-          }
-        },
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 8, 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  widget.strings("notebooks"),
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert),
-                  tooltip: widget.strings("more_actions"),
-                  onSelected: (action) {
-                    if (action == "new_note") {
-                      createNote(notebookId: "", closeDrawer: true);
-                    } else {
-                      createNotebook();
-                    }
-                  },
-                  itemBuilder:
-                      (context) => [
-                        PopupMenuItem(
-                          value: "new_note",
-                          child: Text(widget.strings("new_note")),
-                        ),
-                        PopupMenuItem(
-                          value: "new_notebook",
-                          child: Text(widget.strings("new_notebook")),
-                        ),
-                      ],
-                ),
-              ],
-            ),
-          ),
-          NavigationDrawerDestination(
-            icon: const Icon(Icons.notes),
-            label: Text(widget.strings("notes")),
-          ),
-          ...notebookTree(),
-          const Divider(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(widget.strings("tags")),
-                IconButton(
-                  tooltip: widget.strings("new_tag"),
-                  onPressed: createTag,
-                  icon: const Icon(Icons.add, size: 20),
-                ),
-              ],
-            ),
-          ),
-          ...tags
-              .where((item) => item["deleted"] != true)
-              .map(
-                (item) => ListTile(
-                  leading: const Icon(Icons.tag),
-                  title: Text(item["name"] as String),
-                  selected: selectedTag == item["id"],
-                  onTap: () {
-                    setState(() {
-                      selectedTag =
-                          selectedTag == item["id"]
-                              ? null
-                              : item["id"] as String;
-                    });
-                    Navigator.pop(context);
-                  },
-                  trailing: IconButton(
-                    tooltip: widget.strings("delete"),
-                    icon: const Icon(Icons.close, size: 18),
-                    onPressed: () => deleteTag(item["id"] as String),
-                  ),
-                ),
-              ),
-          ListTile(
-            title: _LanguageControl(
-              language: widget.language,
-              onChanged: widget.onLanguageChanged,
-            ),
-          ),
-        ],
+            }),
+        onSelectNotebook:
+            (id) => setState(() {
+              selectedNotebook = id;
+              selectedTag = null;
+            }),
+        onToggleTag:
+            (id) => setState(() {
+              selectedTag = selectedTag == id ? null : id;
+            }),
+        onNewNote: () => createNote(notebookId: "", closeDrawer: true),
+        onNewNotebook: createNotebook,
+        onAddSubnotebook: (parentId) => createNotebook(parentId: parentId),
+        onRenameNotebook: renameNotebook,
+        onDeleteNotebook: deleteNotebook,
+        onCreateTag: createTag,
+        onDeleteTag: deleteTag,
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: SearchBar(
-              hintText: widget.strings("search"),
-              leading: const Icon(Icons.search),
-              onChanged: runSearch,
-            ),
-          ),
-          if (error != null)
-            MaterialBanner(
-              content: Text(error!),
-              actions: [
-                TextButton(onPressed: refresh, child: const Text("OK")),
-              ],
-            ),
-          Expanded(
-            child:
-                loading
-                    ? const Center(child: CircularProgressIndicator())
-                    : visible.isEmpty
-                    ? Center(child: Text(widget.strings("empty")))
-                    : ListView.builder(
-                      itemCount: visible.length,
-                      itemBuilder: (context, index) {
-                        final note = visible[index];
-                        final title = note["title"] as String;
-                        return ListTile(
-                          leading: Icon(
-                            note["pinned"] == true
-                                ? Icons.push_pin
-                                : Icons.description_outlined,
-                          ),
-                          title: Text(
-                            title.isEmpty ? widget.strings("untitled") : title,
-                          ),
-                          subtitle: Text(
-                            DateTime.fromMillisecondsSinceEpoch(
-                              (note["updated_unix_ms"] as int?) ??
-                                  (note["created_unix_ms"] as int),
-                            ).toLocal().toString(),
-                          ),
-                          trailing: IconButton(
-                            tooltip: widget.strings("move_to_notebook"),
-                            icon: const Icon(Icons.drive_file_move_outline),
-                            onPressed: () => moveNote(note["id"] as String),
-                          ),
-                          onTap: () => openEditor(note["id"] as String),
-                        );
-                      },
-                    ),
-          ),
-        ],
+      body: NoteListBody(
+        strings: widget.strings,
+        notes: visible,
+        loading: loading,
+        error: error,
+        onSearch: runSearch,
+        onDismissError: refresh,
+        onOpenNote: openEditor,
+        onMoveNote: moveNote,
       ),
       floatingActionButton: FloatingActionButton.extended(
         tooltip: widget.strings("new_note"),
@@ -1239,69 +1040,6 @@ class _NotesShellState extends State<NotesShell> {
     );
     await refresh();
     await refreshSyncSummary();
-  }
-
-  List<Widget> notebookTree() {
-    final visibleNotebooks = notebooks.where((item) => item["deleted"] != true);
-    final byParent = <String, List<Map<String, dynamic>>>{};
-    for (final item in visibleNotebooks) {
-      final parent = (item["parent_id"] as String?) ?? "";
-      byParent.putIfAbsent(parent, () => []).add(item);
-    }
-    List<Widget> render(String parentId, int depth) {
-      final children = byParent[parentId] ?? const [];
-      return [
-        for (final item in children) ...[
-          ListTile(
-            contentPadding: EdgeInsets.only(left: 16.0 + depth * 20, right: 4),
-            leading: const Icon(Icons.book_outlined),
-            title: Text(item["name"] as String),
-            selected: selectedNotebook == item["id"],
-            onTap: () {
-              setState(() {
-                selectedNotebook = item["id"] as String;
-                selectedTag = null;
-              });
-              Navigator.pop(context);
-            },
-            trailing: PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
-              onSelected: (action) {
-                switch (action) {
-                  case "add":
-                    createNotebook(parentId: item["id"] as String);
-                  case "rename":
-                    renameNotebook(
-                      item["id"] as String,
-                      item["name"] as String,
-                    );
-                  default:
-                    deleteNotebook(item["id"] as String);
-                }
-              },
-              itemBuilder:
-                  (context) => [
-                    PopupMenuItem(
-                      value: "add",
-                      child: Text(widget.strings("new_notebook")),
-                    ),
-                    PopupMenuItem(
-                      value: "rename",
-                      child: Text(widget.strings("rename")),
-                    ),
-                    PopupMenuItem(
-                      value: "delete",
-                      child: Text(widget.strings("delete")),
-                    ),
-                  ],
-            ),
-          ),
-          ...render(item["id"] as String, depth + 1),
-        ],
-      ];
-    }
-
-    return render("", 0);
   }
 
   Future<void> createNotebook({String parentId = ""}) async {

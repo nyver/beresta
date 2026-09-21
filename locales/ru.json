@@ -404,6 +404,7 @@
   "diagnostics.transport_security_mode_label": "Проверка сертификата",
   "diagnostics.transport_url_label": "URL сервера",
   "diagnostics.migration_version_label": "Версия схемы базы данных",
+  "diagnostics.rotation_pending_label": "Смена ключа рабочего пространства ожидает завершения",
   "diagnostics.none_label": "Нет",
 
   "data_check.action_button": "Проверить мои данные",

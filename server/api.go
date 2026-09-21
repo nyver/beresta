@@ -281,12 +281,19 @@ func (a *API) revokeMember(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (a *API) getKeyEnvelopes(writer http.ResponseWriter, request *http.Request) {
-	result, err := a.storage.GetKeyEnvelopes(request.Context(), principalFrom(request.Context()), chi.URLParam(request, "workspaceID"))
+	workspaceID := chi.URLParam(request, "workspaceID")
+	principal := principalFrom(request.Context())
+	result, err := a.storage.GetKeyEnvelopes(request.Context(), principal, workspaceID)
 	if err != nil {
 		writeAPIError(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"key_envelopes": result})
+	transitions, err := a.storage.GetKeyTransitions(request.Context(), principal, workspaceID)
+	if err != nil {
+		writeAPIError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"key_envelopes": result, "key_transitions": transitions})
 }
 
 func (a *API) listWorkspaceMemberDevices(writer http.ResponseWriter, request *http.Request) {
@@ -302,12 +309,13 @@ func (a *API) rotateWorkspaceKey(writer http.ResponseWriter, request *http.Reque
 	var input struct {
 		KeyID     string             `json:"key_id"`
 		Envelopes []KeyEnvelopeInput `json:"envelopes"`
+		Signature []byte             `json:"signature"`
 	}
 	if !decodeJSON(writer, request, a.config.Limits.MaxOperationBytes*6, &input) {
 		return
 	}
 	workspaceID := chi.URLParam(request, "workspaceID")
-	if err := a.storage.RotateWorkspaceKey(request.Context(), principalFrom(request.Context()), workspaceID, input.KeyID, input.Envelopes, time.Now()); err != nil {
+	if err := a.storage.RotateWorkspaceKey(request.Context(), principalFrom(request.Context()), workspaceID, input.KeyID, input.Envelopes, input.Signature, time.Now()); err != nil {
 		writeAPIError(writer, err)
 		return
 	}

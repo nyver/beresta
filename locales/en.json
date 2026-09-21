@@ -404,6 +404,7 @@
   "diagnostics.transport_security_mode_label": "Certificate verification",
   "diagnostics.transport_url_label": "Server URL",
   "diagnostics.migration_version_label": "Database schema version",
+  "diagnostics.rotation_pending_label": "Workspace key rotation pending",
   "diagnostics.none_label": "None",
 
   "data_check.action_button": "Check my data",

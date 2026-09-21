@@ -166,6 +166,9 @@ func (a *App) collectTechnicalDiagnostics() (presentation.TechnicalDiagnostics, 
 	if version, err := store.SchemaVersion(ctx, acc.DB()); err == nil {
 		technical.MigrationVersion = version
 	}
+	if pending, err := store.KeyRotationPending(ctx, acc.DB(), workspaceID); err == nil {
+		technical.RotationPending = pending
+	}
 	return technical, nil
 }
 

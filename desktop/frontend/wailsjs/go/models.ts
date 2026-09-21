@@ -834,6 +834,7 @@ export namespace main {
 	    transport_security_mode: string;
 	    transport_url: string;
 	    migration_version: number;
+	    rotation_pending: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new TechnicalDiagnosticsDTO(source);
@@ -854,6 +855,7 @@ export namespace main {
 	        this.transport_security_mode = source["transport_security_mode"];
 	        this.transport_url = source["transport_url"];
 	        this.migration_version = source["migration_version"];
+	        this.rotation_pending = source["rotation_pending"];
 	    }
 	}
 	export class UnlockAccountRequest {

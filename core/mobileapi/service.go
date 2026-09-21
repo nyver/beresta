@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/beresta-app/beresta/core/account"
+	"github.com/beresta-app/beresta/core/keyrotation"
 	"github.com/beresta-app/beresta/core/model"
 	"github.com/beresta-app/beresta/core/sharecode"
 	"github.com/beresta-app/beresta/core/store"
@@ -1355,7 +1356,16 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 	var lastCatalogDigest [32]byte
 	var lastReviewed model.ID
 	worker, err := coresync.NewWorker(workspaceID, repository, remote, processor, coresync.WorkerOptions{
-		Prepare: func(ctx context.Context) error { return refreshMobileDevices(ctx, value, remote, workspaceID) },
+		Prepare: func(ctx context.Context) error {
+			if err := refreshMobileDevices(ctx, value, remote, workspaceID); err != nil {
+				return err
+			}
+			// Detects and applies a workspace key rotation a fellow member
+			// initiated (see design.md decision 10). Android currently has
+			// no member-revocation UI of its own, so this device is always
+			// the reactive side, never the trigger.
+			return keyrotation.Reconcile(ctx, value, remote, workspaceID)
+		},
 		Bootstrap: func(ctx context.Context) error {
 			if err := refreshMobileDevices(ctx, value, remote, workspaceID); err != nil {
 				return err

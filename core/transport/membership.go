@@ -144,16 +144,33 @@ func ActiveMemberCount(members []RemoteMember) int {
 	return count
 }
 
+// RemoteKeyTransition is one workspace key rotation's authority signature
+// and signed recipient set, as the server stores it (see
+// server.Storage.GetKeyTransitions). The server never verifies this
+// signature itself; a recipient device verifies it against the rotating
+// owner's AuthorityPublic key (from ListMembers) before trusting a rotated
+// key it did not itself initiate (see core/account.AcceptWorkspaceKeyRotation).
+type RemoteKeyTransition struct {
+	WorkspaceID      string    `json:"workspace_id"`
+	KeyID            string    `json:"key_id"`
+	Signature        []byte    `json:"signature"`
+	RecipientUserIDs []string  `json:"recipient_user_ids"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
 // GetKeyEnvelopes returns every envelope the server has stored for this
-// device's user in one workspace, current and historical.
-func (h *HTTP) GetKeyEnvelopes(ctx context.Context, workspaceID string) ([]RemoteKeyEnvelope, error) {
+// device's user in one workspace (current and historical), along with every
+// recorded key-transition signature for that workspace so a caller can
+// verify a rotation it did not itself initiate.
+func (h *HTTP) GetKeyEnvelopes(ctx context.Context, workspaceID string) ([]RemoteKeyEnvelope, []RemoteKeyTransition, error) {
 	var response struct {
-		KeyEnvelopes []RemoteKeyEnvelope `json:"key_envelopes"`
+		KeyEnvelopes   []RemoteKeyEnvelope   `json:"key_envelopes"`
+		KeyTransitions []RemoteKeyTransition `json:"key_transitions"`
 	}
 	if err := h.doJSON(ctx, http.MethodGet, "/v1/workspaces/"+workspaceID+"/key-envelopes", nil, &response, true); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return response.KeyEnvelopes, nil
+	return response.KeyEnvelopes, response.KeyTransitions, nil
 }
 
 // RotationEnvelope is one recipient's sealed copy of a freshly rotated
@@ -163,12 +180,14 @@ type RotationEnvelope struct {
 	Envelope []byte
 }
 
-// RotateWorkspaceKey publishes a new current workspace key. The server
-// rejects the call unless envelopes cover every currently active member
-// (see server.Storage.RotateWorkspaceKey), so a caller must seal the new key
-// to every active member, including itself, before calling this method.
-func (h *HTTP) RotateWorkspaceKey(ctx context.Context, workspaceID string, keyID []byte, envelopes []RotationEnvelope) error {
-	if len(keyID) == 0 || len(envelopes) == 0 {
+// RotateWorkspaceKey publishes a new current workspace key, authorized by
+// signature (see core/account.BeginWorkspaceKeyRotation's RotationInvitation.
+// Signature). The server rejects the call unless envelopes cover every
+// currently active member (see server.Storage.RotateWorkspaceKey), so a
+// caller must seal the new key to every active member, including itself,
+// before calling this method.
+func (h *HTTP) RotateWorkspaceKey(ctx context.Context, workspaceID string, keyID []byte, envelopes []RotationEnvelope, signature []byte) error {
+	if len(keyID) == 0 || len(envelopes) == 0 || len(signature) == 0 {
 		return errors.New("transport: invalid key rotation")
 	}
 	request := struct {
@@ -177,7 +196,8 @@ func (h *HTTP) RotateWorkspaceKey(ctx context.Context, workspaceID string, keyID
 			UserID   string `json:"user_id"`
 			Envelope []byte `json:"envelope"`
 		} `json:"envelopes"`
-	}{KeyID: hex.EncodeToString(keyID)}
+		Signature []byte `json:"signature"`
+	}{KeyID: hex.EncodeToString(keyID), Signature: signature}
 	for _, envelope := range envelopes {
 		request.Envelopes = append(request.Envelopes, struct {
 			UserID   string `json:"user_id"`

@@ -177,6 +177,7 @@ Metrics are aggregate and optional. Labels must not contain user, workspace, not
 
 - Go is garbage collected. Explicitly wiping an owned byte slice cannot prove that compiler/runtime copies, register values, stack growth copies, or library internals were erased. APIs therefore minimize copies and string conversion, but forensic zeroization is best effort.
 - Key rotation protects future content. Previously authorized recipients may retain historical keys and downloaded data.
+- Automatic key rotation triggers on workspace member removal, not on revoking one of that same member's own devices: workspace-key envelopes are sealed to an account-level identity key shared by every device of that account via the account-wide keybag sync, so rotating in response to a single still-member device's revocation would re-seal to the same identity key and add no confidentiality benefit. A revoked device's actual boundary is immediate session/authentication rejection (see the Elevation of Privilege table); it cannot erase what that device already downloaded, matching device revocation's disclosed "future access only" guarantee.
 - Workspace membership, device identifiers, object sizes, timing, and access frequency remain visible to the server.
 - Self-signed certificate pinning relies on a trustworthy first QR transfer. A user who accepts a fingerprint through an attacked channel can pin the attacker.
 - Availability is not guaranteed against deletion by a malicious server, client ransomware, loss of all devices and backups, or catastrophic passphrase loss.

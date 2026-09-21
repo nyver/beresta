@@ -159,6 +159,7 @@ func CopyDiagnostics(summary presentation.DiagnosticSummary, technical presentat
 	b.WriteString("Transport security mode: " + technical.TransportSecurityMode + "\n")
 	b.WriteString("Transport URL: " + technical.TransportURL + "\n")
 	b.WriteString("Migration version: " + strconv.Itoa(technical.MigrationVersion) + "\n")
+	b.WriteString("Workspace rotation pending: " + strconv.FormatBool(technical.RotationPending) + "\n")
 	return b.String(), nil
 }
 

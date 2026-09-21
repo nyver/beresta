@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"time"
 
+	"github.com/beresta-app/beresta/core/keyrotation"
 	"github.com/beresta-app/beresta/core/sharecode"
 	"github.com/beresta-app/beresta/core/transport"
 )
@@ -118,7 +120,7 @@ func (a *App) AcceptWorkspaceGrant(grantCode string) (WorkspaceSummaryDTO, error
 	}
 	ctx, cancel := context.WithTimeout(a.requestContext(), 30*time.Second)
 	defer cancel()
-	envelopes, err := httpTransport.GetKeyEnvelopes(ctx, workspaceID.String())
+	envelopes, _, err := httpTransport.GetKeyEnvelopes(ctx, workspaceID.String())
 	if err != nil {
 		return WorkspaceSummaryDTO{}, mapError(err)
 	}
@@ -230,12 +232,20 @@ func (a *App) ListWorkspaceMembers(workspaceID string) ([]WorkspaceMemberDTO, er
 
 // RevokeWorkspaceMember removes a non-owner account from workspaceID. It
 // blocks that account's subsequent server synchronization; it cannot erase
-// notes or keys the account downloaded before removal.
+// notes or keys the account downloaded before removal. It then rotates the
+// workspace key to every remaining active member (see design.md decision
+// 10 and core/keyrotation), closing the window during which the removed
+// member's now-obsolete key could otherwise still encrypt/decrypt further
+// content: rotation publishing is retried automatically by the next sync
+// cycle if it cannot complete inline here, so a transient failure at this
+// point does not fail the revocation the user asked for.
 func (a *App) RevokeWorkspaceMember(workspaceID, memberUserID string) error {
-	if _, err := a.currentAccount(); err != nil {
+	acc, err := a.currentAccount()
+	if err != nil {
 		return mapError(err)
 	}
-	if _, err := parseID(workspaceID); err != nil {
+	id, err := parseID(workspaceID)
+	if err != nil {
 		return err
 	}
 	if _, err := parseID(memberUserID); err != nil {
@@ -251,6 +261,9 @@ func (a *App) RevokeWorkspaceMember(workspaceID, memberUserID string) error {
 	defer cancel()
 	if err := httpTransport.RevokeMember(ctx, workspaceID, memberUserID); err != nil {
 		return mapError(err)
+	}
+	if err := keyrotation.TriggerAfterRevocation(ctx, acc, httpTransport, id); err != nil {
+		slog.Warn("workspace key rotation after member revocation did not complete; will retry on next sync", "error_class", "key_rotation_retry_pending")
 	}
 	a.emit(EventWorkspaceChanged)
 	return nil

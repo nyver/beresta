@@ -17,6 +17,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -343,20 +345,41 @@ func TestMembershipKeyRotationAndRevocationBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	newKeyID := strings.Repeat("2", 32)
+	transitionSignature := bytes.Repeat([]byte{0x5a}, ed25519.SignatureSize)
 	if err := runtime.Storage.RotateWorkspaceKey(context.Background(), owner.Principal, owner.WorkspaceID, newKeyID,
-		[]KeyEnvelopeInput{{UserID: owner.UserID, Envelope: []byte("owner rotated envelope")}}, time.Now()); !errors.Is(err, ErrConflict) {
+		[]KeyEnvelopeInput{{UserID: owner.UserID, Envelope: []byte("owner rotated envelope")}}, transitionSignature, time.Now()); !errors.Is(err, ErrConflict) {
 		t.Fatalf("incomplete key rotation error = %v", err)
 	}
 	if err := runtime.Storage.RotateWorkspaceKey(context.Background(), owner.Principal, owner.WorkspaceID, newKeyID,
 		[]KeyEnvelopeInput{
 			{UserID: owner.UserID, Envelope: []byte("owner rotated envelope")},
 			{UserID: recipient.UserID, Envelope: []byte("recipient rotated envelope")},
-		}, time.Now()); err != nil {
+		}, transitionSignature, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	envelopes, err := runtime.Storage.GetKeyEnvelopes(context.Background(), recipient.Principal, owner.WorkspaceID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	transitions, err := runtime.Storage.GetKeyTransitions(context.Background(), recipient.Principal, owner.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundTransition bool
+	for _, transition := range transitions {
+		if transition.KeyID == newKeyID && bytes.Equal(transition.Signature, transitionSignature) {
+			foundTransition = true
+			sortedRecipients := append([]string(nil), transition.RecipientUserIDs...)
+			sort.Strings(sortedRecipients)
+			wantRecipients := []string{owner.UserID, recipient.UserID}
+			sort.Strings(wantRecipients)
+			if !reflect.DeepEqual(sortedRecipients, wantRecipients) {
+				t.Fatalf("key transition recipients = %v, want %v", sortedRecipients, wantRecipients)
+			}
+		}
+	}
+	if !foundTransition {
+		t.Fatal("rotated key's transition signature was not recorded")
 	}
 	var found bool
 	for _, envelope := range envelopes {
@@ -422,7 +445,7 @@ func TestGeneratedIDORMatrixDeniesEveryForeignResourceAction(t *testing.T) {
 		{name: "foreign member add", method: http.MethodPost, path: "/v1/workspaces/" + owner.WorkspaceID + "/members", body: map[string]any{"user_id": attacker.UserID, "key_id": owner.KeyID, "envelope": []byte("opaque")}},
 		{name: "foreign member revoke", method: http.MethodDelete, path: "/v1/workspaces/" + owner.WorkspaceID + "/members/" + attacker.UserID},
 		{name: "foreign envelopes", method: http.MethodGet, path: "/v1/workspaces/" + owner.WorkspaceID + "/key-envelopes"},
-		{name: "foreign key rotation", method: http.MethodPut, path: "/v1/workspaces/" + owner.WorkspaceID + "/key-envelopes", body: map[string]any{"key_id": strings.Repeat("2", 32), "envelopes": []KeyEnvelopeInput{{UserID: owner.UserID, Envelope: []byte("opaque")}}}},
+		{name: "foreign key rotation", method: http.MethodPut, path: "/v1/workspaces/" + owner.WorkspaceID + "/key-envelopes", body: map[string]any{"key_id": strings.Repeat("2", 32), "envelopes": []KeyEnvelopeInput{{UserID: owner.UserID, Envelope: []byte("opaque")}}, "signature": bytes.Repeat([]byte{0x5a}, ed25519.SignatureSize)}},
 		{name: "foreign operation push", method: http.MethodPost, path: "/v1/sync/ops", body: map[string]any{"operations": []Operation{foreignOperation}}},
 		{name: "foreign operation pull", method: http.MethodGet, path: "/v1/sync/changes?workspace_id=" + owner.WorkspaceID + "&cursor=0&limit=10"},
 		{name: "foreign blob init", method: http.MethodPost, path: "/v1/blobs/init", body: BlobInit{WorkspaceID: owner.WorkspaceID, BlobID: strings.Repeat("a", 64), KeyID: owner.KeyID, EncryptedManifest: []byte("x"), TotalBytes: 1, Chunks: []BlobChunkSpec{{Index: 0, Bytes: 1, SHA256: hex.EncodeToString(sha256.New().Sum(nil))}}}},

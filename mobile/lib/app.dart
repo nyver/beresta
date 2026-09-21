@@ -2794,6 +2794,12 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
           widget.strings("diagnostics_migration_version"),
           "${technical["migration_version"] ?? 0}",
         ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_rotation_pending"),
+          technical["rotation_pending"] == true
+              ? widget.strings("diagnostics_yes")
+              : widget.strings("diagnostics_no"),
+        ),
       ],
     );
   }

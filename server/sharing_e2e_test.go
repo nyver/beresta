@@ -243,7 +243,7 @@ func TestSharingRevocationAndKeyRotationEndToEnd(t *testing.T) {
 	// --- Cross-user / server opacity, before any sharing ---
 	// Carol was never invited: the server rejects her attempt to even list
 	// key envelopes or pull operations for Alice's workspace.
-	if _, err := carol.Transport.GetKeyEnvelopes(context.Background(), alice.WorkspaceID.String()); err == nil {
+	if _, _, err := carol.Transport.GetKeyEnvelopes(context.Background(), alice.WorkspaceID.String()); err == nil {
 		t.Fatal("expected an unrelated user to be forbidden from reading key envelopes")
 	}
 	if err := syncE2E(t, carol, alice.WorkspaceID); err == nil {
@@ -261,7 +261,7 @@ func TestSharingRevocationAndKeyRotationEndToEnd(t *testing.T) {
 
 	// Bob independently discovers and accepts his own envelope, exactly as
 	// a real client would after being told a workspace was shared with it.
-	envelopes, err := bob.Transport.GetKeyEnvelopes(context.Background(), alice.WorkspaceID.String())
+	envelopes, _, err := bob.Transport.GetKeyEnvelopes(context.Background(), alice.WorkspaceID.String())
 	if err != nil {
 		t.Fatalf("bob GetKeyEnvelopes: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestSharingRevocationAndKeyRotationEndToEnd(t *testing.T) {
 			aliceEnvelope = r.Envelope
 		}
 	}
-	if err := alice.Transport.RotateWorkspaceKey(context.Background(), alice.WorkspaceID.String(), rotation.KeyID, []transport.RotationEnvelope{{UserID: alice.Account.ID.String(), Envelope: aliceEnvelope}}); err != nil {
+	if err := alice.Transport.RotateWorkspaceKey(context.Background(), alice.WorkspaceID.String(), rotation.KeyID, []transport.RotationEnvelope{{UserID: alice.Account.ID.String(), Envelope: aliceEnvelope}}, rotation.Signature); err != nil {
 		t.Fatalf("RotateWorkspaceKey: %v", err)
 	}
 	if err := alice.Account.AcceptWorkspaceKeyRotation(context.Background(), alice.WorkspaceID, rotation.KeyID, aliceEnvelope, alice.Account.AuthorityPublicKey, rotation.Signature, []model.ID{alice.Account.ID}); err != nil {

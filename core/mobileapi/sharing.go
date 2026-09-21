@@ -120,7 +120,7 @@ func (s *Service) AcceptWorkspaceGrant(requestID, grantCode string) (string, err
 	if err != nil {
 		return "", err
 	}
-	envelopes, err := remote.GetKeyEnvelopes(ctx, workspaceID.String())
+	envelopes, _, err := remote.GetKeyEnvelopes(ctx, workspaceID.String())
 	if err != nil {
 		return "", err
 	}

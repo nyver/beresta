@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/beresta-app/beresta/core/account"
+	"github.com/beresta-app/beresta/core/keyrotation"
 	"github.com/beresta-app/beresta/core/model"
 	"github.com/beresta-app/beresta/core/sharecode"
 	"github.com/beresta-app/beresta/core/store"
@@ -183,7 +184,15 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 	var lastCatalogDigest [32]byte
 	var lastReviewed model.ID
 	worker, err := coresync.NewWorker(workspaceID, repository, httpTransport, processor, coresync.WorkerOptions{
-		Prepare: func(ctx context.Context) error { return refreshRemoteDevices(ctx, acc, httpTransport, workspaceID) },
+		Prepare: func(ctx context.Context) error {
+			if err := refreshRemoteDevices(ctx, acc, httpTransport, workspaceID); err != nil {
+				return err
+			}
+			// Finishes a rotation this device began but could not publish
+			// inline (see RevokeWorkspaceMember), and detects/applies a
+			// rotation a fellow member initiated (see design.md decision 10).
+			return keyrotation.Reconcile(ctx, acc, httpTransport, workspaceID)
+		},
 		Bootstrap: func(ctx context.Context) error {
 			if err := refreshRemoteDevices(ctx, acc, httpTransport, workspaceID); err != nil {
 				return err

@@ -380,6 +380,7 @@ configuration. Unencrypted HTTP is not a supported client protocol.
 - Every client retains a complete local copy and remains usable when the server is absent.
 - The server stores opaque signed operations and encrypted blobs in SQLite plus a local directory; it needs no PostgreSQL, Redis, S3, queue, or orchestrator.
 - Device revocation protects future access but cannot erase data already copied by a formerly authorized device.
+- Removing a workspace member automatically rotates that workspace's key to every remaining active member, sealed and signed by the owner's authority key; every other device detects and applies the rotation on its next sync, verifying the authority signature so a compromised or malicious server cannot forge a rotation of its own. Automatic rotation does not extend to revoking one of your own devices - see [threat-model.md](docs/threat-model.md) for why.
 
 The normative design is documented in [architecture.md](docs/architecture.md), [threat-model.md](docs/threat-model.md), [crypto-spec.md](docs/crypto-spec.md), and [sync-protocol.md](docs/sync-protocol.md).
 

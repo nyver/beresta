@@ -184,7 +184,7 @@ func TestPresentationDTOCompatibility(t *testing.T) {
 		PendingOperationCount: 9, QuarantinedOperationIDs: []string{"op-1", "op-2"},
 		CursorSequence: 42, CursorEpoch: 1, RetryCount: 3, RetryIn: 6 * time.Second,
 		TransportProtocol: "https", TransportSecurityMode: "pinned", TransportURL: "https://home.example:8443",
-		MigrationVersion: 12,
+		MigrationVersion: 12, RotationPending: true,
 	}
 
 	assertEquivalentJSON(t, "SyncSummary", newSyncSummaryDTO(syncSummary), func() (string, error) {

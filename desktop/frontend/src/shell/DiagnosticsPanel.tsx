@@ -211,6 +211,10 @@ export function DiagnosticsPanel() {
                 <dt>{t("diagnostics.migration_version_label")}</dt>
                 <dd>{technical.migration_version}</dd>
               </div>
+              <div>
+                <dt>{t("diagnostics.rotation_pending_label")}</dt>
+                <dd>{technical.rotation_pending ? t("diagnostics.yes") : t("diagnostics.no")}</dd>
+              </div>
             </dl>
           ) : null}
 

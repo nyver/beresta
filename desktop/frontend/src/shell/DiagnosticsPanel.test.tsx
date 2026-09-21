@@ -39,6 +39,7 @@ function fakeTechnical(overrides: Partial<main.TechnicalDiagnosticsDTO> = {}): m
     transport_security_mode: "pinned",
     transport_url: "https://home.example",
     migration_version: 12,
+    rotation_pending: false,
     ...overrides,
   });
 }
@@ -83,6 +84,22 @@ describe("DiagnosticsPanel", () => {
     expect(await screen.findByText("ws-1")).toBeInTheDocument();
     expect(screen.getByText("device-1")).toBeInTheDocument();
     expect(screen.getByText("5@1")).toBeInTheDocument();
+    expect(screen.getByText("diagnostics.rotation_pending_label")).toBeInTheDocument();
+    expect(screen.getByText("diagnostics.no")).toBeInTheDocument();
+  });
+
+  it("shows a pending workspace key rotation in technical details", async () => {
+    appMock.DiagnosticSummary.mockResolvedValue(fakeSummary());
+    appMock.TechnicalDiagnostics.mockResolvedValue(fakeTechnical({ rotation_pending: true }));
+    renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "diagnostics.title" }));
+    await screen.findByText("1.2.3");
+    await userEvent.click(screen.getByRole("button", { name: "diagnostics.show_technical_details_button" }));
+
+    await screen.findByText("ws-1");
+    const label = screen.getByText("diagnostics.rotation_pending_label");
+    expect(label.nextElementSibling).toHaveTextContent("diagnostics.yes");
   });
 
   it("copies the sanitized bundle to the clipboard and shows confirmation", async () => {

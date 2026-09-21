@@ -159,6 +159,9 @@ func (s *Service) collectTechnicalDiagnostics() (presentation.TechnicalDiagnosti
 	if version, err := store.SchemaVersion(s.root, value.DB()); err == nil {
 		technical.MigrationVersion = version
 	}
+	if pending, err := store.KeyRotationPending(s.root, value.DB(), workspaceID); err == nil {
+		technical.RotationPending = pending
+	}
 	return technical, nil
 }
 

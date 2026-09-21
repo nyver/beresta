@@ -144,9 +144,21 @@ func (r *SyncRepository) ApplyPage(ctx context.Context, cursor coresync.Cursor, 
 	return tx.Commit()
 }
 
+// Pending returns outbox operations ready to push, except while
+// workspaceID has an unresolved key rotation marker (see
+// MarkKeyRotationPending / core/keyrotation.TriggerAfterRevocation): it then
+// reports nothing to push, so this device cannot encrypt and publish
+// further content under the old key - which a just-removed workspace
+// member still holds - before the rotation completes. Pull and apply are
+// unaffected; only outbound push is held.
 func (r *SyncRepository) Pending(ctx context.Context, workspaceID model.ID, limit int) ([]coresync.WireOperation, error) {
 	if limit <= 0 || limit > 256 {
 		return nil, errors.New("store: invalid outbox limit")
+	}
+	if rotating, err := KeyRotationPending(ctx, r.db, workspaceID); err != nil {
+		return nil, err
+	} else if rotating {
+		return nil, nil
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT op_id, workspace_id, device_id, physical_ms, logical, key_id, nonce, ciphertext, signature

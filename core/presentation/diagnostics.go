@@ -153,4 +153,11 @@ type TechnicalDiagnostics struct {
 	// MigrationVersion is the local database's applied schema migration
 	// version.
 	MigrationVersion int
+	// RotationPending reports whether this device began a workspace key
+	// rotation (see core/keyrotation.TriggerAfterRevocation, triggered by
+	// removing a workspace member) that has not yet been confirmed
+	// published and applied. It resolves automatically on a later sync
+	// cycle; a value stuck at true across several syncs is what's
+	// debuggable through this field.
+	RotationPending bool
 }

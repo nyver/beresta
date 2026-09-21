@@ -167,7 +167,7 @@ func TestHostileServerTamperingIsRejectedNotAppliedSilently(t *testing.T) {
 	if err := alice.Transport.AddMember(context.Background(), alice.WorkspaceID.String(), bob.Account.ID.String(), invitation.KeyID, invitation.Envelope); err != nil {
 		t.Fatal(err)
 	}
-	envelopes, err := bob.Transport.GetKeyEnvelopes(context.Background(), alice.WorkspaceID.String())
+	envelopes, _, err := bob.Transport.GetKeyEnvelopes(context.Background(), alice.WorkspaceID.String())
 	if err != nil || len(envelopes) != 1 {
 		t.Fatalf("bob GetKeyEnvelopes: envelopes=%v err=%v", envelopes, err)
 	}

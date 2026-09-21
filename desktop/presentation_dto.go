@@ -112,6 +112,7 @@ type TechnicalDiagnosticsDTO struct {
 	TransportSecurityMode   string   `json:"transport_security_mode"`
 	TransportURL            string   `json:"transport_url"`
 	MigrationVersion        int      `json:"migration_version"`
+	RotationPending         bool     `json:"rotation_pending"`
 }
 
 func newTechnicalDiagnosticsDTO(technical presentation.TechnicalDiagnostics) TechnicalDiagnosticsDTO {
@@ -133,6 +134,7 @@ func newTechnicalDiagnosticsDTO(technical presentation.TechnicalDiagnostics) Tec
 		TransportSecurityMode:   technical.TransportSecurityMode,
 		TransportURL:            technical.TransportURL,
 		MigrationVersion:        technical.MigrationVersion,
+		RotationPending:         technical.RotationPending,
 	}
 }
 

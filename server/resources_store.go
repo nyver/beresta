@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -52,6 +55,21 @@ type KeyEnvelope struct {
 type KeyEnvelopeInput struct {
 	UserID   string `json:"user_id"`
 	Envelope []byte `json:"envelope"`
+}
+
+// KeyTransition records the authority signature that authorized one
+// workspace key rotation, along with the sorted set of recipients it was
+// signed over. The server never verifies this signature itself - it stores
+// and returns it as opaque bytes so any active member's device can verify
+// with the workspace owner's authority public key (see
+// core/account.AcceptWorkspaceKeyRotation) that a rotation was actually
+// authorized, rather than merely asserted by the server.
+type KeyTransition struct {
+	WorkspaceID      string    `json:"workspace_id"`
+	KeyID            string    `json:"key_id"`
+	Signature        []byte    `json:"signature"`
+	RecipientUserIDs []string  `json:"recipient_user_ids"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 func (s *Storage) GetKeybag(ctx context.Context, principal Principal) (Keybag, error) {
@@ -250,7 +268,47 @@ func (s *Storage) GetKeyEnvelopes(ctx context.Context, principal Principal, work
 	return result, rows.Err()
 }
 
-func (s *Storage) RotateWorkspaceKey(ctx context.Context, principal Principal, workspaceID, keyID string, envelopes []KeyEnvelopeInput, now time.Time) error {
+// GetKeyTransitions returns every recorded key rotation's authority
+// signature and signed recipient set for a workspace this principal is an
+// active member of, so a client can verify a key it fetched via
+// GetKeyEnvelopes was actually authorized by the workspace owner rather
+// than merely asserted by the server (see core/account.AcceptWorkspaceKeyRotation).
+func (s *Storage) GetKeyTransitions(ctx context.Context, principal Principal, workspaceID string) ([]KeyTransition, error) {
+	if err := validateID(workspaceID, "workspace_id"); err != nil {
+		return nil, err
+	}
+	member, err := s.isActiveMember(ctx, s.db, principal.UserID, workspaceID)
+	if err != nil || !member {
+		if err == nil {
+			err = ErrForbidden
+		}
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT workspace_id, key_id, signature, recipient_user_ids, created_at FROM key_transitions
+		WHERE workspace_id = ? ORDER BY created_at, key_id`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []KeyTransition
+	for rows.Next() {
+		var item KeyTransition
+		var created int64
+		var recipients string
+		if err := rows.Scan(&item.WorkspaceID, &item.KeyID, &item.Signature, &recipients, &created); err != nil {
+			return nil, err
+		}
+		item.CreatedAt = time.Unix(created, 0).UTC()
+		if recipients != "" {
+			item.RecipientUserIDs = strings.Split(recipients, ",")
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Storage) RotateWorkspaceKey(ctx context.Context, principal Principal, workspaceID, keyID string, envelopes []KeyEnvelopeInput, signature []byte, now time.Time) error {
 	if err := validateID(workspaceID, "workspace_id"); err != nil {
 		return err
 	}
@@ -259,6 +317,9 @@ func (s *Storage) RotateWorkspaceKey(ctx context.Context, principal Principal, w
 	}
 	if len(envelopes) == 0 || len(envelopes) > 5 {
 		return fmt.Errorf("%w: key rotation must cover every active member", ErrInvalid)
+	}
+	if len(signature) != ed25519.SignatureSize {
+		return fmt.Errorf("%w: invalid key transition signature", ErrInvalid)
 	}
 	seen := make(map[string]bool, len(envelopes))
 	for _, envelope := range envelopes {
@@ -313,6 +374,21 @@ func (s *Storage) RotateWorkspaceKey(ctx context.Context, principal Principal, w
 				workspaceID, envelope.UserID, keyID, envelope.Envelope, unixNow(now)); err != nil {
 				return struct{}{}, err
 			}
+		}
+		// active is exactly the recipient set the client signed over (see
+		// core/account.keyTransitionSignatureInput, which sorts recipient
+		// IDs by their canonical string form before signing) - sort it the
+		// same way here so the stored record reconstructs the exact signed
+		// payload for later verification, rather than re-deriving "current
+		// members" from present-day state, which could have changed since.
+		sort.Strings(active)
+		if _, err := transaction.ExecContext(ctx, `
+			INSERT INTO key_transitions(workspace_id, key_id, signature, recipient_user_ids, created_at)
+			VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(workspace_id, key_id) DO UPDATE SET signature = excluded.signature,
+			recipient_user_ids = excluded.recipient_user_ids, created_at = excluded.created_at`,
+			workspaceID, keyID, signature, strings.Join(active, ","), unixNow(now)); err != nil {
+			return struct{}{}, err
 		}
 		return struct{}{}, nil
 	})

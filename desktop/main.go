@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -23,6 +24,8 @@ var assets embed.FS
 const autostartFlag = "--autostart"
 
 func main() {
+	processStart := time.Now()
+
 	closeLogging := configureLogging()
 	defer closeLogging()
 
@@ -38,6 +41,7 @@ func main() {
 	}
 
 	app := newApp()
+	app.processStart = processStart
 
 	// The tray icon, context menu, and global hotkey are started here,
 	// before wails.Run, rather than from app.startup: whether the OS

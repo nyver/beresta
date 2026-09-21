@@ -68,6 +68,7 @@ export const appMock = {
   AddAttachmentFromBytes: vi.fn(),
   RemoveAttachment: vi.fn(),
   ReadAttachmentPreview: vi.fn(),
+  RecordPerfStage: vi.fn(),
   SaveAttachmentToFile: vi.fn(),
   ListRevisions: vi.fn(),
   RevisionMarkdown: vi.fn(),

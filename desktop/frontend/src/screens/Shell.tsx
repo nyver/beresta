@@ -11,6 +11,7 @@ import {
   listTags,
   lockAccount,
   noteTagsByWorkspace,
+  recordPerfStage,
   restoreNote,
   searchByTag,
   setNoteTag,
@@ -189,6 +190,21 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
   // note in another notebook is the exception: after navigating to that
   // notebook, keep the just-created note selected and open.
   const preserveCreatedNoteSelectionRef = useRef(false);
+  // Times only this session's very first note-list load (perf.StageFirstNoteList,
+  // task 11.1): loadAll is also called on every later refresh (create,
+  // delete, workspace switch, etc.), which must not re-report the stage.
+  const firstListStartMsRef = useRef<number | null>(null);
+  const firstListRecordedRef = useRef(false);
+  // Times perf.StageSettingsOpen (task 11.1) from the user's open request to
+  // the Modal/SettingsPanel committing. Only set by openSettings (below),
+  // never by SettingsPanel's own onGroupChange switching between already-
+  // open groups, so navigating within an open Settings modal is not
+  // mistaken for opening it.
+  const settingsOpenStartMsRef = useRef<number | null>(null);
+  const openSettings = useCallback((group: SettingsGroup) => {
+    settingsOpenStartMsRef.current = performance.now();
+    setSettingsGroup(group);
+  }, []);
 
   const loadAll = useCallback(() => {
     setLoading(true);
@@ -199,6 +215,10 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
         setTags(loadedTags);
         setNotes(loadedNotes);
         setNoteTagIds(loadedNoteTagIds);
+        if (!firstListRecordedRef.current && firstListStartMsRef.current !== null) {
+          firstListRecordedRef.current = true;
+          recordPerfStage("first_note_list", firstListStartMsRef.current);
+        }
         // A selection restored from a previous launch (or from a different
         // workspace, before task 8.2 scopes this per-workspace) may name a
         // notebook or tag that no longer exists here - fall back to "All
@@ -225,8 +245,16 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
     // after ready), but Shell does not otherwise depend on that caller
     // discipline to behave correctly.
     if (!ready) return;
+    firstListStartMsRef.current = performance.now();
     loadAll();
   }, [ready, loadAll]);
+
+  useEffect(() => {
+    if (settingsGroup && settingsOpenStartMsRef.current !== null) {
+      recordPerfStage("settings_open", settingsOpenStartMsRef.current);
+      settingsOpenStartMsRef.current = null;
+    }
+  }, [settingsGroup]);
 
   useEffect(() => {
     // Runs once per unlock, matching desktop/backup.go's own doc comments
@@ -638,7 +666,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
       // even if event delivery is delayed.
       setSyncStatusValue("active");
     } catch {
-      setSettingsGroup("synchronization");
+      openSettings("synchronization");
     } finally {
       setForcingSync(false);
     }
@@ -716,7 +744,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
         searchBarRef.current?.focus();
       } else if (matchesShortcut(event, SHELL_COMMANDS.settings.shortcut)) {
         event.preventDefault();
-        setSettingsGroup("general");
+        openSettings("general");
       } else if (matchesShortcut(event, SHELL_COMMANDS.lock.shortcut)) {
         event.preventDefault();
         void handleLockRef.current();
@@ -738,8 +766,8 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
         syncStatus={syncStatusValue}
         forcingSync={forcingSync}
         onSyncNow={() => void handleSyncNow()}
-        onOpenSync={() => setSettingsGroup("synchronization")}
-        onOpenSettings={() => setSettingsGroup("general")}
+        onOpenSync={() => openSettings("synchronization")}
+        onOpenSettings={() => openSettings("general")}
         onOpenQuickNote={handleOpenQuickNote}
         onLock={() => void handleLock()}
         locking={locking}
@@ -863,7 +891,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
               onDraftTouched={markDraftTouched}
               syncStatus={syncStatusValue}
               syncedAt={syncedAt}
-              onOpenSync={() => setSettingsGroup("synchronization")}
+              onOpenSync={() => openSettings("synchronization")}
             />
           </section>
         </div>

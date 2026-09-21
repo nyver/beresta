@@ -195,6 +195,16 @@ abstract interface class CoreGateway {
   /// outside that one call immediately after unlock, since the count is
   /// consumed on read.
   Future<int> takeShareImportCount();
+
+  /// Reports one bounded elapsed-time sample for a render-dependent
+  /// component-boundary stage the Go core cannot observe directly - first
+  /// note list, editor readiness, commit acknowledgement, settings open,
+  /// or cached attachment preview (see design.md's "Make performance
+  /// budgets observable at component boundaries" decision, task 11.1) -
+  /// matching core/mobileapi.Service.RecordPerfStage and desktop's
+  /// identical RecordPerfStage bridge. stage must be one of
+  /// core/perf.Stage's closed values.
+  Future<void> recordPerfStage(String stage, int durationMs);
 }
 
 class MethodChannelCore implements CoreGateway {
@@ -506,4 +516,8 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<int> takeShareImportCount() async =>
       await _invoke("takeShareImportCount") as int;
+
+  @override
+  Future<void> recordPerfStage(String stage, int durationMs) =>
+      _invoke("recordPerfStage", {"stage": stage, "durationMs": durationMs});
 }

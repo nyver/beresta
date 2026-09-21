@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/keystore"
 	"github.com/beresta-app/beresta/core/model"
+	"github.com/beresta-app/beresta/core/perf"
 	"github.com/beresta-app/beresta/core/store"
 	coresync "github.com/beresta-app/beresta/core/sync"
 	"github.com/beresta-app/beresta/core/transport"
@@ -42,6 +44,15 @@ type App struct {
 	syncGeneration uint64
 	settings       AppSettings
 
+	// lastSyncProgressAt is when the sync worker's Progress callback most
+	// recently fired (see sync.go), consumed and cleared by the next
+	// SyncSummary call to record perf.StageSyncProjection - the elapsed
+	// time from a raw sync event to its projection into presentation
+	// state (task 11.1). It is the zero time when no progress event is
+	// waiting to be projected, so a periodic poll unrelated to any new
+	// event does not report a stale or repeated sample.
+	lastSyncProgressAt time.Time
+
 	// keyWrapperFactory builds the platform keystore.Wrapper used to
 	// wrap/unwrap the local device database key. It defaults to
 	// newKeyWrapper (real Windows Hello/DPAPI); tests substitute a fast,
@@ -60,6 +71,19 @@ type App struct {
 	// HKCU Run key); tests substitute a no-op so they never touch the
 	// developer's or CI machine's real autostart registration.
 	applyAutostart func(enabled bool) error
+
+	// perf holds bounded recent-sample timing for the component-boundary
+	// stages named in design.md's "Make performance budgets observable at
+	// component boundaries" decision (task 11.1). It is never nil.
+	perf *perf.Recorder
+	// processStart is when main() began, set by desktop/main.go before
+	// wails.Run. startup uses it to approximate perf.StageProcessStart as
+	// elapsed time to the Wails OnStartup callback - the first point the Go
+	// side knows the native window exists - which is a proxy for "first
+	// interactive main window", not an exact paint measurement. It is the
+	// zero time in tests that construct an App directly without going
+	// through main().
+	processStart time.Time
 }
 
 func newApp() *App {
@@ -68,6 +92,7 @@ func newApp() *App {
 		settings:          defaultSettings(),
 		keyWrapperFactory: newKeyWrapper,
 		applyAutostart:    applyAutostartReal,
+		perf:              perf.NewRecorder(),
 	}
 }
 
@@ -79,7 +104,12 @@ func (a *App) startup(ctx context.Context) {
 	a.mu.Lock()
 	a.ctx = ctx
 	a.ready = true
+	processStart := a.processStart
 	a.mu.Unlock()
+
+	if !processStart.IsZero() {
+		a.perf.Record(perf.StageProcessStart, time.Since(processStart))
+	}
 
 	settings, err := loadSettings()
 	if err != nil {
@@ -286,6 +316,7 @@ func (a *App) UnlockAccount(req UnlockAccountRequest) (AccountInfo, error) {
 		a.mu.Unlock()
 	}()
 
+	unlockStart := time.Now()
 	ctx := a.requestContext()
 	wrapper, protection, err := a.keyWrapper(ctx, "Unlock your Beresta account.")
 	if err != nil {
@@ -295,11 +326,16 @@ func (a *App) UnlockAccount(req UnlockAccountRequest) (AccountInfo, error) {
 		DatabasePath: req.DatabasePath,
 		Passphrase:   []byte(req.Passphrase),
 		Wrapper:      wrapper,
+		Hook:         a.perf.Hook(),
 	})
 	if err != nil {
 		return AccountInfo{}, mapError(err)
 	}
-	return a.activate(acc, protection, req.DatabasePath)
+	info, err := a.activate(acc, protection, req.DatabasePath)
+	if err == nil {
+		a.perf.Record(perf.StageUnlockReady, time.Since(unlockStart))
+	}
+	return info, err
 }
 
 func (a *App) activate(acc *account.Account, protection, databasePath string) (AccountInfo, error) {

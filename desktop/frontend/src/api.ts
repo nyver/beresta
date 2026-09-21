@@ -51,6 +51,7 @@ import {
   PlanRestore,
   PreviewBackup,
   ReadAttachmentPreview,
+  RecordPerfStage,
   RemoveAttachment,
   RenameNotebook,
   RestoreNote,
@@ -501,6 +502,41 @@ export async function listNotebooks(): Promise<main.NotebookDTO[]> {
 
 export async function listTags(): Promise<main.TagDTO[]> {
   return ListTags();
+}
+
+/**
+ * PerfStage mirrors core/perf.Stage's closed set of component-boundary
+ * names for the render-dependent stages only the frontend can time (see
+ * design.md's "Make performance budgets observable at component
+ * boundaries" decision, task 11.1). Stages the Go core observes directly
+ * (process start, unlock, database open) are recorded there instead.
+ */
+export type PerfStage =
+  | "first_note_list"
+  | "editor_ready"
+  | "commit_acknowledged"
+  | "settings_open"
+  | "cached_preview";
+
+/**
+ * recordPerfStage reports one bounded elapsed-time sample for stage,
+ * measured by the caller with `performance.now()`. Best-effort: a failure
+ * (for example, an unrecognized stage from a future build mismatch) is
+ * swallowed rather than surfaced, since instrumentation must never disrupt
+ * the feature it is measuring.
+ */
+export function recordPerfStage(stage: PerfStage, startedAtMs: number): void {
+  const elapsed = performance.now() - startedAtMs;
+  if (!Number.isFinite(elapsed) || elapsed < 0) return;
+  try {
+    // Promise.resolve(...) tolerates a test/mock binding that does not
+    // itself return a promise; the outer try/catch tolerates one that
+    // throws synchronously. Either way this must never propagate into the
+    // caller it is instrumenting.
+    void Promise.resolve(RecordPerfStage(stage, Math.round(elapsed))).catch(() => {});
+  } catch {
+    // Best-effort; see doc comment above.
+  }
 }
 
 export async function listNotes(): Promise<main.NoteDTO[]> {

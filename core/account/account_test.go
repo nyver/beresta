@@ -11,6 +11,7 @@ import (
 
 	corecrypto "github.com/beresta-app/beresta/core/crypto"
 	"github.com/beresta-app/beresta/core/keystore"
+	"github.com/beresta-app/beresta/core/perf"
 )
 
 // fakeWrapper is a deterministic in-memory keystore.Wrapper for tests. It
@@ -220,6 +221,51 @@ func TestCreateThenUnlockRecoversTheSameIdentity(t *testing.T) {
 	}
 	if !bytes.Equal(unlocked.DevicePublicKey, wantDevicePub) {
 		t.Fatal("device public key changed across unlock")
+	}
+}
+
+// TestUnlockReportsDatabaseOpenThroughHook proves Unlock fires
+// UnlockOptions.Hook exactly once with perf.StageDatabaseOpen and a
+// non-negative duration for a successful unlock, so desktop and
+// core/mobileapi's bounded instrumentation (task 11.1) actually observes
+// the database open sub-stage rather than silently receiving nothing.
+func TestUnlockReportsDatabaseOpenThroughHook(t *testing.T) {
+	path := tempDBPath(t)
+	wrapper := newFakeWrapper()
+	ctx := context.Background()
+
+	created, err := Create(ctx, CreateOptions{
+		DatabasePath: path,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+		KDFOptions:   fastKDF(),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if err := created.Lock(); err != nil {
+		t.Fatalf("Lock() error = %v", err)
+	}
+
+	var calls []perf.Stage
+	unlocked, err := Unlock(ctx, UnlockOptions{
+		DatabasePath: path,
+		Passphrase:   []byte("correct horse battery staple"),
+		Wrapper:      wrapper,
+		Hook: func(stage perf.Stage, elapsed time.Duration) {
+			calls = append(calls, stage)
+			if elapsed < 0 {
+				t.Errorf("Hook elapsed = %v, want >= 0", elapsed)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Unlock() error = %v", err)
+	}
+	defer unlocked.Lock()
+
+	if len(calls) != 1 || calls[0] != perf.StageDatabaseOpen {
+		t.Fatalf("Hook calls = %v, want exactly one StageDatabaseOpen call", calls)
 	}
 }
 

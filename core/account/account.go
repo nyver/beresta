@@ -10,10 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	corecrypto "github.com/beresta-app/beresta/core/crypto"
 	"github.com/beresta-app/beresta/core/keystore"
 	"github.com/beresta-app/beresta/core/model"
+	"github.com/beresta-app/beresta/core/perf"
 	"github.com/beresta-app/beresta/core/store"
 )
 
@@ -585,6 +587,10 @@ type UnlockOptions struct {
 	// Wrapper is the platform OS-keystore adapter that unwraps the local
 	// database key and device signing key.
 	Wrapper keystore.Wrapper
+	// Hook optionally receives bounded perf.StageDatabaseOpen timing for
+	// this unlock's database open. It is nil-safe: a caller that does not
+	// need instrumentation may leave it unset.
+	Hook perf.Hook
 }
 
 // Unlock opens an existing local account: it unwraps the database key
@@ -617,7 +623,11 @@ func Unlock(ctx context.Context, opts UnlockOptions) (*Account, error) {
 	if err != nil {
 		return nil, err
 	}
+	dbOpenStart := time.Now()
 	db, _, err := store.Open(ctx, opts.DatabasePath, dbKey)
+	if opts.Hook != nil {
+		opts.Hook(perf.StageDatabaseOpen, time.Since(dbOpenStart))
+	}
 	dbKey.Close()
 	if err != nil {
 		return nil, err

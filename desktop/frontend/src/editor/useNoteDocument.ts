@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Y from "yjs";
 
-import { commitNoteBody, getNoteDocument, unwrapError, type ApiError } from "../api";
+import { commitNoteBody, getNoteDocument, recordPerfStage, unwrapError, type ApiError } from "../api";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import { base64ToBytes, bytesToBase64 } from "./base64";
 import { CommitTracker, type LocalSaveState } from "./commitTracker";
@@ -123,6 +123,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
     // from any newer generation that starts (and captures a higher
     // number) while this commit is still in flight.
     const generation = trackerRef.current.current();
+    const commitStartedAtMs = performance.now();
     setSaveState("saving");
     try {
       await commitNoteBody({
@@ -139,6 +140,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
       if (accepted) {
         setError(null);
         setSaveState(accepted);
+        recordPerfStage("commit_acknowledged", commitStartedAtMs);
       }
       return true;
     } catch (thrown) {
@@ -163,6 +165,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
 
   useEffect(() => {
     noteIdRef.current = noteId;
+    const openStartedAtMs = performance.now();
     let canceled = false;
     let unsubscribeRemoteMerge: (() => void) | null = null;
     setReady(false);
@@ -196,6 +199,7 @@ export function useNoteDocument(noteId: string): NoteDocumentState {
         ydocRef.current = doc;
         setYdoc(doc);
         setReady(true);
+        recordPerfStage("editor_ready", openStartedAtMs);
 
         // Background synchronization merges a remote change into this
         // note's durable state without ever touching this already-open

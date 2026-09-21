@@ -14,6 +14,7 @@ import {
   pickAttachmentFile,
   pickAttachmentSaveDestination,
   readAttachmentPreview,
+  recordPerfStage,
   removeAttachment,
   saveAttachmentToFile,
   unwrapError,
@@ -290,6 +291,7 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
       );
       for (const attachment of previewable) {
         requestedPreviewsRef.current.add(attachment.blob_id);
+        const previewStartedAtMs = performance.now();
         readAttachmentPreview(attachment.blob_id)
           .then((preview) => {
             if (!mountedRef.current) return;
@@ -297,6 +299,7 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
               ...current,
               [attachment.blob_id]: `data:${preview.media_type};base64,${preview.data_base64}`,
             }));
+            recordPerfStage("cached_preview", previewStartedAtMs);
           })
           .catch(() => {
             // A failed preview just leaves the generic file row shown

@@ -17,6 +17,7 @@ import (
 	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/keyrotation"
 	"github.com/beresta-app/beresta/core/model"
+	"github.com/beresta-app/beresta/core/perf"
 	"github.com/beresta-app/beresta/core/sharecode"
 	"github.com/beresta-app/beresta/core/store"
 	coresync "github.com/beresta-app/beresta/core/sync"
@@ -58,6 +59,22 @@ type Service struct {
 	// still working and discard its result instead of silently
 	// resurrecting a connection the user just turned off.
 	syncGeneration uint64
+	// perf holds bounded recent-sample timing for the component-boundary
+	// stages named in design.md's "Make performance budgets observable at
+	// component boundaries" decision (task 11.1). It only covers what the
+	// Go core itself can observe (unlock, database open, and stages
+	// reported through RecordPerfStage below); Android process/activity
+	// startup happens before NewService is ever called and is outside this
+	// package's visibility, so StageProcessStart is not recorded here.
+	perf *perf.Recorder
+	// lastSyncProgressAt is when the sync worker's Progress callback most
+	// recently fired, consumed and cleared by the next SyncSummary call to
+	// record perf.StageSyncProjection - the elapsed time from a raw sync
+	// event to its projection into presentation state. It is the zero
+	// time when no progress event is waiting to be projected, so a
+	// periodic poll unrelated to any new event does not report a stale or
+	// repeated sample.
+	lastSyncProgressAt time.Time
 }
 
 // NewService consumes deviceSecret. Android must generate it randomly and
@@ -68,7 +85,7 @@ func NewService(deviceSecret []byte) (*Service, error) {
 		return nil, err
 	}
 	root, cancel := context.WithCancel(context.Background())
-	return &Service{root: root, cancelRoot: cancel, wrapper: wrapper, requests: make(map[string]context.CancelFunc)}, nil
+	return &Service{root: root, cancelRoot: cancel, wrapper: wrapper, requests: make(map[string]context.CancelFunc), perf: perf.NewRecorder()}, nil
 }
 
 func (s *Service) begin(requestID string) (context.Context, func(), error) {
@@ -149,11 +166,16 @@ func (s *Service) UnlockAccount(requestID, databasePath, passphrase string) (str
 		return "", err
 	}
 	defer done()
-	unlocked, err := account.Unlock(ctx, account.UnlockOptions{DatabasePath: databasePath, Passphrase: []byte(passphrase), Wrapper: s.wrapper})
+	unlockStart := time.Now()
+	unlocked, err := account.Unlock(ctx, account.UnlockOptions{DatabasePath: databasePath, Passphrase: []byte(passphrase), Wrapper: s.wrapper, Hook: s.perf.Hook()})
 	if err != nil {
 		return "", err
 	}
-	return s.activate(unlocked, databasePath)
+	result, err := s.activate(unlocked, databasePath)
+	if err == nil {
+		s.perf.Record(perf.StageUnlockReady, time.Since(unlockStart))
+	}
+	return result, err
 }
 
 // EnableDeviceUnlock persists a platform-wrapped Root Key for the current
@@ -180,11 +202,16 @@ func (s *Service) UnlockWithDeviceKey(requestID, databasePath string) (string, e
 		return "", err
 	}
 	defer done()
+	unlockStart := time.Now()
 	unlocked, err := account.UnlockWithDeviceKey(ctx, databasePath, s.wrapper)
 	if err != nil {
 		return "", err
 	}
-	return s.activate(unlocked, databasePath)
+	result, err := s.activate(unlocked, databasePath)
+	if err == nil {
+		s.perf.Record(perf.StageUnlockReady, time.Since(unlockStart))
+	}
+	return result, err
 }
 
 func (s *Service) activate(value *account.Account, databasePath string) (string, error) {
@@ -1465,6 +1492,9 @@ func (s *Service) buildWorkspaceWorker(value *account.Account, workspaceID model
 			// sync_progress already fires on every phase transition, so
 			// Dart's event poll uses it as the signal to re-fetch
 			// SyncSummary instead of a dedicated payload-less event.
+			s.mu.Lock()
+			s.lastSyncProgressAt = time.Now()
+			s.mu.Unlock()
 			s.emit("sync_progress", map[string]any{"workspace_id": progress.WorkspaceID.String(), "phase": progress.Phase, "pulled": progress.Pulled, "pushed": progress.Pushed, "cursor": progress.Cursor, "retry_ms": progress.RetryIn.Milliseconds(), "error_class": progress.ErrorClass, "error_detail": progress.ErrorDetail})
 			if progress.Phase == coresync.PhaseCurrent {
 				s.emit("workspace_synced", map[string]string{"workspace_id": progress.WorkspaceID.String()})
@@ -1682,7 +1712,14 @@ func (s *Service) DisconnectServer() error {
 func (s *Service) SyncSummary() (string, error) {
 	s.mu.Lock()
 	coordinator, repository, workspaceID, configured := s.coordinator, s.repository, s.workspaceID, s.remote != nil
+	// Consumed once so only the projection that actually follows a real
+	// progress event is timed, not every unrelated periodic poll.
+	progressAt := s.lastSyncProgressAt
+	s.lastSyncProgressAt = time.Time{}
 	s.mu.Unlock()
+	if !progressAt.IsZero() {
+		defer func() { s.perf.Record(perf.StageSyncProjection, time.Since(progressAt)) }()
+	}
 
 	var progress coresync.CoordinatorProgress
 	if coordinator != nil {
@@ -1820,6 +1857,24 @@ func coalesce(actual, fallback error) error {
 		return actual
 	}
 	return fallback
+}
+
+// RecordPerfStage lets the Flutter frontend report bounded elapsed-time
+// samples for the render-dependent component-boundary stages the Go core
+// cannot observe directly - first note list, editor readiness, settings
+// open, and cached attachment preview (see design.md's "Make performance
+// budgets observable at component boundaries" decision, task 11.1). stage
+// must be one of perf.Stage's closed values; durationMs must be
+// non-negative. Both constraints are enforced here rather than trusted
+// from Dart, since this method is reachable from any code on the platform
+// channel.
+func (s *Service) RecordPerfStage(stage string, durationMs int64) error {
+	st := perf.Stage(stage)
+	if !st.Valid() || durationMs < 0 {
+		return errors.New("mobileapi: unknown performance stage or negative duration")
+	}
+	s.perf.Record(st, time.Duration(durationMs)*time.Millisecond)
+	return nil
 }
 
 func refreshMobileDevices(ctx context.Context, value *account.Account, remote *transport.HTTP, workspaceID model.ID) error {

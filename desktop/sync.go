@@ -8,6 +8,7 @@ import (
 	"github.com/beresta-app/beresta/core/account"
 	"github.com/beresta-app/beresta/core/keyrotation"
 	"github.com/beresta-app/beresta/core/model"
+	"github.com/beresta-app/beresta/core/perf"
 	"github.com/beresta-app/beresta/core/sharecode"
 	"github.com/beresta-app/beresta/core/store"
 	coresync "github.com/beresta-app/beresta/core/sync"
@@ -296,6 +297,9 @@ func (a *App) buildWorkspaceWorker(acc *account.Account, workspaceID model.ID, h
 			// that summary on every phase transition, keeps this callback
 			// - which runs on the worker's own goroutine mid-cycle - free
 			// of extra database reads.
+			a.mu.Lock()
+			a.lastSyncProgressAt = time.Now()
+			a.mu.Unlock()
 			a.emit(EventSyncSummary)
 		},
 	})
@@ -318,7 +322,14 @@ func (a *App) SyncSummary() (SyncSummaryDTO, error) {
 	repository := a.syncRepository
 	configured := a.httpTransport != nil
 	preferred := a.settings.ActiveWorkspaceID
+	// Consumed once so only the projection that actually follows a real
+	// progress event is timed, not every unrelated periodic poll.
+	progressAt := a.lastSyncProgressAt
+	a.lastSyncProgressAt = time.Time{}
 	a.mu.Unlock()
+	if !progressAt.IsZero() {
+		defer func() { a.perf.Record(perf.StageSyncProjection, time.Since(progressAt)) }()
+	}
 
 	var progress coresync.CoordinatorProgress
 	if coordinator != nil {

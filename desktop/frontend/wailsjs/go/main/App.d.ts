@@ -109,6 +109,8 @@ export function PreviewBackup(arg1:string):Promise<main.BackupPreviewDTO>;
 
 export function ReadAttachmentPreview(arg1:string):Promise<main.AttachmentPreviewDTO>;
 
+export function RecordPerfStage(arg1:string,arg2:number):Promise<void>;
+
 export function RemoveAttachment(arg1:string,arg2:string):Promise<void>;
 
 export function RenameNotebook(arg1:string,arg2:string):Promise<void>;

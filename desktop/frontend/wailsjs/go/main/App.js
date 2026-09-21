@@ -214,6 +214,10 @@ export function ReadAttachmentPreview(arg1) {
   return window['go']['main']['App']['ReadAttachmentPreview'](arg1);
 }
 
+export function RecordPerfStage(arg1, arg2) {
+  return window['go']['main']['App']['RecordPerfStage'](arg1, arg2);
+}
+
 export function RemoveAttachment(arg1, arg2) {
   return window['go']['main']['App']['RemoveAttachment'](arg1, arg2);
 }

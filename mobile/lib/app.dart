@@ -101,6 +101,17 @@ void requestCurrentWorkspaceSync(CoreGateway gateway) {
   unawaited(gateway.syncNow().catchError((_) {}));
 }
 
+/// Reports one bounded elapsed-time sample for [stage] (see
+/// core_gateway.dart's recordPerfStage doc comment and design.md's "Make
+/// performance budgets observable at component boundaries" decision, task
+/// 11.1), measured from [startedAt] to now. Best-effort: a failure must
+/// never disrupt the feature being measured.
+void recordPerfStage(CoreGateway gateway, String stage, DateTime startedAt) {
+  final elapsedMs = DateTime.now().difference(startedAt).inMilliseconds;
+  if (elapsedMs < 0) return;
+  unawaited(gateway.recordPerfStage(stage, elapsedMs).catchError((_) {}));
+}
+
 /// The currently mounted [EditorScreen]'s local-only flush barrier, if
 /// any - see [AppLifecycleLock]'s didChangeAppLifecycleState, which sits
 /// above the Navigator and so has no direct reference to whatever screen
@@ -710,10 +721,17 @@ class _NotesShellState extends State<NotesShell> {
   int eventCursor = 0;
   bool pollingEvents = false;
   bool syncingWorkspace = false;
+  // Times only this shell's very first note-list load (perf.StageFirstNoteList,
+  // task 11.1): refresh() is also called on every later reload (create,
+  // delete, sync event, workspace switch, etc.), which must not re-report
+  // the stage.
+  DateTime? _firstRefreshStartedAt;
+  bool _firstRefreshRecorded = false;
 
   @override
   void initState() {
     super.initState();
+    _firstRefreshStartedAt = DateTime.now();
     refresh();
     requestCurrentWorkspaceSync(widget.gateway);
     refreshSyncSummary();
@@ -786,6 +804,14 @@ class _NotesShellState extends State<NotesShell> {
           loading = false;
           error = null;
         });
+        if (!_firstRefreshRecorded && _firstRefreshStartedAt != null) {
+          _firstRefreshRecorded = true;
+          recordPerfStage(
+            widget.gateway,
+            "first_note_list",
+            _firstRefreshStartedAt!,
+          );
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -1054,17 +1080,20 @@ class _NotesShellState extends State<NotesShell> {
   Future<void> showSettings({
     SettingsGroup group = SettingsGroup.general,
   }) async {
+    final openStartedAt = DateTime.now();
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder:
-          (_) => GroupedSettingsSheet(
-            gateway: widget.gateway,
-            strings: widget.strings,
-            notebooks: notebooks,
-            initialGroup: group,
-          ),
+      builder: (_) {
+        recordPerfStage(widget.gateway, "settings_open", openStartedAt);
+        return GroupedSettingsSheet(
+          gateway: widget.gateway,
+          strings: widget.strings,
+          notebooks: notebooks,
+          initialGroup: group,
+        );
+      },
     );
     await refresh();
     await refreshSyncSummary();
@@ -3454,6 +3483,7 @@ class _EditorScreenState extends State<EditorScreen> {
     // TextField in build(), always present regardless of `loading`) is
     // actually in the tree.
     if (widget.autoFocusTitle) titleFocusNode.requestFocus();
+    final openStartedAt = DateTime.now();
     widget.gateway.getNote(widget.noteId).then((value) {
       if (!mounted) return;
       final note = value["note"] as Map<String, dynamic>;
@@ -3483,6 +3513,7 @@ class _EditorScreenState extends State<EditorScreen> {
         loading = false;
       });
       title.addListener(markDirty);
+      recordPerfStage(widget.gateway, "editor_ready", openStartedAt);
     });
     refreshAttachments();
     refreshTags();
@@ -3534,6 +3565,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
     final markdown = deltaToMarkdown(body!.document.toDelta());
     final usedBaseRevision = _baseRevision;
+    final commitStartedAt = DateTime.now();
     try {
       final newBaseRevision = await widget.gateway.saveNoteCancelable(
         requestId,
@@ -3548,6 +3580,9 @@ class _EditorScreenState extends State<EditorScreen> {
       requestCurrentWorkspaceSync(widget.gateway);
       final accepted = _tracker.accept(generation, true);
       if (accepted != null && mounted) setState(() => saveState = accepted);
+      if (accepted != null) {
+        recordPerfStage(widget.gateway, "commit_acknowledged", commitStartedAt);
+      }
     } catch (_) {
       if (_inFlightRequestId == requestId) _inFlightRequestId = null;
       if (_selfCanceledRequestIds.remove(requestId)) return;
@@ -3991,9 +4026,15 @@ class _AttachmentThumbnail extends StatefulWidget {
 }
 
 class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
-  late final Future<Uint8List> bytes = widget.gateway.readAttachmentData(
-    widget.blobId,
-  );
+  late final Future<Uint8List> bytes = _loadPreview();
+
+  Future<Uint8List> _loadPreview() {
+    final startedAt = DateTime.now();
+    return widget.gateway.readAttachmentData(widget.blobId).then((data) {
+      recordPerfStage(widget.gateway, "cached_preview", startedAt);
+      return data;
+    });
+  }
 
   Future<void> confirmDelete() async {
     final confirmed = await showDialog<bool>(

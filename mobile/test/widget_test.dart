@@ -1898,4 +1898,10 @@ class FakeGateway implements CoreGateway {
     shareImportCount = 0;
     return count;
   }
+
+  final List<(String, int)> recordedPerfStages = [];
+  @override
+  Future<void> recordPerfStage(String stage, int durationMs) async {
+    recordedPerfStages.add((stage, durationMs));
+  }
 }

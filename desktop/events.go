@@ -25,6 +25,14 @@ const (
 	// active, so the frontend knows to reload notes/notebooks/tags instead
 	// of showing state scoped to the previously active workspace.
 	EventWorkspaceChanged = "workspace:changed"
+	// EventLockRequested carries no payload; it fires whenever the tray
+	// menu's "Lock" item is selected, after the main window has already
+	// been shown/restored (mirroring EventQuickNoteOpen). The frontend
+	// itself performs the actual lock through its own content-first flush-
+	// then-lock sequence (Shell.tsx's handleLock, task 7.6) rather than a
+	// Go-side LockAccount call here, so a tray-triggered lock cannot skip
+	// that ordering and drop an unflushed edit.
+	EventLockRequested = "lock:requested"
 )
 
 // emit forwards a Wails runtime event, but only once startup(ctx) has

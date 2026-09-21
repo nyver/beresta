@@ -63,6 +63,12 @@ type AppSettings struct {
 	// preference from before a share was revoked, for example) falls back
 	// the same way rather than failing.
 	ActiveWorkspaceID string `json:"active_workspace_id"`
+	// CloseToTrayExplained records whether the one-time close-to-tray
+	// education balloon (task 8.6; watchForFirstCloseToTray) has already
+	// been shown on this install, so it never repeats after the first
+	// close. Not exposed through UpdateSettings: it is an internal,
+	// automatically-set flag, not a user preference.
+	CloseToTrayExplained bool `json:"close_to_tray_explained"`
 }
 
 func defaultSettings() AppSettings {

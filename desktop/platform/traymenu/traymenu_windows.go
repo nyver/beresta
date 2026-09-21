@@ -79,8 +79,14 @@ const (
 	nifMessage = 0x00000001
 	nifIcon    = 0x00000002
 	nifTip     = 0x00000004
+	nifInfo    = 0x00000010
 	nimAdd     = 0
+	nimModify  = 1
 	nimDelete  = 2
+
+	// niifInfo selects the plain informational balloon icon (NIIF_INFO),
+	// set in notifyIconData.infoFlags for ShowBalloon.
+	niifInfo = 0x00000001
 
 	modAlt      = 0x0001
 	modControl  = 0x0002
@@ -105,7 +111,8 @@ const (
 
 	idMenuQuickNote = 1
 	idMenuShow      = 2
-	idMenuQuit      = 3
+	idMenuLock      = 3
+	idMenuQuit      = 4
 
 	wmSystrayCallback = wmApp + 1
 	wmSetHotkey       = wmApp + 2
@@ -193,6 +200,8 @@ type Handlers struct {
 	// OnShowWindow fires when the tray icon is left-clicked or the
 	// "Show Beresta" menu item is selected.
 	OnShowWindow func()
+	// OnLock fires when the "Lock" menu item is selected.
+	OnLock func()
 	// OnQuit fires when the "Quit" menu item is selected.
 	OnQuit func()
 }
@@ -428,6 +437,37 @@ func (c *Controller) removeTrayIcon() {
 	procShellNotifyIconW.Call(uintptr(nimDelete), uintptr(unsafe.Pointer(&c.nid)))
 }
 
+// ShowBalloon shows a one-shot notification-area balloon from the tray
+// icon (Shell_NotifyIconW's NIM_MODIFY with NIF_INFO), used for the
+// first-use close-to-tray education (task 8.6). Safe to call from any
+// goroutine once Start has returned: c.nid's id/wnd/icon fields (set by
+// addTrayIcon during Start's own synchronous handshake) are only ever
+// read here, never mutated concurrently with this call.
+func (c *Controller) ShowBalloon(title, message string) error {
+	titleUTF16, err := syscall.UTF16FromString(title)
+	if err != nil {
+		return fmt.Errorf("encode balloon title: %w", err)
+	}
+	messageUTF16, err := syscall.UTF16FromString(message)
+	if err != nil {
+		return fmt.Errorf("encode balloon message: %w", err)
+	}
+	// A copy, not c.nid itself: only the balloon-specific fields below
+	// differ from the steady-state icon/tooltip notifyIconData already
+	// registered, and this call must not disturb that registration.
+	balloon := c.nid
+	balloon.flags = nifInfo
+	balloon.infoFlags = niifInfo
+	copy(balloon.infoTitle[:], titleUTF16)
+	copy(balloon.info[:], messageUTF16)
+
+	ret, _, callErr := procShellNotifyIconW.Call(uintptr(nimModify), uintptr(unsafe.Pointer(&balloon)))
+	if ret == 0 {
+		return fmt.Errorf("show balloon: %w", callErr)
+	}
+	return nil
+}
+
 func (c *Controller) createMenu() error {
 	menu, _, callErr := procCreatePopupMenu.Call()
 	if menu == 0 {
@@ -442,6 +482,7 @@ func (c *Controller) createMenu() error {
 		{idMenuQuickNote, "Quick Note", false},
 		{0, "", true},
 		{idMenuShow, "Show Beresta", false},
+		{idMenuLock, "Lock", false},
 		{0, "", true},
 		{idMenuQuit, "Quit", false},
 	}
@@ -538,6 +579,8 @@ func (c *Controller) wndProc(hwnd uintptr, message uint32, wParam, lParam uintpt
 			c.invoke(c.handlers.OnQuickNote)
 		case idMenuShow:
 			c.invoke(c.handlers.OnShowWindow)
+		case idMenuLock:
+			c.invoke(c.handlers.OnLock)
 		case idMenuQuit:
 			c.invoke(c.handlers.OnQuit)
 		}

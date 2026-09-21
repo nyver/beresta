@@ -59,6 +59,7 @@ func main() {
 	trayCtrl, trayErr := traymenu.Start(traymenu.Handlers{
 		OnQuickNote:  app.handleQuickNoteTrigger,
 		OnShowWindow: app.handleShowWindowTrigger,
+		OnLock:       app.handleLockTrigger,
 		OnQuit:       app.handleQuitTrigger,
 	}, mod, vk)
 	if trayErr != nil {
@@ -66,6 +67,7 @@ func main() {
 	}
 	if trayCtrl != nil {
 		app.shell = trayCtrl
+		go watchForFirstCloseToTray(trayCtrl)
 	}
 
 	err = wails.Run(&options.App{

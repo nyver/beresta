@@ -39,6 +39,7 @@ export function mockSettings(overrides: Partial<main.AppSettings> = {}) {
     sync_security_mode: "pinned",
     sync_fingerprint: "",
     active_workspace_id: "",
+    close_to_tray_explained: false,
     ...overrides,
   };
   appMock.GetSettings.mockResolvedValue(settings);

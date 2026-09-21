@@ -580,6 +580,24 @@ describe("Shell", () => {
     await waitFor(() => expect(appMock.LockAccount).toHaveBeenCalled());
   });
 
+  it("locks the account when the tray menu's Lock item fires lock:requested (task 8.6)", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    appMock.LockAccount.mockResolvedValue(undefined);
+    renderShell();
+    await screen.findByRole("main");
+
+    await waitFor(() => expect(runtimeMock.EventsOnMultiple).toHaveBeenCalled());
+    const [, onLockRequested] =
+      runtimeMock.EventsOnMultiple.mock.calls.find(([eventName]) => eventName === "lock:requested") ?? [];
+    expect(onLockRequested).toBeDefined();
+
+    act(() => onLockRequested?.());
+
+    await waitFor(() => expect(appMock.LockAccount).toHaveBeenCalled());
+  });
+
   it("opens Settings with Ctrl+,", async () => {
     appMock.ListNotebooks.mockResolvedValue([]);
     appMock.ListTags.mockResolvedValue([]);

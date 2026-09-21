@@ -61,5 +61,22 @@ func TestSetHotkeyRoundTrip(t *testing.T) {
 	}
 }
 
+// TestShowBalloon proves ShowBalloon's notifyIconData struct (in
+// particular its infoTitle/info fixed-size arrays, filled from UTF-16
+// title/message text) round-trips through a real Shell_NotifyIconW call
+// without the OS rejecting it - the exact class of struct-layout bug a
+// pure Go unit test cannot catch (see TestStartAndClose's doc comment).
+func TestShowBalloon(t *testing.T) {
+	c, err := Start(Handlers{}, 0, 0)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(c.Close)
+
+	if err := c.ShowBalloon("Beresta", "Beresta is still running in the notification area."); err != nil {
+		t.Fatalf("ShowBalloon() error = %v", err)
+	}
+}
+
 func hotkeyModsForTest() uint32 { return modControl | modAlt | modShift }
 func vkF24ForTest() uint32      { return 0x87 } // VK_F24

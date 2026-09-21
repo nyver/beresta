@@ -62,6 +62,7 @@ export namespace main {
 	    sync_security_mode: string;
 	    sync_fingerprint: string;
 	    active_workspace_id: string;
+	    close_to_tray_explained: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -80,6 +81,7 @@ export namespace main {
 	        this.sync_security_mode = source["sync_security_mode"];
 	        this.sync_fingerprint = source["sync_fingerprint"];
 	        this.active_workspace_id = source["active_workspace_id"];
+	        this.close_to_tray_explained = source["close_to_tray_explained"];
 	    }
 	}
 	export class AttachmentDTO {

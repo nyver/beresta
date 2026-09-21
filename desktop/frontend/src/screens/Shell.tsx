@@ -38,6 +38,11 @@ import { UndoSnackbar } from "../shell/UndoSnackbar";
 
 // Matches desktop/events.go's EventQuickNoteOpen.
 const EVENT_QUICK_NOTE_OPEN = "quicknote:open";
+// Matches desktop/events.go's EventLockRequested, fired by the tray menu's
+// "Lock" item (task 8.6). The actual lock still runs through handleLock's
+// own flush-then-lock sequence below, not a direct Go-side LockAccount
+// call, so a tray-triggered lock cannot skip that ordering.
+const EVENT_LOCK_REQUESTED = "lock:requested";
 // Matches desktop/events.go's EventSyncSummary (see also SyncPanel.tsx's own
 // subscription - this one feeds the topbar's compact status pill and the
 // open note's footer status line instead of the full Sync modal). The event
@@ -260,6 +265,18 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
     if (!ready) return;
     EventsOn(EVENT_QUICK_NOTE_OPEN, handleOpenQuickNote);
     return () => EventsOff(EVENT_QUICK_NOTE_OPEN);
+  }, [ready]);
+
+  useEffect(() => {
+    // Fires when the tray menu's "Lock" item is selected (task 8.6;
+    // desktop/shell.go's handleLockTrigger already brought the main
+    // window to the front before emitting this). handleLockRef (defined
+    // below, alongside the auto-lock idle timer) is always initialized by
+    // the time this callback actually runs, since effects only fire after
+    // the full component render - including that declaration - completes.
+    if (!ready) return;
+    EventsOn(EVENT_LOCK_REQUESTED, () => void handleLockRef.current());
+    return () => EventsOff(EVENT_LOCK_REQUESTED);
   }, [ready]);
 
   useEffect(() => {

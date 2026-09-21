@@ -12,6 +12,9 @@ import (
 // which case UpdateSettings simply skips re-registering the hotkey.
 type shellController interface {
 	SetHotkey(mod, vk uint32) error
+	// ShowBalloon shows a one-shot notification-area balloon (task 8.6's
+	// first-use close-to-tray education).
+	ShowBalloon(title, message string) error
 	Close()
 }
 
@@ -61,6 +64,15 @@ func (a *App) handleQuickNoteTrigger() {
 // handleShowWindowTrigger is traymenu.Handlers.OnShowWindow.
 func (a *App) handleShowWindowTrigger() {
 	a.showWindow()
+}
+
+// handleLockTrigger is traymenu.Handlers.OnLock: it shows/restores the
+// main window (mirroring handleQuickNoteTrigger) and asks the frontend to
+// perform its own flush-then-lock sequence, rather than locking the
+// account directly here - see EventLockRequested's doc comment for why.
+func (a *App) handleLockTrigger() {
+	a.showWindow()
+	a.emit(EventLockRequested)
 }
 
 // handleQuitTrigger is traymenu.Handlers.OnQuit. Unlike the window's

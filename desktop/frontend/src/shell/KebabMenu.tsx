@@ -19,16 +19,30 @@ export interface KebabMenuProps {
  * attachment) needs a handful of secondary actions without permanently
  * occupying row space. Closes on an outside click or Escape; no focus trap,
  * since these menus are small enough that Tab simply leaving the menu is
- * fine (unlike Modal, which owns the whole screen).
+ * fine (unlike Modal, which owns the whole screen). Closing always returns
+ * focus to the trigger button (task 8.4's "logical tab/focus restoration"):
+ * without it, closing the menu while a menu item held focus (reached via
+ * Tab, or via a click/Escape after that) would unmount that focused
+ * element and drop keyboard focus to the document body, losing the user's
+ * place entirely.
  */
 export function KebabMenu({ label, items, className }: KebabMenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  function close() {
+    setOpen(false);
+    buttonRef.current?.focus();
+  }
 
   useEffect(() => {
     if (!open) return;
     function handlePointerDown(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        // No focus() here: an outside click already moved focus (or is
+        // about to) wherever the user clicked, so pulling it back to this
+        // button would fight that, not restore anything.
         setOpen(false);
       }
     }
@@ -40,7 +54,7 @@ export function KebabMenu({ label, items, className }: KebabMenuProps) {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      setOpen(false);
+      close();
     }
   }
 
@@ -51,6 +65,7 @@ export function KebabMenu({ label, items, className }: KebabMenuProps) {
       onKeyDown={handleKeyDown}
     >
       <button
+        ref={buttonRef}
         type="button"
         className="kebab-button"
         aria-label={label}
@@ -74,7 +89,7 @@ export function KebabMenu({ label, items, className }: KebabMenuProps) {
                 disabled={item.disabled}
                 onClick={(event) => {
                   event.stopPropagation();
-                  setOpen(false);
+                  close();
                   item.onSelect();
                 }}
               >

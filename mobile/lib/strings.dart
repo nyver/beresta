@@ -193,6 +193,8 @@ class Strings {
           "tracking, remote telemetry, or third-party crash upload by "
           "default.",
       "auto_lock": "Automatic lock",
+      "attachment_photo": "Photo attachment",
+      "attachment_file": "File attachment",
       "attachment_retention": "Downloaded attachments",
       "retention_all": "Keep all",
       "retention_selected": "Selected notebooks",
@@ -450,6 +452,8 @@ class Strings {
           "отслеживание поведения, удалённую телеметрию и отправку "
           "отчётов о сбоях сторонним сервисам.",
       "auto_lock": "Автоматическая блокировка",
+      "attachment_photo": "Фотовложение",
+      "attachment_file": "Файловое вложение",
       "attachment_retention": "Загруженные вложения",
       "retention_all": "Хранить все",
       "retention_selected": "Выбранные блокноты",

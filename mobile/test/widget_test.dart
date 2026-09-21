@@ -31,6 +31,54 @@ Future<void> simulateSystemBack(WidgetTester tester) async {
 
 void main() {
   testWidgets(
+    "main screens and every settings group do not overflow at a large text "
+    "scale on a small phone (task 9.7)",
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      final gateway = FakeGateway(unlocked: true)
+        ..notebooksList = [
+          {"id": "notebook-1", "parent_id": "", "name": "Notebook"},
+        ];
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: "home screen");
+
+      await tester.tap(find.byIcon(Icons.menu));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: "navigation drawer");
+
+      await simulateSystemBack(tester);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: "settings sheet");
+
+      for (final label in [
+        "General",
+        "Security",
+        "Synchronization",
+        "Data",
+        "Advanced",
+        "About",
+      ]) {
+        await tester.tap(find.widgetWithText(ChoiceChip, label));
+        await tester.pumpAndSettle();
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: "settings group $label",
+        );
+      }
+    },
+  );
+
+  testWidgets(
     "editor bottom action bar does not overflow at a large text scale on a "
     "small phone, with or without the keyboard open (task 9.3)",
     (tester) async {

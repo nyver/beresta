@@ -129,9 +129,16 @@ class NotesNavigationDrawer extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                strings("notebooks"),
-                style: Theme.of(context).textTheme.titleMedium,
+              // Expanded, with an ellipsis, so a long localized title at a
+              // large accessibility text scale shrinks to fit instead of
+              // pushing the menu button off the drawer's fixed width
+              // (task 9.7).
+              Expanded(
+                child: Text(
+                  strings("notebooks"),
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
               ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
@@ -169,7 +176,12 @@ class NotesNavigationDrawer extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(strings("tags")),
+              Expanded(
+                child: Text(
+                  strings("tags"),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               IconButton(
                 tooltip: strings("new_tag"),
                 onPressed: onCreateTag,

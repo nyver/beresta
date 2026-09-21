@@ -1527,11 +1527,17 @@ class _ServerSheetState extends State<ServerSheet> {
                 color: syncStatusColor(context, syncStatusValue),
               ),
               const SizedBox(width: 8),
-              Text(
-                "${widget.strings("sync_status_label")}: "
-                "${widget.strings("sync_status_$syncStatusValue")}",
-                style: TextStyle(
-                  color: syncStatusColor(context, syncStatusValue),
+              // Expanded, with an ellipsis, so the combined label+status
+              // text shrinks to fit at a large accessibility text scale
+              // instead of overflowing this fixed-width sheet (task 9.7).
+              Expanded(
+                child: Text(
+                  "${widget.strings("sync_status_label")}: "
+                  "${widget.strings("sync_status_$syncStatusValue")}",
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: syncStatusColor(context, syncStatusValue),
+                  ),
                 ),
               ),
             ],
@@ -2150,6 +2156,11 @@ class _SettingsSheetState extends State<SettingsSheet> {
           if (widget.section == SettingsSection.security)
             DropdownButtonFormField<int>(
               initialValue: current["auto_lock_minutes"] as int,
+              // Without this, the field's internal Row sizes to its
+              // selected item's natural width instead of the field's own
+              // available width, which overflows at a large accessibility
+              // text scale (task 9.7).
+              isExpanded: true,
               decoration: InputDecoration(
                 labelText: widget.strings("auto_lock"),
               ),
@@ -2169,6 +2180,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
           if (widget.section == SettingsSection.data) ...[
             DropdownButtonFormField<String>(
               initialValue: current["attachment_retention"] as String,
+              isExpanded: true,
               decoration: InputDecoration(
                 labelText: widget.strings("attachment_retention"),
               ),
@@ -4016,77 +4028,93 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
     final isImage = widget.mediaType.startsWith("image/");
     return Stack(
       children: [
-        GestureDetector(
-          onTap:
-              isImage
-                  ? () => showDialog<void>(
-                    context: context,
-                    builder:
-                        (_) => Dialog(
-                          child: FutureBuilder<Uint8List>(
-                            future: bytes,
-                            builder: (context, snapshot) {
-                              if (snapshot.hasError) {
-                                return SizedBox(
-                                  height: 200,
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.broken_image_outlined,
-                                      color:
-                                          Theme.of(context).colorScheme.error,
+        // A bare GestureDetector exposes its tap/long-press actions to
+        // TalkBack automatically but carries no label of its own; this
+        // names what the thumbnail actually is (task 9.7's TalkBack
+        // semantics requirement). The visible delete button below already
+        // has its own "delete" label, so long-press-to-delete needs no
+        // separate mention here.
+        Semantics(
+          label: widget.strings(
+            isImage ? "attachment_photo" : "attachment_file",
+          ),
+          image: isImage,
+          child: GestureDetector(
+            onTap:
+                isImage
+                    ? () => showDialog<void>(
+                      context: context,
+                      builder:
+                          (_) => Dialog(
+                            child: FutureBuilder<Uint8List>(
+                              future: bytes,
+                              builder: (context, snapshot) {
+                                if (snapshot.hasError) {
+                                  return SizedBox(
+                                    height: 200,
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.broken_image_outlined,
+                                        color:
+                                            Theme.of(
+                                              context,
+                                            ).colorScheme.error,
+                                      ),
                                     ),
-                                  ),
+                                  );
+                                }
+                                if (!snapshot.hasData) {
+                                  return const SizedBox(
+                                    height: 200,
+                                    child: Center(
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  );
+                                }
+                                return InteractiveViewer(
+                                  child: Image.memory(snapshot.data!),
                                 );
-                              }
-                              if (!snapshot.hasData) {
-                                return const SizedBox(
-                                  height: 200,
-                                  child: Center(
-                                    child: CircularProgressIndicator(),
-                                  ),
-                                );
-                              }
-                              return InteractiveViewer(
-                                child: Image.memory(snapshot.data!),
-                              );
-                            },
+                              },
+                            ),
                           ),
+                    )
+                    : null,
+            onLongPress: confirmDelete,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 96,
+                height: 96,
+                child: FutureBuilder<Uint8List>(
+                  future: bytes,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const ColoredBox(
+                        color: Color(0x11000000),
+                        child: Center(
+                          child: Icon(Icons.broken_image_outlined),
                         ),
-                  )
-                  : null,
-          onLongPress: confirmDelete,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: SizedBox(
-              width: 96,
-              height: 96,
-              child: FutureBuilder<Uint8List>(
-                future: bytes,
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return const ColoredBox(
-                      color: Color(0x11000000),
-                      child: Center(child: Icon(Icons.broken_image_outlined)),
-                    );
-                  }
-                  if (!snapshot.hasData) {
-                    return const ColoredBox(
-                      color: Color(0x11000000),
-                      child: Center(
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    );
-                  }
-                  if (!isImage) {
-                    return const ColoredBox(
-                      color: Color(0x11000000),
-                      child: Center(
-                        child: Icon(Icons.insert_drive_file_outlined),
-                      ),
-                    );
-                  }
-                  return Image.memory(snapshot.data!, fit: BoxFit.cover);
-                },
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return const ColoredBox(
+                        color: Color(0x11000000),
+                        child: Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      );
+                    }
+                    if (!isImage) {
+                      return const ColoredBox(
+                        color: Color(0x11000000),
+                        child: Center(
+                          child: Icon(Icons.insert_drive_file_outlined),
+                        ),
+                      );
+                    }
+                    return Image.memory(snapshot.data!, fit: BoxFit.cover);
+                  },
+                ),
               ),
             ),
           ),
@@ -4100,9 +4128,12 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
             shape: const CircleBorder(),
             child: IconButton(
               tooltip: widget.strings("delete"),
-              constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+              // At least 48x48dp (task 9.7's "Accessible Android
+              // operation": interactive targets SHALL be at least 48x48
+              // density-independent pixels) - this used to be a 40x40
+              // compact button, below the minimum.
+              constraints: const BoxConstraints.tightFor(width: 48, height: 48),
               padding: EdgeInsets.zero,
-              visualDensity: VisualDensity.compact,
               onPressed: confirmDelete,
               icon: const Icon(Icons.delete_outline, size: 20),
             ),

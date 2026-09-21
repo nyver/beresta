@@ -1,5 +1,7 @@
 import "package:flutter/material.dart";
 
+import "design_tokens.dart";
+
 /// Maps a core/presentation.SyncState value ("local_only", "current",
 /// "active", "offline", "pending", "retrying", "action_required") - the
 /// same seven-state model desktop renders (see core/syncsummary.Summarize)
@@ -22,20 +24,26 @@ IconData syncStatusIcon(String status) {
   }
 }
 
+/// Colors mirror desktop's `.sync-status-*` rules (styles.css) via
+/// design/tokens.json's `color.status.*` roles, rather than Material's
+/// generic red/green/orange, so the same sync state reads as the same color
+/// on both clients. Desktop treats "pending" as neutral (waiting, not yet a
+/// problem) and reserves the warning color for "offline"/"retrying"
+/// specifically - kept distinct here too instead of grouping all three.
 Color syncStatusColor(BuildContext context, String status) {
-  final scheme = Theme.of(context).colorScheme;
   switch (status) {
     case "current":
-      return Colors.green;
+      return AppColors.statusSuccess;
     case "active":
-      return scheme.primary;
+      return AppColors.statusInfo;
     case "offline":
     case "retrying":
+      return AppColors.statusWarningStrong;
     case "pending":
-      return Colors.orange;
+      return AppColors.statusNeutral;
     case "action_required":
-      return scheme.error;
+      return AppColors.statusDanger;
     default:
-      return scheme.onSurfaceVariant;
+      return AppColors.statusNeutral;
   }
 }

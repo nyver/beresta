@@ -13,6 +13,7 @@ import "commit_tracker.dart";
 import "core_gateway.dart";
 import "markdown_delta.dart";
 import "paste_format.dart";
+import "shell/design_tokens.dart";
 import "shell/language_control.dart";
 import "shell/note_list_view.dart";
 import "shell/notes_app_bar.dart";
@@ -170,7 +171,10 @@ class _BerestaAppState extends State<BerestaApp> {
       debugShowCheckedModeBanner: false,
       title: "Beresta",
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF754C29)),
+        // Seeded from color.accent.default (design/tokens.json) so the
+        // derived Material 3 tonal palette starts from the same brand color
+        // desktop actually renders, rather than a close-but-different value.
+        colorScheme: ColorScheme.fromSeed(seedColor: AppColors.accentDefault),
         useMaterial3: true,
       ),
       // The note editor's flutter_quill toolbar reads its tooltip strings
@@ -315,7 +319,7 @@ class _AppLifecycleLockState extends State<AppLifecycleLock>
   Widget build(BuildContext context) {
     if (obscured) {
       return const Scaffold(
-        backgroundColor: Color(0xFF2B2118),
+        backgroundColor: AppColors.inverseBackground,
         body: SizedBox.expand(),
       );
     }
@@ -4081,7 +4085,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
                     : null,
             onLongPress: confirmDelete,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
               child: SizedBox(
                 width: 96,
                 height: 96,
@@ -4090,7 +4094,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
                   builder: (context, snapshot) {
                     if (snapshot.hasError) {
                       return const ColoredBox(
-                        color: Color(0x11000000),
+                        color: AppColors.accentHoverTint,
                         child: Center(
                           child: Icon(Icons.broken_image_outlined),
                         ),
@@ -4098,7 +4102,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
                     }
                     if (!snapshot.hasData) {
                       return const ColoredBox(
-                        color: Color(0x11000000),
+                        color: AppColors.accentHoverTint,
                         child: Center(
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
@@ -4106,7 +4110,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
                     }
                     if (!isImage) {
                       return const ColoredBox(
-                        color: Color(0x11000000),
+                        color: AppColors.accentHoverTint,
                         child: Center(
                           child: Icon(Icons.insert_drive_file_outlined),
                         ),
@@ -4370,10 +4374,7 @@ class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
                                 text:
                                     "${_diffMarker(line["op"] as String)}${line["text"]}\n",
                                 style: TextStyle(
-                                  color: _diffColor(
-                                    line["op"] as String,
-                                    scheme,
-                                  ),
+                                  color: _diffColor(line["op"] as String),
                                   fontFamily: "monospace",
                                 ),
                               ),
@@ -4421,9 +4422,9 @@ class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
     _ => "  ",
   };
 
-  Color? _diffColor(String op, ColorScheme scheme) => switch (op) {
-    "insert" => Colors.green,
-    "delete" => scheme.error,
+  Color? _diffColor(String op) => switch (op) {
+    "insert" => AppColors.statusSuccess,
+    "delete" => AppColors.statusDanger,
     _ => null,
   };
 }

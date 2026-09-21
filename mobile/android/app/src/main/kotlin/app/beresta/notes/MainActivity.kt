@@ -35,6 +35,21 @@ class MainActivity : FlutterFragmentActivity() {
     @Volatile private var nativeCoreInitStarted = false
     @Volatile private var deviceAuthenticationFresh = false
 
+    // How many staged share/quick-note captures the most recent unlock
+    // drained into real notes, read and cleared exactly once by Dart's
+    // "takeShareImportCount" call so the completion notice (task 9.5) is
+    // never shown twice for the same import.
+    @Volatile private var lastShareImportCount = 0
+
+    // Common to every unlock path (passphrase create/unlock, and device
+    // authentication below) so staged share/quick-note captures are always
+    // drained and an immediate backup is requested regardless of which
+    // path the user took to unlock.
+    private fun onAccountUnlocked() {
+        lastShareImportCount = ShareHandoff.drain(this)
+        BackupWorker.requestImmediate(this)
+    }
+
     private val backupTreePicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         val pending = pendingBackupDestination.also { pendingBackupDestination = null } ?: return@registerForActivityResult
         if (uri == null) pending.success(false)
@@ -298,14 +313,13 @@ class MainActivity : FlutterFragmentActivity() {
             "status" -> annotateStatus(service.status())
             "createAccount" -> service.createAccount(requestId, NativeCore.accountPath(filesDir), required(call, "passphrase")).also {
                 enableDeviceUnlockIfAvailable(service)
-                ShareHandoff.drain(this)
-                BackupWorker.requestImmediate(this)
+                onAccountUnlocked()
             }
             "unlockAccount" -> service.unlockAccount(requestId, NativeCore.accountPath(filesDir), required(call, "passphrase")).also {
                 enableDeviceUnlockIfAvailable(service)
-                ShareHandoff.drain(this)
-                BackupWorker.requestImmediate(this)
+                onAccountUnlocked()
             }
+            "takeShareImportCount" -> lastShareImportCount.also { lastShareImportCount = 0 }
             "lock" -> service.lock()
             "listNotes" -> service.listNotes(requestId)
             "createNote" -> service.createNote(requestId, call.argument<String>("notebookId") ?: "", required(call, "title"))
@@ -399,7 +413,17 @@ class MainActivity : FlutterFragmentActivity() {
                 runCatching {
                     NativeCore.awaitService().unlockWithDeviceKey(requestId, databasePath)
                 }.fold(
-                    onSuccess = { value -> mainHandler.post { result.success(value) } },
+                    onSuccess = { value ->
+                        // Matches the passphrase create/unlock paths above:
+                        // biometric/device-credential unlock (task 7.5's
+                        // primary, automatic path) must drain staged
+                        // share/quick-note captures too, not just passphrase
+                        // unlock - otherwise content shared while locked
+                        // would never become a note for a user who never
+                        // unlocks with a passphrase.
+                        onAccountUnlocked()
+                        mainHandler.post { result.success(value) }
+                    },
                     onFailure = { error -> mainHandler.post { result.error("device_unlock_failed", error.message, null) } },
                 )
             }
@@ -472,7 +496,12 @@ class MainActivity : FlutterFragmentActivity() {
 
     private fun importShareIntent(intent: Intent) {
         if (intent.action != Intent.ACTION_SEND) return
-        ShareHandoff.capture(this, intent)
+        // A malformed or oversized share (capture() validates size/media
+        // type with require()) must not crash the app that is already in
+        // the foreground to receive it - this was previously unguarded,
+        // unlike ShareReceiverActivity's own runCatching around the same
+        // call.
+        runCatching { ShareHandoff.capture(this, intent) }
         intent.action = null
     }
 

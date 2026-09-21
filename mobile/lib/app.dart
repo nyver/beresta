@@ -729,6 +729,30 @@ class _NotesShellState extends State<NotesShell> {
         }
       });
     }
+    unawaited(checkShareImportCompletion());
+  }
+
+  // Post-unlock completion notice for content shared or quick-noted while
+  // the account was locked (specs/mobile-clients' "Share extension and
+  // quick-note widget", task 9.5): the actual import already happened
+  // natively during unlock, before this screen ever mounted - this only
+  // surfaces a one-time, non-blocking notice for it, and is a no-op
+  // (count 0) on every ordinary unlock that drained nothing.
+  Future<void> checkShareImportCompletion() async {
+    try {
+      final count = await widget.gateway.takeShareImportCount();
+      if (count > 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("$count ${widget.strings("share_import_summary")}"),
+          ),
+        );
+      }
+    } catch (_) {
+      // Best-effort: a transient bridge error simply skips this one-time
+      // notice; the import itself, if any, already completed during
+      // unlock regardless of whether this notice can be shown.
+    }
   }
 
   Future<void> refreshSyncSummary() async {

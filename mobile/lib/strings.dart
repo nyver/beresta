@@ -136,6 +136,7 @@ class Strings {
       "workspace_owner": "Owner",
       "workspace_member": "Member",
       "workspace_members": "members",
+      "share_import_summary": "shared items added to your notes",
       "workspace_active": "Active",
       "workspace_switch": "Switch",
       "workspace_sync_pending":
@@ -392,6 +393,7 @@ class Strings {
       "workspace_owner": "Владелец",
       "workspace_member": "Участник",
       "workspace_members": "участников",
+      "share_import_summary": "публикаций из «Поделиться» добавлено в заметки",
       "workspace_active": "Активно",
       "workspace_switch": "Переключить",
       "workspace_sync_pending":

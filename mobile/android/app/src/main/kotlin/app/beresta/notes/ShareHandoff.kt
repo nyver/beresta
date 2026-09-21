@@ -10,6 +10,7 @@ import java.io.DataOutputStream
 import java.io.File
 import java.security.KeyStore
 import java.util.UUID
+import java.util.concurrent.Executors
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -22,25 +23,45 @@ internal object ShareHandoff {
     private const val MAX_IMAGE_BYTES = 64 shl 20
     private val associatedData = "beresta-share-handoff-v1".toByteArray()
 
+    // Only the image path's own (potentially large) read/encrypt/write ever
+    // runs here - see capture() below.
+    private val captureExecutor = Executors.newSingleThreadExecutor()
+
+    // For a plain-text share, capture() stays synchronous end to end (the
+    // work is small, and QuickNoteActivity depends on a synchronous
+    // success/failure to decide which confirmation to show). For an image,
+    // this only resolves the content:// URI - which must happen on the
+    // calling thread, while the caller (ShareReceiverActivity, or
+    // MainActivity handling a share while already foregrounded) still holds
+    // its granted read permission - and defers the actual read, encryption,
+    // and file write to a background thread, so that entry interaction is
+    // never blocked on them (specs/mobile-clients: "expensive processing
+    // SHALL continue after the entry interaction"). Once a stream is open,
+    // continuing to read from it does not require the permission grant to
+    // still be valid, so this split adds no correctness risk.
     fun capture(context: Context, intent: Intent) {
         val mediaType = intent.type ?: return
-        val payload = when {
-            mediaType == "text/plain" -> {
-                val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
-                val encoded = text.toByteArray()
-                require(encoded.isNotEmpty() && encoded.size <= MAX_TEXT_BYTES)
-                Capture(1, "text/plain", encoded)
-            }
-            mediaType.startsWith("image/") -> {
-                val uri = intent.shareUri() ?: return
-                val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
-                    readBounded(input, MAX_IMAGE_BYTES)
-                } ?: return
-                require(bytes.isNotEmpty() && bytes.size <= MAX_IMAGE_BYTES)
-                Capture(2, mediaType.take(128), bytes)
-            }
-            else -> return
+        if (mediaType == "text/plain") {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+            val encoded = text.toByteArray()
+            require(encoded.isNotEmpty() && encoded.size <= MAX_TEXT_BYTES)
+            persist(context, Capture(1, "text/plain", encoded))
+            return
         }
+        if (!mediaType.startsWith("image/")) return
+        val uri = intent.shareUri() ?: return
+        val input = context.contentResolver.openInputStream(uri) ?: return
+        val mediaTypeTrimmed = mediaType.take(128)
+        captureExecutor.execute {
+            runCatching {
+                val bytes = input.use { readBounded(it, MAX_IMAGE_BYTES) }
+                require(bytes.isNotEmpty() && bytes.size <= MAX_IMAGE_BYTES)
+                persist(context, Capture(2, mediaTypeTrimmed, bytes))
+            }
+        }
+    }
+
+    private fun persist(context: Context, payload: Capture) {
         val encoded = payload.encode()
         val encrypted = encrypt(encoded)
         encoded.fill(0)
@@ -52,8 +73,15 @@ internal object ShareHandoff {
         check(temporary.renameTo(destination))
     }
 
-    fun drain(context: Context) {
+    // Returns how many staged captures were successfully turned into notes,
+    // so the caller can give the user a post-unlock completion notice
+    // (specs/mobile-clients' "Share extension and quick-note widget":
+    // capture "shall enter encrypted local storage even when
+    // synchronization is unavailable" and shall surface "a non-blocking
+    // completion notice" once the app is unlocked).
+    fun drain(context: Context): Int {
         val directory = File(context.noBackupFilesDir, "share-handoff")
+        var imported = 0
         directory.listFiles { file -> file.extension == "bhf" }?.sortedBy { it.name }?.forEach { file ->
             runCatching {
                 val plaintext = decrypt(file.readBytes())
@@ -75,8 +103,9 @@ internal object ShareHandoff {
                 }
                 capture.contents.fill(0)
                 check(file.delete())
-            }
+            }.onSuccess { imported++ }
         }
+        return imported
     }
 
     @Suppress("DEPRECATION")

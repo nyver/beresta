@@ -186,6 +186,15 @@ abstract interface class CoreGateway {
   /// consistency, and backup health, matching desktop's identical
   /// DataCheckReportDTO - see core/mobileapi.Service.RunDataCheck.
   Future<Map<String, dynamic>> runDataCheck();
+
+  /// Returns how many share-target/quick-note captures staged while the
+  /// account was locked were just turned into notes by the most recent
+  /// unlock, then resets that count to zero - a post-unlock completion
+  /// notice (specs/mobile-clients' "Share extension and quick-note
+  /// widget") the caller should show at most once per unlock. Always 0
+  /// outside that one call immediately after unlock, since the count is
+  /// consumed on read.
+  Future<int> takeShareImportCount();
 }
 
 class MethodChannelCore implements CoreGateway {
@@ -493,4 +502,8 @@ class MethodChannelCore implements CoreGateway {
   @override
   Future<Map<String, dynamic>> runDataCheck() async =>
       _object(await _invoke("runDataCheck"));
+
+  @override
+  Future<int> takeShareImportCount() async =>
+      await _invoke("takeShareImportCount") as int;
 }

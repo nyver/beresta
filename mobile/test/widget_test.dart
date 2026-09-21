@@ -1304,6 +1304,39 @@ void main() {
     expect(find.text("Shared from desktop"), findsOneWidget);
   });
 
+  testWidgets(
+    "shows a one-time completion notice for content shared while locked "
+    "(task 9.5)",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)..shareImportCount = 2;
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      expect(gateway.takeShareImportCountCallCount, 1);
+      expect(
+        find.text("2 shared items added to your notes"),
+        findsOneWidget,
+      );
+
+      // The count is consumed on read, so it must not repeat on the next
+      // check (e.g. a later unlock in the same session that drained
+      // nothing new).
+      expect(gateway.shareImportCount, 0);
+    },
+  );
+
+  testWidgets(
+    "shows no completion notice on an ordinary unlock that imported nothing",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      expect(gateway.takeShareImportCountCallCount, 1);
+      expect(find.textContaining("added to your notes"), findsNothing);
+    },
+  );
+
   testWidgets("sync button refreshes the current workspace collection", (
     tester,
   ) async {
@@ -1806,5 +1839,15 @@ class FakeGateway implements CoreGateway {
     runDataCheckCallCount++;
     if (runDataCheckFailure != null) throw runDataCheckFailure!;
     return dataCheckReportValue;
+  }
+
+  int shareImportCount = 0;
+  int takeShareImportCountCallCount = 0;
+  @override
+  Future<int> takeShareImportCount() async {
+    takeShareImportCountCallCount++;
+    final count = shareImportCount;
+    shareImportCount = 0;
+    return count;
   }
 }

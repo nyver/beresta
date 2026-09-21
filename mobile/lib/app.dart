@@ -3843,24 +3843,36 @@ class _EditorScreenState extends State<EditorScreen> {
         bottomNavigationBar: SafeArea(
           child: Row(
             children: [
-              TextButton.icon(
-                onPressed: capturingPhoto ? null : capturePhoto,
-                icon:
-                    capturingPhoto
-                        ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                        : const Icon(Icons.photo_camera),
-                label: Text(
-                  widget.strings(capturingPhoto ? "photo_adding" : "photo"),
+              // Expanded, with an ellipsis on each label, so a long
+              // localized string at a large accessibility text scale
+              // shrinks to fit its own half of the bar instead of
+              // overflowing past the other primary action (task 9.3).
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: capturingPhoto ? null : capturePhoto,
+                  icon:
+                      capturingPhoto
+                          ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                          : const Icon(Icons.photo_camera),
+                  label: Text(
+                    widget.strings(capturingPhoto ? "photo_adding" : "photo"),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
-              TextButton.icon(
-                onPressed: showRevisions,
-                icon: const Icon(Icons.history),
-                label: Text(widget.strings("revisions")),
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: showRevisions,
+                  icon: const Icon(Icons.history),
+                  label: Text(
+                    widget.strings("revisions"),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ),
             ],
           ),

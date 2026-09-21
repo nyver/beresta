@@ -30,6 +30,44 @@ Future<void> simulateSystemBack(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets(
+    "editor bottom action bar does not overflow at a large text scale on a "
+    "small phone, with or without the keyboard open (task 9.3)",
+    (tester) async {
+      // A common small/entry-level Android phone's logical size, not the
+      // much larger default test surface, and Android's largest standard
+      // accessibility font scale (specs/mobile-clients' "Accessible
+      // Android operation": "support platform font scaling without
+      // obscuring primary or destructive controls").
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      final gateway = FakeGateway(unlocked: true);
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text("Add photo"), findsOneWidget);
+      expect(find.text("Previous versions"), findsOneWidget);
+
+      // Simulate the on-screen keyboard opening while editing: the
+      // formatting toolbar and the bottom action bar must both keep
+      // rendering (specs/mobile-clients' "Durable Android editor
+      // lifecycle": "Keyboard insets SHALL keep active content and the
+      // formatting toolbar accessible") without the Scaffold overflowing.
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(QuillSimpleToolbar), findsOneWidget);
+    },
+  );
+
   testWidgets("onboarding is local-first and switches language", (
     tester,
   ) async {

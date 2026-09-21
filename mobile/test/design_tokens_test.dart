@@ -134,6 +134,40 @@ void main() {
       });
     });
   });
+
+  group("AppDuration.resolve (task 10.4 reduced motion)", () {
+    testWidgets("returns the requested duration when motion is not reduced", (tester) async {
+      late Duration resolved;
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(disableAnimations: false),
+          child: Builder(
+            builder: (context) {
+              resolved = AppDuration.resolve(context, AppDuration.slow);
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+      expect(resolved, AppDuration.slow);
+    });
+
+    testWidgets("collapses to instant when the platform requests reduced motion", (tester) async {
+      late Duration resolved;
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: Builder(
+            builder: (context) {
+              resolved = AppDuration.resolve(context, AppDuration.slow);
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+      expect(resolved, AppDuration.instant);
+    });
+  });
 }
 
 /// design/tokens.json lives at the repository root; `flutter test` runs

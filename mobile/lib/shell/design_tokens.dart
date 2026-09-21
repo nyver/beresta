@@ -83,7 +83,16 @@ class AppIconSize {
 /// don't go through a Material widget's default hit-test area.
 const double kTouchTargetMinimum = 44;
 
-/// `animationDuration.*`.
+/// `animationDuration.*` and the `motion.reducedMotionOverride` rule (task
+/// 10.4): every animated widget this app adds should read its duration
+/// through [resolve] rather than a raw constant, so a future animation
+/// cannot ship without collapsing to `instant` when the platform requests
+/// reduced motion. There is no custom animated widget yet - route
+/// transitions and Material ripple/splash effects are the app's only
+/// motion today, and both come from the Flutter/Material framework itself
+/// rather than a duration this app controls - so `resolve` currently has no
+/// caller; it exists so the next one is correct by construction instead of
+/// each animated feature inventing its own reduced-motion check.
 class AppDuration {
   const AppDuration._();
 
@@ -91,6 +100,13 @@ class AppDuration {
   static const Duration fast = Duration(milliseconds: 120);
   static const Duration base = Duration(milliseconds: 200);
   static const Duration slow = Duration(milliseconds: 800);
+
+  /// Returns [duration] normally, or [instant] when the platform's
+  /// accessibility settings request reduced motion
+  /// (`MediaQuery.disableAnimations`).
+  static Duration resolve(BuildContext context, Duration duration) {
+    return MediaQuery.of(context).disableAnimations ? instant : duration;
+  }
 }
 
 /// `color.status.*`, `color.accent.*`, and `color.inverse.*` - the semantic

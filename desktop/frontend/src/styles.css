@@ -1916,6 +1916,17 @@ li:hover > .tree-row-delete,
   }
 }
 
+/* Task 10.4: the spin is decorative - "syncing" is already conveyed by
+   aria-busy and the sync status text/icon next to it, so removing the
+   motion loses no information. This is the only keyframe animation in the
+   app today; a future one must add an equivalent override here, not assume
+   prefers-reduced-motion is handled automatically. */
+@media (prefers-reduced-motion: reduce) {
+  .sync-now-button[aria-busy="true"] span {
+    animation: none;
+  }
+}
+
 .key-protection-hint {
   display: inline-flex;
   align-items: center;

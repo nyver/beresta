@@ -88,6 +88,21 @@ Consolidations made during review:
   (offline/local-only) - it does not introduce a fifth category not already
   needed by an existing UI state.
 
+## Dark mode is deliberately not introduced yet
+
+design.md's "Build parallel native design-token layers from one semantic
+manifest" decision states theme scope is all-or-nothing: "dark mode ships
+only when every editor, dialog, menu, native bridge, and platform surface
+passes the complete theme matrix." That matrix needs visual review on real
+displays and the physical Windows/Android qualification passes (tasks
+12.4/12.5) - neither is something this manifest or its consuming code can
+self-certify. Task 10.4 therefore implements only the half of "reduced-motion
+and complete-theme handling" that is independently verifiable today:
+reduced-motion support (`tokens.css`'s `prefers-reduced-motion` override,
+`design_tokens.dart`'s `AppDuration.resolve`). A second (dark) color set is
+intentionally not added to this manifest; adding one is future work gated on
+that qualification pass, not a gap in this review.
+
 ## What this manifest does not do
 
 Defining and reviewing the manifest (this task, 10.1) does not migrate any

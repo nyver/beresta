@@ -646,7 +646,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: Text(
                       error!,
                       style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
+                        color: AppColors.statusDanger,
                       ),
                     ),
                   ),
@@ -1626,7 +1626,7 @@ class _ServerSheetState extends State<ServerSheet> {
           if (error != null)
             Text(
               error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              style: TextStyle(color: AppColors.statusDanger),
             ),
           const SizedBox(height: 12),
           TextButton(
@@ -2253,7 +2253,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
           if (error != null)
             Text(
               error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              style: TextStyle(color: AppColors.statusDanger),
             ),
           const SizedBox(height: 12),
           FilledButton(
@@ -2393,7 +2393,7 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
               children: [
                 Text(
                   summaryError!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  style: TextStyle(color: AppColors.statusDanger),
                 ),
                 TextButton(
                   onPressed: () => unawaited(loadSummary()),
@@ -2478,7 +2478,7 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
                     Text(
                       technicalError!,
                       style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
+                        color: AppColors.statusDanger,
                       ),
                     )
                   else if (technical != null)
@@ -2487,7 +2487,7 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
                   Text(
                     copyError!,
                     style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
+                      color: AppColors.statusDanger,
                     ),
                   ),
                 TextButton(
@@ -2649,7 +2649,7 @@ class _DataCheckSectionState extends State<DataCheckSection> {
             child: CircularProgressIndicator(),
           )
         else if (error != null)
-          Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error))
+          Text(error!, style: TextStyle(color: AppColors.statusDanger))
         else if (current != null)
           Text(
             widget.strings("data_check_issue_${current["issue"]}"),
@@ -2657,7 +2657,7 @@ class _DataCheckSectionState extends State<DataCheckSection> {
               color:
                   current["healthy"] == true
                       ? null
-                      : Theme.of(context).colorScheme.error,
+                      : AppColors.statusDanger,
             ),
           ),
       ],
@@ -2754,7 +2754,7 @@ class _BackupSheetState extends State<BackupSheet> {
             if (health == "corrupt")
               Text(
                 widget.strings("backup_corrupt_explanation"),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                style: TextStyle(color: AppColors.statusDanger),
               ),
           ],
         ),
@@ -2825,7 +2825,7 @@ class _BackupSheetState extends State<BackupSheet> {
         if (error != null)
           Text(
             error!,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
+            style: TextStyle(color: AppColors.statusDanger),
           ),
         if (spaceError)
           OutlinedButton(
@@ -3242,7 +3242,7 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
                   Text(
                     error!,
                     style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
+                      color: AppColors.statusDanger,
                     ),
                   ),
                 if (plan == null)
@@ -4060,9 +4060,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
                                       child: Icon(
                                         Icons.broken_image_outlined,
                                         color:
-                                            Theme.of(
-                                              context,
-                                            ).colorScheme.error,
+                                            AppColors.statusDanger,
                                       ),
                                     ),
                                   );
@@ -4326,7 +4324,6 @@ class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
@@ -4358,7 +4355,7 @@ class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
                 diffError != null
                     ? Text(
                       describeFailure(widget.strings, diffError!),
-                      style: TextStyle(color: scheme.error),
+                      style: TextStyle(color: AppColors.statusDanger),
                     )
                     : diffLines == null
                     ? const Padding(
@@ -4394,7 +4391,7 @@ class _RevisionDetailSheetState extends State<RevisionDetailSheet> {
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
                 describeFailure(widget.strings, restoreError!),
-                style: TextStyle(color: scheme.error),
+                style: TextStyle(color: AppColors.statusDanger),
               ),
             ),
           Align(

@@ -11,13 +11,21 @@ import android.widget.LinearLayout
 import android.widget.Toast
 
 class QuickNoteActivity : Activity() {
+    private lateinit var editor: EditText
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        val editor = EditText(this).apply {
+        editor = EditText(this).apply {
             hint = getString(R.string.quick_note_hint)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             minLines = 5
+            // This dynamically-built view has no stable id for Android's
+            // own view-hierarchy state restoration to key off, so without
+            // this a screen rotation or a low-memory process recreation
+            // while composing a quick note would silently erase the typed,
+            // not-yet-saved text.
+            savedInstanceState?.getString(STATE_TEXT)?.let { setText(it) }
         }
         val save = Button(this).apply {
             text = getString(R.string.quick_note_save)
@@ -42,5 +50,14 @@ class QuickNoteActivity : Activity() {
             addView(editor, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
             addView(save)
         })
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_TEXT, editor.text.toString())
+    }
+
+    companion object {
+        private const val STATE_TEXT = "quick_note_text"
     }
 }

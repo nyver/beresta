@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -162,6 +163,97 @@ func TestApplyRestoresPriorExecutableWhenInstalledPublisherIsRejected(t *testing
 		t.Fatal("Apply(untrusted installed executable) error = nil")
 	}
 	assertFileContent(t, installed, "version one")
+}
+
+// TestRollbackFailsWhenNoPriorExecutableWasPreserved exercises the rollback
+// path itself failing (task 8.7's "exercise rollback failures"): if Apply
+// was never run, or its preserved copy has since gone missing, Rollback
+// must report a clear error rather than silently doing nothing or leaving
+// the installed executable half-replaced.
+func TestRollbackFailsWhenNoPriorExecutableWasPreserved(t *testing.T) {
+	dir := retryTempDir(t)
+	installed := filepath.Join(dir, "beresta.exe")
+	if err := os.WriteFile(installed, []byte("version two"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// No installed+rollbackSuffix file exists - Apply was never run.
+
+	err := Rollback(installed)
+	if err == nil {
+		t.Fatal("Rollback(no preserved executable) error = nil")
+	}
+	// The still-installed executable must be untouched by the failed
+	// attempt, not partially overwritten.
+	assertFileContent(t, installed, "version two")
+}
+
+// TestRollbackFailsWhenPreservedExecutableIsCorrupt covers the other
+// rollback-failure shape: a preserved copy exists but is not a usable
+// regular file (for example, a directory left behind by a prior crash
+// mid-preservation).
+func TestRollbackFailsWhenPreservedExecutableIsCorrupt(t *testing.T) {
+	dir := retryTempDir(t)
+	installed := filepath.Join(dir, "beresta.exe")
+	if err := os.WriteFile(installed, []byte("version two"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(installed+rollbackSuffix, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Rollback(installed); err == nil {
+		t.Fatal("Rollback(non-regular preserved file) error = nil")
+	}
+	assertFileContent(t, installed, "version two")
+}
+
+// TestApplyReportsBothFailuresWhenInstallerFailsAndItsOwnRollbackAlsoFails
+// covers Apply's internal restore-on-failure path itself failing (task
+// 8.7's "exercise rollback failures"): the installer runner deletes the
+// preserved ".previous" copy Apply just created before reporting its own
+// failure, so Apply's subsequent restore attempt has nothing to restore
+// from. Both failures must be visible in the returned error, and the
+// installed executable must be left in whatever partial state the failing
+// installer left it in - never silently reported as recovered when it was
+// not.
+func TestApplyReportsBothFailuresWhenInstallerFailsAndItsOwnRollbackAlsoFails(t *testing.T) {
+	dir := retryTempDir(t)
+	installed := filepath.Join(dir, "beresta.exe")
+	artifact := filepath.Join(dir, "beresta-installer.exe")
+	if err := os.WriteFile(installed, []byte("version one"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact, []byte("installer"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest, publicKey := signedManifest(t, artifact, "0.2.0")
+	runner := InstallerRunnerFunc(func(context.Context, string, ...string) error {
+		// Apply already preserved installed+rollbackSuffix by this point;
+		// remove it so Apply's own restore attempt below has nothing to
+		// recover from, then leave the installed executable partially
+		// overwritten, as a real interrupted install would.
+		if err := os.Remove(installed + rollbackSuffix); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(installed, []byte("partial"), 0o700); err != nil {
+			return err
+		}
+		return errors.New("installer exit 1")
+	})
+
+	err := Apply(context.Background(), manifest, artifact, installed, "0.1.0", publicKey, PublisherVerifierFunc(func(context.Context, string) error { return nil }), runner)
+	if err == nil {
+		t.Fatal("Apply(failing installer, failing rollback) error = nil")
+	}
+	if !strings.Contains(err.Error(), "installer exit 1") {
+		t.Errorf("Apply error = %q, want it to mention the original installer failure", err)
+	}
+	if !strings.Contains(err.Error(), "rollback failed") {
+		t.Errorf("Apply error = %q, want it to mention the rollback failure", err)
+	}
+	// The installed executable is left exactly as the failing installer
+	// left it - Apply must never claim a recovery it could not perform.
+	assertFileContent(t, installed, "partial")
 }
 
 func signedManifest(t *testing.T, artifact, version string) (Manifest, ed25519.PublicKey) {

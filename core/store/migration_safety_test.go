@@ -217,6 +217,68 @@ func TestOpenTakesSafetyBackupBeforeApplyingAPendingMigration(t *testing.T) {
 	}
 }
 
+// TestSafetyBackupRecoversFromACatastrophicallyFailedMigration exercises
+// the actual recovery path a pre-migration safety backup exists for (task
+// 8.7's "exercise rollback failures", specs/windows-desktop-client's
+// "Migration fails after update starts" scenario): not the already-covered
+// case of a migration statement itself failing (Migrate's own transaction
+// already rolls that back cleanly with no file-level recovery needed -
+// TestApplyMigrationRollsBackFailedMigrationLeavingSchemaVersionUnchanged),
+// but the harder case BackupDatabaseFile's own doc comment describes - a
+// migration that leaves the database file itself corrupted or wrong,
+// whether from a mid-write crash or a bug discovered after the fact - and
+// proves restoring the safety backup recovers a fully working database
+// with every pre-migration record intact, exactly as the spec's "offers
+// rollback without discarding account data" requires.
+func TestSafetyBackupRecoversFromACatastrophicallyFailedMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "beresta.db")
+	backupPath := filepath.Join(dir, "beresta.db.pre-migration-v1-1000.bak")
+	key := testDatabaseKey(t, 0x62)
+	defer key.Close()
+	ctx := context.Background()
+
+	db := openSQLCipherForTest(t, path, key)
+	workspaceID := seedWorkspace(t, db)
+	if err := BackupDatabaseFile(ctx, db, path, backupPath); err != nil {
+		t.Fatalf("BackupDatabaseFile() error = %v", err)
+	}
+	db.Close()
+
+	// Simulate a migration that left the live database file corrupted -
+	// the scenario the safety backup exists for, distinct from an
+	// in-transaction SQL failure (which never reaches disk in the first
+	// place). A real cause could be a process killed mid-write or a
+	// migration bug found only after it already committed.
+	if err := os.WriteFile(path, []byte("not a valid SQLite database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	openErr := key.Use(func(k []byte) error {
+		opened, err := sqlcipherdb.Open(path, k)
+		if err == nil {
+			opened.Close()
+		}
+		return err
+	})
+	if openErr == nil {
+		t.Fatal("opening the corrupted database unexpectedly succeeded")
+	}
+
+	if err := RestoreDatabaseFile(ctx, backupPath, path); err != nil {
+		t.Fatalf("RestoreDatabaseFile() error = %v", err)
+	}
+
+	restored := openSQLCipherForTest(t, path, key)
+	defer restored.Close()
+	var count int
+	if err := restored.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces WHERE id = ?`, workspaceID.Bytes()).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatal("restoring the safety backup lost the pre-migration workspace")
+	}
+}
+
 func TestRebuildFTSIndex(t *testing.T) {
 	db := repoTestDB(t)
 	ctx := context.Background()

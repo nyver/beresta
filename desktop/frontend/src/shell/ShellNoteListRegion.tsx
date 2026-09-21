@@ -22,6 +22,12 @@ export interface ShellNoteListRegionProps {
    * "no notes" one. */
   searchActive: boolean;
   onClearSearch: () => void;
+  /** Creates a note in whichever notebook is currently selected (see
+   * Shell.tsx's handleCreateNote), giving the new-note command a
+   * pointer-accessible entry point independent of the notebook tree's own
+   * per-row menu and the Ctrl+N shortcut (task 8.3). */
+  onCreateNote: () => void;
+  creatingNote: boolean;
 }
 
 /**
@@ -44,11 +50,25 @@ export function ShellNoteListRegion({
   highlightTerms,
   searchActive,
   onClearSearch,
+  onCreateNote,
+  creatingNote,
 }: ShellNoteListRegionProps) {
   const { t } = useI18n();
 
   return (
     <section className="shell-notes">
+      <div className="shell-notes-toolbar">
+        <button
+          type="button"
+          className="tree-section-add-button"
+          aria-label={t("shell.new_note_button")}
+          title={t("shell.new_note_button")}
+          disabled={creatingNote}
+          onClick={onCreateNote}
+        >
+          +
+        </button>
+      </div>
       {noteActionError ? (
         <p className="error" role="alert">
           {noteActionError}

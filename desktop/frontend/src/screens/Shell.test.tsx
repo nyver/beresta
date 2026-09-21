@@ -533,6 +533,95 @@ describe("Shell", () => {
     await waitFor(() => expect(titleInput).toHaveFocus());
   });
 
+  it("creates a new note from the note list's pointer-accessible New note button", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(fakeNote({ id: "new-note", title: "" }));
+    renderShell();
+    const user = userEvent.setup();
+
+    // task 8.3's command registry: new-note must be reachable by pointer,
+    // not only Ctrl+N and the notebook tree's own per-row menu.
+    await user.click(await screen.findByRole("button", { name: "shell.new_note_button" }));
+
+    expect(appMock.CreateNote).toHaveBeenCalledWith("", "");
+    expect(
+      await screen.findByLabelText("shell.detail_title_label", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the quick-note capture panel from the topbar's pointer-accessible button", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(fakeNote({ title: "" }));
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "shell.quick_note_button" }));
+
+    expect(await screen.findByRole("dialog", { name: "quicknote.title" })).toBeInTheDocument();
+  });
+
+  it("locks the account with Ctrl+L", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    appMock.LockAccount.mockResolvedValue(undefined);
+    renderShell();
+    const user = userEvent.setup();
+    await screen.findByRole("main");
+
+    await user.keyboard("{Control>}l{/Control}");
+
+    await waitFor(() => expect(appMock.LockAccount).toHaveBeenCalled());
+  });
+
+  it("opens Settings with Ctrl+,", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    renderShell();
+    const user = userEvent.setup();
+    await screen.findByRole("main");
+
+    await user.keyboard("{Control>},{/Control}");
+
+    expect(await screen.findByRole("tab", { name: "settings.group_general", selected: true })).toBeInTheDocument();
+  });
+
+  it("focuses the search field with Ctrl+F", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    renderShell();
+    const user = userEvent.setup();
+    const searchField = await screen.findByPlaceholderText("search.placeholder");
+
+    await user.keyboard("{Control>}f{/Control}");
+
+    expect(searchField).toHaveFocus();
+  });
+
+  it("does not steal focus to the search field with Ctrl+F while the Settings dialog is open", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    appMock.ListNotes.mockResolvedValue([]);
+    renderShell();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "settings.title" }));
+    const dialog = await screen.findByRole("dialog", { name: "settings.title" });
+
+    await user.keyboard("{Control>}f{/Control}");
+
+    // The dialog's own focus trap (Modal.tsx) must still own focus - see
+    // "Dialogs SHALL trap focus" (specs/windows-desktop-client).
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+  });
+
   it("removes an untouched empty draft when the user opens a different note instead", async () => {
     const existing = fakeNote({ id: "existing-note", title: "Existing note" });
     appMock.ListNotebooks.mockResolvedValue([]);

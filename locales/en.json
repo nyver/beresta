@@ -41,6 +41,7 @@
   "unlock.wiping_button": "Erasing…",
   "shell.title": "Your notes",
   "shell.lock_button": "Lock",
+  "shell.quick_note_button": "Quick note",
   "shell.all_notes": "All Notes",
   "shell.notebooks_section": "Notebooks",
   "shell.new_notebook_placeholder": "New notebook name",

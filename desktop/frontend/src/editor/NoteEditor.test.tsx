@@ -216,6 +216,33 @@ describe("NoteEditor", () => {
     expect(quill.getSelection()?.index).toBe(11 + "PREFIX ".length);
   });
 
+  // task 8.3's command registry documents Ctrl+K as the editor's link
+  // shortcut, but the behavior itself is entirely Quill's own default: its
+  // snow theme registers a Ctrl+K keyboard binding automatically once a
+  // ".ql-link" toolbar button exists (see quill/themes/snow.js's
+  // extendToolbar), which TOOLBAR_FORMATS above provides by including
+  // "link". This guards that wiring - so removing "link" from
+  // TOOLBAR_FORMATS would fail this test - rather than re-testing Quill's
+  // own internals.
+  it("registers Quill's Ctrl+K link shortcut, since the toolbar includes a link button", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    mockDocument("hello world");
+
+    render(
+      <I18nProvider>
+        <NoteEditor noteId="note-1" />
+      </I18nProvider>,
+    );
+    const quill = await findQuill();
+    await waitFor(() => expect(quill.getText()).toBe("hello world\n"));
+
+    // No default Quill/core binding uses a bare "k" key - the only source
+    // that ever populates this entry is SnowTheme's shortKey (Ctrl/Cmd+K)
+    // registration for its link toolbar button.
+    expect(quill.keyboard.bindings.k ?? []).not.toHaveLength(0);
+  });
+
   it("shows a localized error when the document fails to load", async () => {
     mockLocaleCatalog();
     mockSettings();

@@ -53,6 +53,7 @@
   "unlock.wiping_button": "Удаление…",
   "shell.title": "Ваши заметки",
   "shell.lock_button": "Заблокировать",
+  "shell.quick_note_button": "Быстрая заметка",
   "shell.all_notes": "Все заметки",
   "shell.notebooks_section": "Блокноты",
   "shell.new_notebook_placeholder": "Название блокнота",

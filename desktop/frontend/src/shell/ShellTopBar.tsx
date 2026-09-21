@@ -14,6 +14,7 @@ export interface ShellTopBarProps {
   onSyncNow: () => void;
   onOpenSync: () => void;
   onOpenSettings: () => void;
+  onOpenQuickNote: () => void;
   onLock: () => void;
   locking: boolean;
 }
@@ -39,6 +40,7 @@ export function ShellTopBar({
   onSyncNow,
   onOpenSync,
   onOpenSettings,
+  onOpenQuickNote,
   onLock,
   locking,
 }: ShellTopBarProps) {
@@ -82,6 +84,15 @@ export function ShellTopBar({
             </span>
           </span>
         ) : null}
+        <button
+          type="button"
+          className="icon-button quick-note-button"
+          aria-label={t("shell.quick_note_button")}
+          title={t("shell.quick_note_button")}
+          onClick={onOpenQuickNote}
+        >
+          <span aria-hidden="true">📝</span>
+        </button>
         <button
           type="button"
           className={`sync-status-pill sync-status-${syncStatus ?? "local_only"}`}

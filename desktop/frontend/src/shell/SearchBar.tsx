@@ -24,6 +24,10 @@ export interface SearchBarHandle {
    * calls this when the user picks a notebook or tag from the sidebar, so
    * a stale search does not keep overriding that choice. */
   clear: () => void;
+  /** Moves keyboard focus into the search text field, so a global search
+   * shortcut (task 8.3's command registry) reaches it without the user
+   * having to click first. */
+  focus: () => void;
 }
 
 export interface SearchBarProps {
@@ -224,7 +228,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
     setError(null);
   }
 
-  useImperativeHandle(ref, () => ({ clear: reset }), []);
+  useImperativeHandle(ref, () => ({ clear: reset, focus: () => inputRef.current?.focus() }), []);
 
   // Windows Escape convention for a search box (task 6.4): the first
   // Escape clears an active query/filters rather than doing nothing, and

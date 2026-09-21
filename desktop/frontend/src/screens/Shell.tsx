@@ -24,6 +24,7 @@ import {
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
+import { matchesShortcut, SHELL_COMMANDS } from "../shell/commands";
 import { Modal } from "../shell/Modal";
 import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPane";
 import { type NoteListMeta } from "../shell/NoteList";
@@ -241,6 +242,14 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
       .catch(() => {});
   }, [ready]);
 
+  // The quick-note command (task 8.3's command registry): opens the same
+  // panel whether triggered by the user's configured global hotkey/tray
+  // item (below) or the topbar's own pointer-accessible button.
+  function handleOpenQuickNote() {
+    setQuickNoteSession((session) => session + 1);
+    setQuickNoteOpen(true);
+  }
+
   useEffect(() => {
     // Fires when the global quick-note hotkey is pressed or the tray
     // menu's "Quick Note" item is selected (desktop/shell.go's
@@ -249,10 +258,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
     // value) is the established unsubscribe pattern in this codebase -
     // see AttachmentPanel's OnFileDrop/OnFileDropOff.
     if (!ready) return;
-    EventsOn(EVENT_QUICK_NOTE_OPEN, () => {
-      setQuickNoteSession((session) => session + 1);
-      setQuickNoteOpen(true);
-    });
+    EventsOn(EVENT_QUICK_NOTE_OPEN, handleOpenQuickNote);
     return () => EventsOff(EVENT_QUICK_NOTE_OPEN);
   }, [ready]);
 
@@ -309,17 +315,6 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
       // never break navigation itself.
     }
   }, [selection]);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        setSidebarCollapsed((current) => !current);
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
 
   useEffect(() => {
     if (preserveCreatedNoteSelectionRef.current) {
@@ -668,18 +663,46 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
     setAutoLockMinutes(updated.auto_lock_minutes);
   }
 
-  // Ctrl+N/Cmd+N creates a note from anywhere in the shell. Read through a
-  // ref (same pattern as handleLockRef above) so this listener is only ever
-  // attached once, instead of being torn down and reattached on every
-  // keystroke-driven Shell render.
+  // The shell-level command shortcuts (task 8.3's command registry):
+  // new note, search, settings, sidebar toggle, and lock all read their
+  // handler through a ref (same pattern as handleLockRef above) so this
+  // listener is only ever attached once, instead of being torn down and
+  // reattached on every keystroke-driven Shell render. Every command here
+  // has an equivalent pointer control (ShellTopBar/ShellNoteListRegion's
+  // buttons) - the shortcut is a faster path to the same action, not a
+  // keyboard-only feature.
   const handleCreateNoteRef = useRef(handleCreateNote);
   handleCreateNoteRef.current = handleCreateNote;
 
+  // Read fresh inside the keydown listener below (mounted once, not
+  // re-subscribed on every settingsGroup/quickNoteOpen change) so the
+  // search shortcut can tell whether a dialog currently owns the focus
+  // trap - see its guard below.
+  const modalOpenRef = useRef(false);
+  modalOpenRef.current = settingsGroup !== null || quickNoteOpen;
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
+      if (matchesShortcut(event, SHELL_COMMANDS.newNote.shortcut)) {
         event.preventDefault();
         void handleCreateNoteRef.current();
+      } else if (matchesShortcut(event, SHELL_COMMANDS.toggleNavigation.shortcut)) {
+        event.preventDefault();
+        setSidebarCollapsed((current) => !current);
+      } else if (matchesShortcut(event, SHELL_COMMANDS.search.shortcut)) {
+        // Moving focus to the (background) search field would break out of
+        // an open dialog's focus trap (Settings modal or the quick-note
+        // panel), so this shortcut is a no-op while one is open - matching
+        // "Dialogs SHALL trap focus" (specs/windows-desktop-client).
+        if (modalOpenRef.current) return;
+        event.preventDefault();
+        searchBarRef.current?.focus();
+      } else if (matchesShortcut(event, SHELL_COMMANDS.settings.shortcut)) {
+        event.preventDefault();
+        setSettingsGroup("general");
+      } else if (matchesShortcut(event, SHELL_COMMANDS.lock.shortcut)) {
+        event.preventDefault();
+        void handleLockRef.current();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -700,6 +723,7 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
         onSyncNow={() => void handleSyncNow()}
         onOpenSync={() => setSettingsGroup("synchronization")}
         onOpenSettings={() => setSettingsGroup("general")}
+        onOpenQuickNote={handleOpenQuickNote}
         onLock={() => void handleLock()}
         locking={locking}
       />
@@ -789,6 +813,8 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
             searchBarRef={searchBarRef}
             tags={tags}
             allNotes={notes}
+            onCreateNote={() => void handleCreateNote()}
+            creatingNote={creatingNote}
             onSearchResultsChange={(results, terms) => {
               setSearchResults(results);
               setHighlightTerms(terms);

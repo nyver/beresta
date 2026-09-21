@@ -1,0 +1,126 @@
+/*
+ * Desktop mapping of design/tokens.json (task 10.2). Every custom property
+ * here mirrors a manifest value one-to-one; do not add a value here that is
+ * not in the manifest, and do not hand-tune a value here without updating
+ * the manifest first - src/tokens.manifest.test.ts mechanically verifies the
+ * two stay identical.
+ */
+:root {
+  /* Spacing */
+  --space-0: 0rem;
+  --space-1: 0.15rem;
+  --space-2: 0.2rem;
+  --space-3: 0.25rem;
+  --space-4: 0.35rem;
+  --space-5: 0.5rem;
+  --space-6: 0.6rem;
+  --space-7: 0.75rem;
+  --space-8: 1rem;
+  --space-9: 1.25rem;
+  --space-10: 1.5rem;
+  --space-11: 2rem;
+  --space-12: 3rem;
+
+  /* Typography */
+  --font-family-base: Inter, "Segoe UI", sans-serif;
+  --font-family-mono: ui-monospace, monospace;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.85rem;
+  --font-size-base: 1rem;
+  --font-size-md: 1.1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.5rem;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --line-height-tight: 1.2;
+  --line-height-base: 1.5;
+
+  /* Radius */
+  --radius-none: 0rem;
+  --radius-xs: 0.15rem;
+  --radius-sm: 0.35rem;
+  --radius-md: 0.5rem;
+  --radius-pill: 1rem;
+  --radius-full: 9999px;
+
+  /* Elevation */
+  --elevation-0: none;
+  --elevation-1: 0 0.25rem 0.75rem rgba(30, 27, 24, 0.2);
+  --elevation-2: 0 0.25rem 1rem rgba(30, 27, 24, 0.35);
+  --elevation-3: 0 0.5rem 2rem rgba(30, 27, 24, 0.3);
+
+  /* Border */
+  --border-width-hairline: 1px;
+  --border-width-thick: 2px;
+  --border-style-solid: solid;
+  --border-style-dashed: dashed;
+
+  /* Focus */
+  --focus-ring-color: var(--color-accent-default);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-style: solid;
+
+  /* Icon size / touch target */
+  --icon-size-sm: 1rem;
+  --icon-size-md: 1.25rem;
+  --icon-size-lg: 1.5rem;
+  --icon-size-xl: 2rem;
+  --touch-target-minimum: 2.75rem;
+
+  /* Animation duration */
+  --duration-instant: 0ms;
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 800ms;
+
+  /* Color: background */
+  --color-background-canvas: #f8f6f1;
+  --color-background-surface: #ffffff;
+  --color-background-surface-sunken: #faf8f4;
+  --color-background-panel: #f1eee6;
+  --color-background-selected-tint: #f5efe3;
+
+  /* Color: text */
+  --color-text-primary: #1e1b18;
+  --color-text-heading: #3a332a;
+  --color-text-secondary: #5a5148;
+  --color-text-muted: #6e6659;
+  --color-text-neutral-muted: #7d7469;
+  --color-text-disabled: #b3a996;
+  --color-text-on-accent: #ffffff;
+
+  /* Color: border */
+  --color-border-default: #d8d1c4;
+  --color-border-subtle: #eee2d0;
+
+  /* Color: accent */
+  --color-accent-default: #6b4f2a;
+  --color-accent-hover-tint: #eee2d0;
+  --color-accent-hover-strong: #f1e6d3;
+  --color-accent-highlight: #e8c887;
+
+  /* Color: status */
+  --color-status-info: #2f6f9f;
+  --color-status-success: #3a6b2a;
+  --color-status-success-tint: #e3f0d8;
+  --color-status-warning: #8a5a1f;
+  --color-status-warning-strong: #b36a20;
+  --color-status-warning-tint: #fbe8c6;
+  --color-status-danger: #8a2c1f;
+  --color-status-danger-strong: #b23b3b;
+  --color-status-danger-tint: #f7dede;
+  --color-status-neutral: #7d7469;
+
+  /* Color: highlight */
+  --color-highlight-search-match: #f4d78a;
+
+  /* Color: overlay */
+  --color-overlay-scrim: rgba(30, 27, 24, 0.5);
+
+  /* Color: inverse surface */
+  --color-inverse-background: #2b2118;
+  --color-inverse-text: #f8f6f1;
+}

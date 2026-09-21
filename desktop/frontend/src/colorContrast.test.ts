@@ -1,14 +1,25 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
  * WCAG 2.1 relative luminance/contrast ratio (task 8.4's "WCAG AA
- * contrast"). This duplicates the color literals from styles.css rather
- * than reading the stylesheet, since there is no shared token source yet -
- * task 10.1/10.2 introduces the semantic manifest and an enforcement check
- * that supersedes this hand-maintained list. Until then, this guards the
- * specific text/background pairs already audited against WCAG AA (4.5:1
- * for normal text) so a future color edit cannot silently regress them.
+ * contrast"). Reads its color values from design/tokens.json (task 10.1's
+ * manifest) instead of duplicating hand-copied literals, so a future
+ * palette edit in the manifest cannot silently drift out of sync with the
+ * pairs already audited against WCAG AA (4.5:1 for normal text) below.
  */
+
+const repoRoot = path.resolve(__dirname, "..", "..", "..");
+const manifest = JSON.parse(readFileSync(path.join(repoRoot, "design", "tokens.json"), "utf8")) as {
+  color: {
+    text: Record<string, string>;
+    background: Record<string, string>;
+    accent: Record<string, string>;
+    status: Record<string, string>;
+  };
+};
+const { text, background, accent, status } = manifest.color;
 function relativeLuminance(hex: string): number {
   const short = hex.replace("#", "");
   const value = short.length === 3 ? short.split("").map((digit) => digit + digit).join("") : short;
@@ -29,19 +40,19 @@ function contrastRatio(hexA: string, hexB: string): number {
 // in styles.css (main content areas, cards, and the muted sidebar tint).
 const WCAG_AA_NORMAL_TEXT = 4.5;
 const TEXT_ON_BACKGROUND_PAIRS: Array<[fg: string, bg: string, context: string]> = [
-  ["#5a5148", "#fff", "default body text on white"],
-  ["#5a5148", "#faf8f4", "default body text on the shell's off-white panels"],
-  ["#5a5148", "#eee2d0", "default body text on the hover/highlight tint"],
-  ["#3a332a", "#fff", "primary/heading text on white"],
-  ["#1e1b18", "#fff", "high-emphasis text on white"],
-  // #6e6659: the muted/secondary color used for note previews, dates, the
-  // key-protection hint, save-status line, and small icon-only buttons -
-  // darkened from the original #8a7f6f (3.93:1 on white), which failed
-  // AA for this normal-size text.
-  ["#6e6659", "#fff", "muted/secondary text on white"],
-  ["#6e6659", "#faf8f4", "muted/secondary text on the shell's off-white panels"],
-  ["#6b4f2a", "#fff", "accent text/links on white"],
-  ["#8a2c1f", "#fff", "destructive text on white"],
+  [text.secondary, background.surface, "default body text on white"],
+  [text.secondary, background.surfaceSunken, "default body text on the shell's off-white panels"],
+  [text.secondary, accent.hoverTint, "default body text on the hover/highlight tint"],
+  [text.heading, background.surface, "primary/heading text on white"],
+  [text.primary, background.surface, "high-emphasis text on white"],
+  // text.muted: the muted/secondary color used for note previews, dates,
+  // the key-protection hint, save-status line, and small icon-only buttons -
+  // darkened from the original #8a7f6f (3.93:1 on white), which failed AA
+  // for this normal-size text.
+  [text.muted, background.surface, "muted/secondary text on white"],
+  [text.muted, background.surfaceSunken, "muted/secondary text on the shell's off-white panels"],
+  [accent.default, background.surface, "accent text/links on white"],
+  [status.danger, background.surface, "destructive text on white"],
 ];
 
 describe("color contrast (WCAG AA)", () => {

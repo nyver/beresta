@@ -25,14 +25,15 @@ import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
 import { Modal } from "../shell/Modal";
-import { NotebookTree } from "../shell/NotebookTree";
 import { NoteEditorPane, type NoteEditorPaneHandle } from "../shell/NoteEditorPane";
-import { NoteList, type NoteListMeta } from "../shell/NoteList";
+import { type NoteListMeta } from "../shell/NoteList";
 import { QuickNotePanel, type QuickNotePanelHandle } from "../shell/QuickNotePanel";
-import { SearchBar, type SearchBarHandle } from "../shell/SearchBar";
+import { type SearchBarHandle } from "../shell/SearchBar";
 import { SettingsPanel, type SettingsGroup } from "../shell/SettingsPanel";
+import { ShellNavigation } from "../shell/ShellNavigation";
+import { ShellNoteListRegion } from "../shell/ShellNoteListRegion";
+import { ShellTopBar } from "../shell/ShellTopBar";
 import { UndoSnackbar } from "../shell/UndoSnackbar";
-import { TagList } from "../shell/TagList";
 
 // Matches desktop/events.go's EventQuickNoteOpen.
 const EVENT_QUICK_NOTE_OPEN = "quicknote:open";
@@ -687,87 +688,21 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
 
   return (
     <main className="screen shell" aria-labelledby={shellTitleId}>
-      <header className="shell-topbar">
-        <div className="shell-topbar-lead">
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={sidebarCollapsed ? t("shell.expand_sidebar") : t("shell.collapse_sidebar")}
-            title={sidebarCollapsed ? t("shell.expand_sidebar") : t("shell.collapse_sidebar")}
-            // Focus mode already hides the sidebar regardless of
-            // sidebarCollapsed's own value (see shell-body's class list
-            // below); disabling this button while it's active avoids a
-            // click here silently changing state with no visible effect.
-            disabled={focusMode}
-            onClick={() => setSidebarCollapsed((current) => !current)}
-          >
-            ☰
-          </button>
-          <button
-            type="button"
-            className={`icon-button${focusMode ? " active" : ""}`}
-            aria-label={focusMode ? t("shell.exit_focus_mode") : t("shell.enter_focus_mode")}
-            title={focusMode ? t("shell.exit_focus_mode") : t("shell.enter_focus_mode")}
-            aria-pressed={focusMode}
-            onClick={() => setFocusMode((current) => !current)}
-          >
-            ⛶
-          </button>
-          <h1 id={shellTitleId}>{t("shell.title")}</h1>
-        </div>
-        <div className="shell-topbar-actions">
-          {account.key_protection ? (
-            <span className="key-protection-hint">
-              <span aria-hidden="true">🔒</span>{" "}
-              <span>
-                {account.key_protection === "windows-hello"
-                  ? t("shell.key_protection_hello")
-                  : t("shell.key_protection_dpapi")}
-              </span>
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className={`sync-status-pill sync-status-${syncStatusValue ?? "local_only"}`}
-            aria-label={t("sync.open_button")}
-            title={t("sync.open_button")}
-            onClick={() => setSettingsGroup("synchronization")}
-          >
-            <span className="sync-status-dot" aria-hidden="true" />
-            {syncStatusValue ? t(`sync.status_${syncStatusValue}`) : t("sync.open_button")}
-          </button>
-          <button
-            type="button"
-            className="icon-button sync-now-button"
-            aria-label={t("sync.force_button")}
-            title={t("sync.force_button")}
-            aria-busy={forcingSync}
-            disabled={forcingSync || syncStatusValue === null || syncStatusValue === "local_only"}
-            onClick={() => void handleSyncNow()}
-          >
-            <span aria-hidden="true">↻</span>
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={t("settings.title")}
-            title={t("settings.title")}
-            onClick={() => setSettingsGroup("general")}
-          >
-            ⚙
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={t("shell.lock_button")}
-            title={t("shell.lock_button")}
-            onClick={() => void handleLock()}
-            disabled={locking}
-          >
-            <span aria-hidden="true">🔒</span>
-          </button>
-        </div>
-      </header>
+      <ShellTopBar
+        titleId={shellTitleId}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+        focusMode={focusMode}
+        onToggleFocusMode={() => setFocusMode((current) => !current)}
+        keyProtection={account.key_protection}
+        syncStatus={syncStatusValue}
+        forcingSync={forcingSync}
+        onSyncNow={() => void handleSyncNow()}
+        onOpenSync={() => setSettingsGroup("synchronization")}
+        onOpenSettings={() => setSettingsGroup("general")}
+        onLock={() => void handleLock()}
+        locking={locking}
+      />
 
       {settingsGroup ? (
         <Modal title={t("settings.title")} onClose={() => setSettingsGroup(null)}>
@@ -818,76 +753,56 @@ export function Shell({ account, onLocked, openSyncOnMount = false }: ShellProps
         <div
           className={`shell-body${sidebarCollapsed || focusMode ? " sidebar-collapsed" : ""}${focusMode ? " focus-mode" : ""}`}
         >
-          <aside className="shell-sidebar">
-            <NotebookTree
-              notebooks={notebooks}
-              selectedId={
-                selection.kind === "all" ? "" : selection.kind === "notebook" ? selection.id : null
-              }
-              onSelect={(id) => {
+          <ShellNavigation
+            notebooks={notebooks}
+            selectedNotebookId={selection.kind === "all" ? "" : selection.kind === "notebook" ? selection.id : null}
+            onSelectNotebook={(id) => {
+              searchBarRef.current?.clear();
+              setSelection(id === "" ? { kind: "all" } : { kind: "notebook", id });
+            }}
+            onCreateNoteInNotebook={(notebookId) => void handleCreateNote(notebookId)}
+            onNotebookCreated={(notebook) => setNotebooks((current) => [...current, notebook])}
+            onNotebookRenamed={handleNotebookRenamed}
+            onNotebookDeleted={(notebookId) => {
+              setNotebooks((current) => current.filter((notebook) => notebook.id !== notebookId));
+              // The deleted notebook can no longer be a valid selection; its
+              // notes are still reachable, just no longer filed under it, so
+              // falling back to "All Notes" keeps them visible instead of
+              // showing an empty, unselectable filter.
+              if (selection.kind === "notebook" && selection.id === notebookId) {
                 searchBarRef.current?.clear();
-                setSelection(id === "" ? { kind: "all" } : { kind: "notebook", id });
-              }}
-              onCreateNote={(notebookId) => void handleCreateNote(notebookId)}
-              onCreated={(notebook) => setNotebooks((current) => [...current, notebook])}
-              onRenamed={handleNotebookRenamed}
-              onDeleted={(notebookId) => {
-                setNotebooks((current) => current.filter((notebook) => notebook.id !== notebookId));
-                // The deleted notebook can no longer be a valid selection;
-                // its notes are still reachable, just no longer filed
-                // under it, so falling back to "All Notes" keeps them
-                // visible instead of showing an empty, unselectable filter.
-                if (selection.kind === "notebook" && selection.id === notebookId) {
-                  searchBarRef.current?.clear();
-                  setSelection({ kind: "all" });
-                }
-              }}
-              onMoved={handleNotebookMoved}
-              onNoteMoved={handleNoteMoved}
-            />
-            <TagList
-              tags={tags}
-              selectedId={selection.kind === "tag" ? selection.id : ""}
-              onSelect={(id) => {
-                searchBarRef.current?.clear();
-                setSelection({ kind: "tag", id });
-              }}
-              onCreated={handleTagCreated}
-              onDeleted={handleTagDeleted}
-            />
-          </aside>
-          <section className="shell-notes">
-            {noteActionError ? (
-              <p className="error" role="alert">
-                {noteActionError}
-              </p>
-            ) : null}
-            <SearchBar
-              ref={searchBarRef}
-              tags={tags}
-              notes={notes}
-              onResultsChange={(results, terms) => {
-                setSearchResults(results);
-                setHighlightTerms(terms);
-              }}
-            />
-            <NoteList
-              notes={visibleNotes}
-              loading={
-                searchResults === null && (loading || (selection.kind === "tag" && tagLoading))
+                setSelection({ kind: "all" });
               }
-              selectedNoteId={selectedNoteId}
-              onSelect={setSelectedNoteId}
-              noteMetaById={noteMetaById}
-              highlightTerms={highlightTerms}
-              emptyMessage={searchResults !== null ? t("search.no_results") : undefined}
-              emptyAction={
-                searchResults !== null
-                  ? { label: t("search.clear_button"), onClick: () => searchBarRef.current?.clear() }
-                  : undefined
-              }
-            />
-          </section>
+            }}
+            onNotebookMoved={handleNotebookMoved}
+            onNoteMoved={handleNoteMoved}
+            tags={tags}
+            selectedTagId={selection.kind === "tag" ? selection.id : ""}
+            onSelectTag={(id) => {
+              searchBarRef.current?.clear();
+              setSelection({ kind: "tag", id });
+            }}
+            onTagCreated={handleTagCreated}
+            onTagDeleted={handleTagDeleted}
+          />
+          <ShellNoteListRegion
+            searchBarRef={searchBarRef}
+            tags={tags}
+            allNotes={notes}
+            onSearchResultsChange={(results, terms) => {
+              setSearchResults(results);
+              setHighlightTerms(terms);
+            }}
+            noteActionError={noteActionError}
+            visibleNotes={visibleNotes}
+            loading={searchResults === null && (loading || (selection.kind === "tag" && tagLoading))}
+            selectedNoteId={selectedNoteId}
+            onSelectNote={setSelectedNoteId}
+            noteMetaById={noteMetaById}
+            highlightTerms={highlightTerms}
+            searchActive={searchResults !== null}
+            onClearSearch={() => searchBarRef.current?.clear()}
+          />
           <section className="shell-detail">
             <NoteEditorPane
               ref={editorPaneRef}

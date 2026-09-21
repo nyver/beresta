@@ -124,6 +124,47 @@ describe("BackupsPanel", () => {
     await waitFor(() => expect(appMock.CreateManualBackup).toHaveBeenCalledWith("C:\\backups"));
   });
 
+  it("offers a retry action when the backup status fetch fails", async () => {
+    mockLocaleCatalog();
+    mockSettings({ backup_directory: "C:\\backups" });
+    appMock.ListBackups.mockResolvedValue([]);
+    appMock.EstimateBackupSize.mockResolvedValue(0);
+    appMock.BackupStatus.mockRejectedValueOnce(new Error("status unavailable"));
+    render(
+      <I18nProvider>
+        <BackupsPanel onRestored={vi.fn()} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("alert");
+    appMock.BackupStatus.mockResolvedValue(fakeBackupStatus({ health: "healthy" }));
+
+    await user.click(screen.getByRole("button", { name: "common.retry" }));
+
+    expect(await screen.findByText("backups.health_healthy")).toBeInTheDocument();
+  });
+
+  it("offers a retry action when the backup catalog fetch fails", async () => {
+    mockLocaleCatalog();
+    mockSettings({ backup_directory: "C:\\backups" });
+    appMock.BackupStatus.mockResolvedValue(fakeBackupStatus());
+    appMock.EstimateBackupSize.mockResolvedValue(0);
+    appMock.ListBackups.mockRejectedValueOnce(new Error("catalog unavailable"));
+    render(
+      <I18nProvider>
+        <BackupsPanel onRestored={vi.fn()} />
+      </I18nProvider>,
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("alert");
+    appMock.ListBackups.mockResolvedValue([fakeBackup()]);
+
+    await user.click(screen.getByRole("button", { name: "common.retry" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(appMock.ListBackups).toHaveBeenCalledTimes(2);
+  });
+
   it("shows a storage-pressure estimate before creating a backup", async () => {
     renderPanel();
     appMock.EstimateBackupSize.mockResolvedValue(1_500_000);

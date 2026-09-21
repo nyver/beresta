@@ -97,12 +97,14 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
   }, [ready]);
 
   const refreshBackups = useCallback(() => {
+    setListError(null);
     listBackups(kind)
       .then(setBackups)
       .catch((thrown: unknown) => setListError(errorMessage(unwrapError(thrown))));
   }, [kind, errorMessage]);
 
   const refreshStatus = useCallback(() => {
+    setStatusError(null);
     backupStatus()
       .then(setStatus)
       .catch((thrown: unknown) => setStatusError(errorMessage(unwrapError(thrown))));
@@ -110,14 +112,12 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
 
   useEffect(() => {
     if (!ready) return;
-    setListError(null);
     refreshBackups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, kind]);
 
   useEffect(() => {
     if (!ready) return;
-    setStatusError(null);
     refreshStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
@@ -265,9 +265,14 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
       <h3>{t("backups.title")}</h3>
 
       {statusError ? (
-        <p className="error" role="alert">
-          {statusError}
-        </p>
+        <div className="backup-status-error">
+          <p className="error" role="alert">
+            {statusError}
+          </p>
+          <button type="button" onClick={refreshStatus}>
+            {t("common.retry")}
+          </button>
+        </div>
       ) : status ? (
         <dl className="backup-status-summary">
           <div>
@@ -342,9 +347,14 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
       </div>
 
       {listError ? (
-        <p className="error" role="alert">
-          {listError}
-        </p>
+        <div className="backup-list-error">
+          <p className="error" role="alert">
+            {listError}
+          </p>
+          <button type="button" onClick={refreshBackups}>
+            {t("common.retry")}
+          </button>
+        </div>
       ) : backups.length === 0 ? (
         <p className="hint">{t("backups.empty")}</p>
       ) : (

@@ -40,6 +40,7 @@ export function RevisionsPanel({ noteId, onBeforeRestore, onRestored }: Revision
   const [restoreError, setRestoreError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
+    setLoadError(null);
     listRevisions(noteId)
       .then(setRevisions)
       .catch((thrown: unknown) => setLoadError(errorMessage(unwrapError(thrown))));
@@ -101,6 +102,9 @@ export function RevisionsPanel({ noteId, onBeforeRestore, onRestored }: Revision
         <p className="error" role="alert">
           {loadError}
         </p>
+        <button type="button" onClick={refresh}>
+          {t("common.retry")}
+        </button>
       </section>
     );
   }

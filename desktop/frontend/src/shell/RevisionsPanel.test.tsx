@@ -60,6 +60,24 @@ describe("RevisionsPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("errors.internal");
   });
 
+  it("retries loading revisions and recovers once the retry succeeds", async () => {
+    appMock.ListRevisions.mockRejectedValueOnce(
+      new Error(JSON.stringify({ code: "internal", message: "boom" })),
+    );
+    renderPanel();
+    const user = userEvent.setup();
+    await screen.findByRole("alert");
+    appMock.ListRevisions.mockResolvedValue([fakeRevision()]);
+
+    await user.click(screen.getByRole("button", { name: "common.retry" }));
+
+    // Without clearing loadError before refetching, a successful retry
+    // would still leave RevisionsPanel stuck on the error screen forever
+    // (its render gates on loadError first).
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(await screen.findByRole("button", { name: /2026/ })).toBeInTheDocument();
+  });
+
   it("diffs the selected revision against its predecessor", async () => {
     appMock.ListRevisions.mockResolvedValue([
       fakeRevision({ id: "rev-1", created_unix_ms: Date.UTC(2026, 0, 1) }),

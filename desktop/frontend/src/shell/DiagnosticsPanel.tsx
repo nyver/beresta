@@ -55,19 +55,23 @@ export function DiagnosticsPanel() {
     }
   }
 
-  async function toggleTechnical() {
+  async function loadTechnical() {
+    setLoadingTechnical(true);
+    setTechnicalError(null);
+    try {
+      setTechnical(await technicalDiagnostics());
+    } catch (thrown) {
+      setTechnicalError(errorMessage(unwrapError(thrown)));
+    } finally {
+      setLoadingTechnical(false);
+    }
+  }
+
+  function toggleTechnical() {
     const next = !technicalExpanded;
     setTechnicalExpanded(next);
     if (next && !technical && !loadingTechnical) {
-      setLoadingTechnical(true);
-      setTechnicalError(null);
-      try {
-        setTechnical(await technicalDiagnostics());
-      } catch (thrown) {
-        setTechnicalError(errorMessage(unwrapError(thrown)));
-      } finally {
-        setLoadingTechnical(false);
-      }
+      void loadTechnical();
     }
   }
 
@@ -148,13 +152,18 @@ export function DiagnosticsPanel() {
             </div>
           </dl>
 
-          <button type="button" onClick={() => void toggleTechnical()} aria-expanded={technicalExpanded}>
+          <button type="button" onClick={toggleTechnical} aria-expanded={technicalExpanded}>
             {t(technicalExpanded ? "diagnostics.hide_technical_details_button" : "diagnostics.show_technical_details_button")}
           </button>
           {!technicalExpanded ? null : loadingTechnical ? (
             <p>{t("common.loading")}</p>
           ) : technicalError ? (
-            <p role="alert">{technicalError}</p>
+            <div>
+              <p role="alert">{technicalError}</p>
+              <button type="button" onClick={() => void loadTechnical()}>
+                {t("common.retry")}
+              </button>
+            </div>
           ) : technical ? (
             <dl className="diagnostics-technical">
               <div>

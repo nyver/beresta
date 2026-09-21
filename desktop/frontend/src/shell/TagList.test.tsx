@@ -62,7 +62,7 @@ describe("TagList", () => {
     expect(onCreated).toHaveBeenCalledWith(created);
   });
 
-  it("deletes a tag after the inline confirmation", async () => {
+  it("deletes a tag after the inline confirmation, naming the tag in the confirm button's accessible name", async () => {
     const tag = fakeTag({ name: "urgent" });
     appMock.SetTagDeleted.mockResolvedValue(undefined);
     const { onDeleted } = renderList([tag]);
@@ -70,9 +70,18 @@ describe("TagList", () => {
 
     await user.click(await screen.findByRole("button", { name: "shell.tag_actions: urgent" }));
     await user.click(await screen.findByRole("menuitem", { name: "shell.delete_tag" }));
-    await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button" }));
+    // task 8.5: the confirm button's accessible name includes the tag it
+    // would delete (not just the generic "Delete"), since - unlike the
+    // notebook/device deletion Modals - this inline confirmation has no
+    // dialog title to announce that context first.
+    await user.click(await screen.findByRole("button", { name: "shell.delete_confirm_button: urgent" }));
 
     expect(appMock.SetTagDeleted).toHaveBeenCalledWith(tag.id, true);
     expect(onDeleted).toHaveBeenCalledWith(tag.id);
+  });
+
+  it("shows an empty-state message when there are no tags", async () => {
+    renderList([]);
+    expect(await screen.findByText("shell.tags_none")).toBeInTheDocument();
   });
 });

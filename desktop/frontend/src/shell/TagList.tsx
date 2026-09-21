@@ -105,7 +105,12 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
               </button>
               {confirmingDeleteId === tag.id ? (
                 <span className="tree-row-delete-confirm">
-                  <button type="button" disabled={deleting} onClick={() => void handleDelete(tag.id)}>
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    aria-label={`${t("shell.delete_confirm_button")}: ${tag.name}`}
+                    onClick={() => void handleDelete(tag.id)}
+                  >
                     {deleting ? t("shell.deleting") : t("shell.delete_confirm_button")}
                   </button>
                   <button
@@ -135,7 +140,9 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
             </li>
           ))}
         </ul>
-      ) : null}
+      ) : (
+        <p className="hint">{t("shell.tags_none")}</p>
+      )}
       {deleteError ? (
         <p className="error" role="alert">
           {deleteError}

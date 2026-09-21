@@ -88,6 +88,24 @@ describe("DiagnosticsPanel", () => {
     expect(screen.getByText("diagnostics.no")).toBeInTheDocument();
   });
 
+  it("offers a retry action when technical details fail to load, and recovers when it succeeds", async () => {
+    appMock.DiagnosticSummary.mockResolvedValue(fakeSummary());
+    appMock.TechnicalDiagnostics.mockRejectedValueOnce(
+      new Error(JSON.stringify({ code: "internal", message: "boom" })),
+    );
+    renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "diagnostics.title" }));
+    await screen.findByText("1.2.3");
+    await userEvent.click(screen.getByRole("button", { name: "diagnostics.show_technical_details_button" }));
+    await screen.findByRole("alert");
+    appMock.TechnicalDiagnostics.mockResolvedValue(fakeTechnical());
+
+    await userEvent.click(screen.getByRole("button", { name: "common.retry" }));
+
+    expect(await screen.findByText("ws-1")).toBeInTheDocument();
+  });
+
   it("shows a pending workspace key rotation in technical details", async () => {
     appMock.DiagnosticSummary.mockResolvedValue(fakeSummary());
     appMock.TechnicalDiagnostics.mockResolvedValue(fakeTechnical({ rotation_pending: true }));

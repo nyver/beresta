@@ -3,10 +3,31 @@ import "dart:typed_data";
 
 import "package:beresta/main.dart";
 import "package:flutter/material.dart";
-import "package:flutter/services.dart" show PlatformException;
+import "package:flutter/services.dart"
+    show JSONMethodCodec, MethodCall, PlatformException;
 import "package:flutter_quill/flutter_quill.dart";
 import "package:flutter_test/flutter_test.dart";
 import "package:qr_flutter/qr_flutter.dart";
+
+/// Simulates a genuine Android system Back press (the hardware button or
+/// the predictive-back gesture), as distinct from tapping an on-screen back
+/// affordance: it sends the same "flutter/navigation" `popRoute` platform
+/// message the engine sends for a real system Back, which reaches whatever
+/// route is currently topmost on the Navigator - a dialog or bottom sheet
+/// above it, if one is open, before ever reaching an underlying screen's
+/// own `PopScope` (task 9.2's overlay-before-editor precedence).
+Future<void> simulateSystemBack(WidgetTester tester) async {
+  // SystemChannels.navigation uses the JSON method codec, not the binary
+  // standard codec every other platform channel in this app uses.
+  final message = const JSONMethodCodec().encodeMethodCall(
+    const MethodCall("popRoute"),
+  );
+  await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+    "flutter/navigation",
+    message,
+    (_) {},
+  );
+}
 
 void main() {
   testWidgets("onboarding is local-first and switches language", (
@@ -366,6 +387,52 @@ void main() {
 
       expect(gateway.note["deleted"], isNot(true));
       expect(gateway.savedBody, "An actual idea");
+    },
+  );
+
+  testWidgets(
+    "system Back closes an open dialog before reaching the editor's "
+    "flush/close, and never loses the pending edit (task 9.2)",
+    (tester) async {
+      final gateway = FakeGateway(unlocked: true)..note["title"] = "";
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+
+      final controller =
+          tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
+      controller.replaceText(
+        0,
+        0,
+        "Unsaved paragraph",
+        const TextSelection.collapsed(offset: 17),
+      );
+      await tester.pump();
+
+      // Open the tag picker: an overlay (a real Navigator route) above the
+      // still-dirty editor.
+      await tester.tap(find.text("Add tag"));
+      await tester.pumpAndSettle();
+      expect(find.byType(SimpleDialog), findsOneWidget);
+
+      // specs/mobile-clients' "System Back during editing": "the overlay
+      // closes first" - one system Back must dismiss only the topmost
+      // route (the dialog). The editor screen underneath must still be
+      // present: this same press must not also pop the editor.
+      await simulateSystemBack(tester);
+      await tester.pumpAndSettle();
+      expect(find.byType(SimpleDialog), findsNothing);
+      expect(find.byType(QuillEditor), findsOneWidget);
+
+      // The next system Back reaches the editor itself: PopScope blocks
+      // the pop while dirty, flushes the pending edit durably, then lets
+      // the route close - the buffer is never lost.
+      await simulateSystemBack(tester);
+      await tester.pumpAndSettle();
+      expect(find.byType(QuillEditor), findsNothing);
+      expect(gateway.savedBody, "Unsaved paragraph");
     },
   );
 

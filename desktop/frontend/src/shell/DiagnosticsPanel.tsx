@@ -10,6 +10,7 @@ import {
 } from "../api";
 import { formatBytes, formatClockTime } from "../format";
 import { useI18n } from "../i18n";
+import { ErrorState, LoadingState } from "./StatusState";
 
 /**
  * DiagnosticsPanel covers task 4.2's user diagnostics screen: the always-
@@ -95,14 +96,9 @@ export function DiagnosticsPanel() {
         </button>
       </h4>
       {!expanded ? null : loadingSummary ? (
-        <p>{t("common.loading")}</p>
+        <LoadingState />
       ) : summaryError ? (
-        <div>
-          <p role="alert">{summaryError}</p>
-          <button type="button" onClick={() => void loadSummary()}>
-            {t("common.retry")}
-          </button>
-        </div>
+        <ErrorState message={summaryError} onRetry={() => void loadSummary()} />
       ) : summary ? (
         <>
           <dl className="diagnostics-summary">
@@ -156,14 +152,9 @@ export function DiagnosticsPanel() {
             {t(technicalExpanded ? "diagnostics.hide_technical_details_button" : "diagnostics.show_technical_details_button")}
           </button>
           {!technicalExpanded ? null : loadingTechnical ? (
-            <p>{t("common.loading")}</p>
+            <LoadingState />
           ) : technicalError ? (
-            <div>
-              <p role="alert">{technicalError}</p>
-              <button type="button" onClick={() => void loadTechnical()}>
-                {t("common.retry")}
-              </button>
-            </div>
+            <ErrorState message={technicalError} onRetry={() => void loadTechnical()} />
           ) : technical ? (
             <dl className="diagnostics-technical">
               <div>
@@ -227,7 +218,7 @@ export function DiagnosticsPanel() {
             </dl>
           ) : null}
 
-          {copyError ? <p role="alert">{copyError}</p> : null}
+          {copyError ? <ErrorState message={copyError} /> : null}
           <button type="button" onClick={() => void handleCopy()}>
             {copied ? t("diagnostics.copied_label") : t("diagnostics.copy_button")}
           </button>

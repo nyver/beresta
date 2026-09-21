@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { autostartStatus, getSettings, unwrapError, updateSettings } from "../api";
 import { useI18n } from "../i18n";
+import { ErrorState } from "./StatusState";
 
 /**
  * ShellIntegrationPanel covers task 5.9's user-facing controls: the
@@ -85,11 +86,7 @@ export function ShellIntegrationPanel() {
           {savingHotkey ? t("shellintegration.saving_hotkey_button") : t("shellintegration.save_hotkey_button")}
         </button>
       </div>
-      {hotkeyError ? (
-        <p className="error" role="alert">
-          {hotkeyError}
-        </p>
-      ) : null}
+      {hotkeyError ? <ErrorState message={hotkeyError} /> : null}
 
       <label className="autostart-control">
         <input
@@ -100,11 +97,7 @@ export function ShellIntegrationPanel() {
         />
         <span>{t("shellintegration.autostart_label")}</span>
       </label>
-      {autostartError ? (
-        <p className="error" role="alert">
-          {autostartError}
-        </p>
-      ) : null}
+      {autostartError ? <ErrorState message={autostartError} /> : null}
       {conflictPath ? <p className="autostart-conflict">{t("shellintegration.autostart_conflict")}</p> : null}
     </section>
   );

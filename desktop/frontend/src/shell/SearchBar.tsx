@@ -18,6 +18,7 @@ import {
 } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { ErrorState } from "./StatusState";
 
 export interface SearchBarHandle {
   /** Resets every field and reports back to "no active search". Shell.tsx
@@ -399,11 +400,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
         ) : null
       )}
 
-      {error ? (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error ? <ErrorState message={error} /> : null}
     </div>
   );
 });

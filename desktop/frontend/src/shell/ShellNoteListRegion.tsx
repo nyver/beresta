@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { NoteList, type NoteListMeta } from "./NoteList";
 import { SearchBar, type SearchBarHandle, type SearchBarProps } from "./SearchBar";
+import { ErrorState } from "./StatusState";
 
 export interface ShellNoteListRegionProps {
   searchBarRef: Ref<SearchBarHandle>;
@@ -69,11 +70,7 @@ export function ShellNoteListRegion({
           +
         </button>
       </div>
-      {noteActionError ? (
-        <p className="error" role="alert">
-          {noteActionError}
-        </p>
-      ) : null}
+      {noteActionError ? <ErrorState message={noteActionError} /> : null}
       <SearchBar ref={searchBarRef} tags={tags} notes={allNotes} onResultsChange={onSearchResultsChange} />
       <NoteList
         notes={visibleNotes}

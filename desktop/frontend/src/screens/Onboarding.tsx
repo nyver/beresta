@@ -4,6 +4,7 @@ import { createAccount, defaultDatabasePath, pickDatabaseDestination, unwrapErro
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { PasswordField } from "./PasswordField";
+import { ErrorState } from "../shell/StatusState";
 
 type Mode = "local" | "server";
 
@@ -197,11 +198,7 @@ export function Onboarding({ onAccountReady, onSwitchToUnlock }: OnboardingProps
 
         <p className="hint recovery-warning">{t("onboarding.passphrase_hint")}</p>
 
-        {error ? (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        ) : null}
+        {error ? <ErrorState message={error} /> : null}
 
         <button type="submit" disabled={submitting}>
           {submitting ? t("onboarding.creating_button") : t("onboarding.create_button")}

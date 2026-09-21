@@ -6,6 +6,7 @@ import { main } from "../../wailsjs/go/models";
 import { KebabMenu } from "./KebabMenu";
 import { Modal } from "./Modal";
 import { buildNotebookTree, flattenVisibleNotebooks, type NotebookNode } from "./notebookTreeModel";
+import { ErrorState } from "./StatusState";
 
 // Custom drag payload types (see NoteList.tsx for the note-side source):
 // distinguishing them lets a single drop target (a notebook row) tell a
@@ -301,11 +302,7 @@ export function NotebookTree({
           </li>
         ))}
       </ul>
-      {moveError ? (
-        <p className="error" role="alert">
-          {moveError}
-        </p>
-      ) : null}
+      {moveError ? <ErrorState message={moveError} /> : null}
       {dialog?.kind === "create" || dialog?.kind === "rename" ? (
         <Modal
           title={dialog.kind === "create" ? t("shell.new_notebook_menu_item") : t("shell.rename_notebook")}
@@ -333,11 +330,7 @@ export function NotebookTree({
               {t("common.cancel")}
             </button>
           </form>
-          {formError ? (
-            <p className="error" role="alert">
-              {formError}
-            </p>
-          ) : null}
+          {formError ? <ErrorState message={formError} /> : null}
         </Modal>
       ) : null}
       {dialog?.kind === "delete" ? (
@@ -351,11 +344,7 @@ export function NotebookTree({
               {t("common.cancel")}
             </button>
           </div>
-          {formError ? (
-            <p className="error" role="alert">
-              {formError}
-            </p>
-          ) : null}
+          {formError ? <ErrorState message={formError} /> : null}
         </Modal>
       ) : null}
       {dialog?.kind === "move" ? (
@@ -377,11 +366,7 @@ export function NotebookTree({
               ))}
           </ul>
           {busy ? <p>{t("shell.moving")}</p> : null}
-          {formError ? (
-            <p className="error" role="alert">
-              {formError}
-            </p>
-          ) : null}
+          {formError ? <ErrorState message={formError} /> : null}
         </Modal>
       ) : null}
     </nav>

@@ -10,6 +10,7 @@ import {
 } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { ErrorState } from "./StatusState";
 
 export interface ImportExportPanelProps {
   /** Called after a successful import, so the caller can reload its own
@@ -131,11 +132,7 @@ export function ImportExportPanel({ onImported }: ImportExportPanelProps) {
             {t("export.start_button")}
           </button>
         )}
-        {exportError ? (
-          <p className="error" role="alert">
-            {exportError}
-          </p>
-        ) : null}
+        {exportError ? <ErrorState message={exportError} /> : null}
         {exportManifest ? <p className="export-success">{t("export.success")}</p> : null}
       </div>
 
@@ -149,11 +146,7 @@ export function ImportExportPanel({ onImported }: ImportExportPanelProps) {
             {importing ? t("import.importing_button") : t("import.evernote_button")}
           </button>
         </div>
-        {importError ? (
-          <p className="error" role="alert">
-            {importError}
-          </p>
-        ) : null}
+        {importError ? <ErrorState message={importError} /> : null}
         {importResult ? (
           <div className="import-result">
             <p className="import-success">{t("import.success")}</p>

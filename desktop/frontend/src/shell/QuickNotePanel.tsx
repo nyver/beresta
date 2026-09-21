@@ -4,6 +4,7 @@ import { createNote, unwrapError } from "../api";
 import { useI18n } from "../i18n";
 import { NoteEditor, type NoteEditorHandle } from "../editor/NoteEditor";
 import { Modal } from "./Modal";
+import { ErrorState } from "./StatusState";
 
 export interface QuickNotePanelProps {
   /** Called once the panel has finished closing (after any pending edit
@@ -120,9 +121,7 @@ export const QuickNotePanel = forwardRef<QuickNotePanelHandle, QuickNotePanelPro
   return (
     <Modal title={t("quicknote.title")} onClose={() => void handleClose()}>
       {obscured ? null : error ? (
-        <p className="error" role="alert">
-          {error}
-        </p>
+        <ErrorState message={error} />
       ) : (
         <div className="quicknote-panel">
           <input

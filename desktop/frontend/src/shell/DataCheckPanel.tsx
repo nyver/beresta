@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { runDataCheck, unwrapError, type DataCheckReport } from "../api";
 import { useI18n } from "../i18n";
+import { ErrorState, LoadingState } from "./StatusState";
 
 /**
  * DataCheckPanel covers task 7.10's Advanced "Check my data" action: one
@@ -36,9 +37,9 @@ export function DataCheckPanel() {
         {t("data_check.action_button")}
       </button>
       {running ? (
-        <p>{t("common.loading")}</p>
+        <LoadingState />
       ) : error ? (
-        <p role="alert">{error}</p>
+        <ErrorState message={error} />
       ) : report ? (
         <p role={report.healthy ? "status" : "alert"}>{t(`data_check.issue_${report.issue}`)}</p>
       ) : null}

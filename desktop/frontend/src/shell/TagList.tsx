@@ -5,6 +5,7 @@ import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { KebabMenu } from "./KebabMenu";
 import { Modal } from "./Modal";
+import { ErrorState } from "./StatusState";
 
 export interface TagListProps {
   tags: main.TagDTO[];
@@ -143,11 +144,7 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
       ) : (
         <p className="hint">{t("shell.tags_none")}</p>
       )}
-      {deleteError ? (
-        <p className="error" role="alert">
-          {deleteError}
-        </p>
-      ) : null}
+      {deleteError ? <ErrorState message={deleteError} /> : null}
       {creatingOpen ? (
         <Modal title={t("shell.tags_add_button")} onClose={closeCreateDialog}>
           <form
@@ -172,11 +169,7 @@ export function TagList({ tags, selectedId, onSelect, onCreated, onDeleted }: Ta
               {t("common.cancel")}
             </button>
           </form>
-          {createError ? (
-            <p className="error" role="alert">
-              {createError}
-            </p>
-          ) : null}
+          {createError ? <ErrorState message={createError} /> : null}
         </Modal>
       ) : null}
     </nav>

@@ -31,6 +31,7 @@ import { useI18n } from "../i18n";
 import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
 import { Modal } from "./Modal";
 import { QrCode } from "./QrCode";
+import { ErrorState, LoadingState } from "./StatusState";
 
 const EVENT_SYNC_SUMMARY = "sync:summary";
 const EVENT_WORKSPACE_CHANGED = "workspace:changed";
@@ -374,8 +375,10 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
       <section aria-labelledby="sync-status-title">
         <h3 id="sync-status-title">{t("sync.status_title")}</h3>
         {error ? (
-          <div className="sync-status-error"><p role="alert">{error}</p><button type="button" onClick={loadStatus}>{t("common.retry")}</button></div>
-        ) : status === null ? <p>{t("common.loading")}</p> : (
+          <ErrorState message={error} onRetry={loadStatus} />
+        ) : status === null ? (
+          <LoadingState />
+        ) : (
           <>
             <div className={`sync-status-card sync-status-${status}`}>
               <span className="sync-status-dot" aria-hidden="true" />
@@ -660,11 +663,7 @@ export function SyncPanel({ deviceId, onWorkspaceChanged, onBeforeWorkspaceSwitc
               {t("common.cancel")}
             </button>
           </div>
-          {error ? (
-            <p className="error" role="alert">
-              {error}
-            </p>
-          ) : null}
+          {error ? <ErrorState message={error} /> : null}
         </Modal>
       ) : null}
     </div>

@@ -8,6 +8,7 @@ import { DataCheckPanel } from "./DataCheckPanel";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { ImportExportPanel } from "./ImportExportPanel";
 import { ShellIntegrationPanel } from "./ShellIntegrationPanel";
+import { ErrorState } from "./StatusState";
 import { SyncPanel } from "./SyncPanel";
 
 /**
@@ -84,9 +85,7 @@ function AboutPanel() {
           </div>
         </dl>
       ) : error ? (
-        <p className="error" role="alert">
-          {error}
-        </p>
+        <ErrorState message={error} />
       ) : null}
     </section>
   );

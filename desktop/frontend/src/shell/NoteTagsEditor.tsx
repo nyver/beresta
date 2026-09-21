@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { unwrapError } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { ErrorState } from "./StatusState";
 
 export interface NoteTagsEditorProps {
   tags: main.TagDTO[];
@@ -130,11 +131,7 @@ export function NoteTagsEditor({ tags, assignedTagIds, onToggle, onCreateAndAssi
               {t("shell.new_tag_button")}
             </button>
           </form>
-          {error ? (
-            <p className="error" role="alert">
-              {error}
-            </p>
-          ) : null}
+          {error ? <ErrorState message={error} /> : null}
         </div>
       ) : null}
     </div>

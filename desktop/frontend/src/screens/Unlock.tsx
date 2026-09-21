@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { unlockAccount, unwrapError, wipeLocalAccount } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { ErrorState } from "../shell/StatusState";
 
 export interface UnlockProps {
   databasePath: string;
@@ -112,11 +113,7 @@ export function Unlock({ databasePath, onAccountReady, onSwitchToOnboarding }: U
           />
         </label>
 
-        {error ? (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        ) : null}
+        {error ? <ErrorState message={error} /> : null}
 
         <button type="submit" disabled={busy}>
           {submitting ? t("unlock.unlocking_button") : t("unlock.button")}
@@ -140,11 +137,7 @@ export function Unlock({ databasePath, onAccountReady, onSwitchToOnboarding }: U
                 autoComplete="off"
               />
             </label>
-            {wipeError ? (
-              <p className="error" role="alert">
-                {wipeError}
-              </p>
-            ) : null}
+            {wipeError ? <ErrorState message={wipeError} /> : null}
             <button
               type="button"
               disabled={busy || wipeConfirmText.trim().toUpperCase() !== WIPE_CONFIRM_PHRASE}

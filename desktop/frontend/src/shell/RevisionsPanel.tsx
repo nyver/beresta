@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { diffRevisions, listRevisions, restoreRevision, unwrapError } from "../api";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { ErrorState, LoadingState } from "./StatusState";
 
 export interface RevisionsPanelProps {
   noteId: string;
@@ -99,12 +100,7 @@ export function RevisionsPanel({ noteId, onBeforeRestore, onRestored }: Revision
   if (loadError) {
     return (
       <section className="revisions-panel" aria-label={t("revisions.section_title")}>
-        <p className="error" role="alert">
-          {loadError}
-        </p>
-        <button type="button" onClick={refresh}>
-          {t("common.retry")}
-        </button>
+        <ErrorState message={loadError} onRetry={refresh} />
       </section>
     );
   }
@@ -141,11 +137,9 @@ export function RevisionsPanel({ noteId, onBeforeRestore, onRestored }: Revision
       {selectedId ? (
         <div className="revision-detail">
           {diffError ? (
-            <p className="error" role="alert">
-              {diffError}
-            </p>
+            <ErrorState message={diffError} />
           ) : diffLines === null ? (
-            <p className="hint">{t("common.loading")}</p>
+            <LoadingState />
           ) : (
             <>
               <h3 className="revision-diff-heading">{t("revisions.diff_heading")}</h3>
@@ -162,11 +156,7 @@ export function RevisionsPanel({ noteId, onBeforeRestore, onRestored }: Revision
             </>
           )}
 
-          {restoreError ? (
-            <p className="error" role="alert">
-              {restoreError}
-            </p>
-          ) : null}
+          {restoreError ? <ErrorState message={restoreError} /> : null}
           {confirmingRestore ? (
             <div className="revision-restore-confirm">
               <span>{t("revisions.restore_confirm")}</span>

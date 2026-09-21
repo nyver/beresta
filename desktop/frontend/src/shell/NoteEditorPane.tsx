@@ -11,6 +11,7 @@ import { buildNotebookTree, flattenVisibleNotebooks } from "./notebookTreeModel"
 import { NoteTagsEditor } from "./NoteTagsEditor";
 import { RevisionsPanel } from "./RevisionsPanel";
 import { SaveStatusLine } from "./SaveStatusLine";
+import { ErrorState } from "./StatusState";
 
 export interface NoteEditorPaneHandle {
   /** Flushes the currently open note's pending body edit and any
@@ -255,11 +256,7 @@ export const NoteEditorPane = forwardRef<NoteEditorPaneHandle, NoteEditorPanePro
               ))}
             </ul>
             {moveBusy ? <p>{t("shell.moving")}</p> : null}
-            {moveError ? (
-              <p className="error" role="alert">
-                {moveError}
-              </p>
-            ) : null}
+            {moveError ? <ErrorState message={moveError} /> : null}
           </Modal>
         ) : null}
         <NoteTagsEditor

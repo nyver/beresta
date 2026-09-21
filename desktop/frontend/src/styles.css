@@ -175,6 +175,13 @@ p {
   font-size: var(--font-size-sm);
 }
 
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
 button {
   font: inherit;
   padding: var(--space-6) var(--space-8);
@@ -1418,8 +1425,7 @@ li:hover > .tree-row-delete,
 }
 
 .sync-panel,
-.sync-panel section,
-.sync-status-error {
+.sync-panel section {
   display: flex;
   flex-direction: column;
   gap: var(--space-7);
@@ -1438,8 +1444,7 @@ li:hover > .tree-row-delete,
   color: var(--color-text-secondary);
 }
 
-.sync-panel section > button,
-.sync-status-error button {
+.sync-panel section > button {
   align-self: flex-start;
 }
 

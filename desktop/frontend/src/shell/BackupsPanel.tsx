@@ -19,6 +19,7 @@ import {
 import { formatBytes, formatClockTime } from "../format";
 import { useI18n } from "../i18n";
 import { main } from "../../wailsjs/go/models";
+import { ErrorState, LoadingState } from "./StatusState";
 
 export interface BackupsPanelProps {
   /** Called after a successful restore, so the caller can reload its own
@@ -265,14 +266,7 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
       <h3>{t("backups.title")}</h3>
 
       {statusError ? (
-        <div className="backup-status-error">
-          <p className="error" role="alert">
-            {statusError}
-          </p>
-          <button type="button" onClick={refreshStatus}>
-            {t("common.retry")}
-          </button>
-        </div>
+        <ErrorState message={statusError} onRetry={refreshStatus} />
       ) : status ? (
         <dl className="backup-status-summary">
           <div>
@@ -293,11 +287,7 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
           ) : null}
         </dl>
       ) : null}
-      {status?.health === "corrupt" ? (
-        <p className="error" role="alert">
-          {t("errors.backup_corrupt")}
-        </p>
-      ) : null}
+      {status?.health === "corrupt" ? <ErrorState message={t("errors.backup_corrupt")} /> : null}
 
       <div className="backup-directory-row">
         <span className="backup-directory-label">{t("backups.directory_label")}</span>
@@ -306,11 +296,7 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
           {changingDirectory ? t("backups.changing_directory_button") : t("backups.change_directory_button")}
         </button>
       </div>
-      {directoryError ? (
-        <p className="error" role="alert">
-          {directoryError}
-        </p>
-      ) : null}
+      {directoryError ? <ErrorState message={directoryError} /> : null}
 
       <button type="button" disabled={creatingManual || !directory} onClick={() => void handleCreateManualBackup()}>
         {creatingManual ? t("backups.creating_manual_button") : t("backups.create_manual_button")}
@@ -320,11 +306,7 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
           {t("backups.estimated_size_label")}: {formatBytes(estimatedSize)}
         </p>
       ) : null}
-      {manualError ? (
-        <p className="error" role="alert">
-          {manualError}
-        </p>
-      ) : null}
+      {manualError ? <ErrorState message={manualError} /> : null}
       {manualErrorCode === "insufficient_space" ? (
         <button type="button" className="link-button" disabled={changingDirectory} onClick={() => void handleChangeDirectory()}>
           {t("backups.change_directory_button")}
@@ -347,14 +329,7 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
       </div>
 
       {listError ? (
-        <div className="backup-list-error">
-          <p className="error" role="alert">
-            {listError}
-          </p>
-          <button type="button" onClick={refreshBackups}>
-            {t("common.retry")}
-          </button>
-        </div>
+        <ErrorState message={listError} onRetry={refreshBackups} />
       ) : backups.length === 0 ? (
         <p className="hint">{t("backups.empty")}</p>
       ) : (
@@ -378,11 +353,9 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
       {selectedBackupId ? (
         <div className="backup-preview">
           {previewError ? (
-            <p className="error" role="alert">
-              {previewError}
-            </p>
+            <ErrorState message={previewError} />
           ) : preview === null ? (
-            <p className="hint">{t("common.loading")}</p>
+            <LoadingState />
           ) : (
             <>
               <h4>{t("backups.preview_title")}</h4>
@@ -397,11 +370,7 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
               )}
 
               {restoreSuccess ? <p className="backup-restore-success">{t("backups.restore_success")}</p> : null}
-              {restoreError ? (
-                <p className="error" role="alert">
-                  {restoreError}
-                </p>
-              ) : null}
+              {restoreError ? <ErrorState message={restoreError} /> : null}
 
               {dryRun === null ? (
                 <button type="button" disabled={planning} onClick={() => void handleStartRestore()}>
@@ -461,11 +430,7 @@ export function BackupsPanel({ onRestored }: BackupsPanelProps) {
                   )}
                 </div>
               )}
-              {planError ? (
-                <p className="error" role="alert">
-                  {planError}
-                </p>
-              ) : null}
+              {planError ? <ErrorState message={planError} /> : null}
             </>
           )}
           <button type="button" className="link-button" onClick={closePreview}>

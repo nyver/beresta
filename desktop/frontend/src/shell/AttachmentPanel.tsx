@@ -24,6 +24,7 @@ import { OnFileDrop, OnFileDropOff } from "../../wailsjs/runtime/runtime";
 import { main } from "../../wailsjs/go/models";
 import { KebabMenu } from "./KebabMenu";
 import { Modal } from "./Modal";
+import { ErrorState } from "./StatusState";
 
 export interface AttachmentPanelHandle {
   /** Queues one or more in-memory files (clipboard paste) for upload. See
@@ -389,16 +390,8 @@ export const AttachmentPanel = forwardRef<AttachmentPanelHandle, AttachmentPanel
             </button>
             <p className="hint attachment-dropzone">{t("attachments.dropzone_hint")}</p>
 
-            {loadError ? (
-              <p className="error" role="alert">
-                {loadError}
-              </p>
-            ) : null}
-            {itemError ? (
-              <p className="error" role="alert">
-                {itemError}
-              </p>
-            ) : null}
+            {loadError ? <ErrorState message={loadError} /> : null}
+            {itemError ? <ErrorState message={itemError} /> : null}
 
             {queue.length > 0 ? (
               <ul className="attachment-upload-queue">

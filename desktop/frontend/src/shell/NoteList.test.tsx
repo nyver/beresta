@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -121,6 +121,80 @@ describe("NoteList", () => {
 
     expect(await screen.findByText("search.no_results")).toBeInTheDocument();
     expect(screen.queryByText("shell.notelist_empty")).not.toBeInTheDocument();
+  });
+
+  // task 11.2: proves the note list actually stays virtualized (not just
+  // visually, but in DOM node count) at the account's documented 20,000-note
+  // ceiling, and that keyboard selection keeps computing the right index
+  // even when the currently selected note is far outside whatever window
+  // the virtualizer happens to have rendered - the case a small fixed-size
+  // fixture (every other test above) cannot exercise, since a handler bug
+  // like "assume the selected row is in the rendered set" would pass there
+  // but silently misbehave at scale.
+  it("keeps the DOM bounded and keyboard selection correct on a virtualized 20,000-note list", async () => {
+    mockLocaleCatalog();
+    mockSettings();
+    const notes = Array.from({ length: 20000 }, (_, index) => fakeNote({ title: `Note ${index}` }));
+    const midIndex = 10000;
+    const onSelect = vi.fn();
+    const { rerender } = render(
+      <I18nProvider>
+        <NoteList
+          notes={notes}
+          loading={false}
+          selectedNoteId={notes[midIndex].id}
+          onSelect={onSelect}
+          noteMetaById={emptyMeta}
+        />
+      </I18nProvider>,
+    );
+
+    // Virtualization's entire point is bounding rendered DOM nodes
+    // regardless of collection size; this is the one assertion that would
+    // actually catch a regression to rendering every row.
+    const listbox = await screen.findByRole("listbox");
+    expect(screen.getAllByRole("option").length).toBeLessThan(100);
+
+    listbox.focus();
+    expect(listbox).toHaveFocus();
+
+    // The selected note (index 10000) is far outside the rendered window
+    // (near index 0), so this proves handleKeyDown's `notes.findIndex`
+    // lookup - not some assumption that the selected row is mounted -
+    // drives the next index.
+    fireEvent.keyDown(listbox, { key: "ArrowDown" });
+    expect(onSelect).toHaveBeenLastCalledWith(notes[midIndex + 1].id);
+    expect(listbox).toHaveFocus();
+
+    rerender(
+      <I18nProvider>
+        <NoteList
+          notes={notes}
+          loading={false}
+          selectedNoteId={notes[midIndex + 1].id}
+          onSelect={onSelect}
+          noteMetaById={emptyMeta}
+        />
+      </I18nProvider>,
+    );
+    fireEvent.keyDown(listbox, { key: "ArrowUp" });
+    expect(onSelect).toHaveBeenLastCalledWith(notes[midIndex].id);
+
+    // Boundary clamping must still hold at scale: one past the last index
+    // stays at the last index, never overflows past notes.length - 1.
+    rerender(
+      <I18nProvider>
+        <NoteList
+          notes={notes}
+          loading={false}
+          selectedNoteId={notes[notes.length - 1].id}
+          onSelect={onSelect}
+          noteMetaById={emptyMeta}
+        />
+      </I18nProvider>,
+    );
+    fireEvent.keyDown(listbox, { key: "ArrowDown" });
+    expect(onSelect).toHaveBeenLastCalledWith(notes[notes.length - 1].id);
   });
 
   it("shows a preview snippet and formatted date when metadata is available", async () => {

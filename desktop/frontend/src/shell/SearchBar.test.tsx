@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -255,5 +255,35 @@ describe("SearchBar", () => {
 
     expect(screen.getByPlaceholderText("search.placeholder")).toHaveValue("");
     await waitFor(() => expect(onResultsChange).toHaveBeenLastCalledWith(null, []));
+  });
+
+  // task 11.2: extends the 20,000-note fixture to the client-side title
+  // filter itself (SearchBar's whole reason for staying client-side rather
+  // than round-tripping through the backend for a bare query), proving both
+  // correctness (finds the one matching title among 20,000) and that the
+  // filter pass stays well clear of the release-quality spec's 50ms local
+  // title-filtering budget (openspec/specs/release-quality/spec.md,
+  // "Target-scale performance budgets"). That budget is a hardware-
+  // qualified UX measurement (see tasks 12.4/12.5's qualification passes);
+  // this jsdom-timed floor is deliberately generous (10x) since jsdom does
+  // no real layout/paint - it exists to catch an accidental O(n^2) filter
+  // regression, not to stand in for hardware qualification.
+  it("keeps client-side title filtering well under budget at the 20,000-note ceiling", async () => {
+    const notes = Array.from({ length: 20000 }, (_, index) =>
+      index === 12345 ? fakeNoteDTO("zzzneedlezzz unique title") : fakeNoteDTO(`Note number ${index}`),
+    );
+    const { onResultsChange } = renderSearchBar([], notes);
+
+    const start = performance.now();
+    fireEvent.change(screen.getByPlaceholderText("search.placeholder"), {
+      target: { value: "zzzneedlezzz" },
+    });
+    await waitFor(() =>
+      expect(onResultsChange).toHaveBeenCalledWith([fakeResult("zzzneedlezzz unique title")], ["zzzneedlezzz"]),
+    );
+    const elapsed = performance.now() - start;
+
+    expect(elapsed).toBeLessThan(500);
+    expect(appMock.Search).not.toHaveBeenCalled();
   });
 });

@@ -846,4 +846,102 @@ describe("Shell", () => {
     });
     expect(appMock.ListNotes.mock.calls.length).toBeGreaterThan(listNotesCallsBeforeClose);
   });
+
+  // task 11.2: extends the 20,000-note fixture to note creation, against
+  // the release-quality spec's 100ms note-creation budget
+  // (openspec/specs/release-quality/spec.md, "Target-scale performance
+  // budgets"); see the notebook-switch test below for why this jsdom-timed
+  // floor is deliberately generous rather than a stand-in for hardware
+  // qualification.
+  it("creates a new note well under budget with 20,000 notes already loaded", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    const base = Date.UTC(2026, 0, 1);
+    appMock.ListNotes.mockResolvedValue(
+      Array.from({ length: 20000 }, (_, index) => fakeNote({ title: `Note ${index}`, updated_unix_ms: base - index })),
+    );
+    mockEmptyNoteDocument();
+    appMock.CreateNote.mockResolvedValue(fakeNote({ id: "new-note", title: "" }));
+    renderShell();
+    const user = userEvent.setup();
+
+    await screen.findByText("Note 0");
+
+    const start = performance.now();
+    await user.click(await screen.findByRole("button", { name: "shell.new_note_button" }));
+    await screen.findByLabelText("shell.detail_title_label", {}, { timeout: 5000 });
+    const elapsed = performance.now() - start;
+
+    expect(appMock.CreateNote).toHaveBeenCalledWith("", "");
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  // task 11.2: extends the 20,000-note fixture to notebook switching -
+  // visibleNotes' client-side re-filter (Shell.tsx) plus NoteList's
+  // virtualized re-render - proving both correctness at scale and that the
+  // switch stays well clear of the release-quality spec's 100ms
+  // notebook/tag-switch budget (openspec/specs/release-quality/spec.md,
+  // "Target-scale performance budgets"). That budget is a hardware-
+  // qualified UX measurement (see tasks 12.4/12.5's qualification passes);
+  // this jsdom-timed floor is deliberately generous, since it exists to
+  // catch an accidental algorithmic regression at scale, not to stand in
+  // for hardware qualification.
+  it("switches notebooks well under budget at the 20,000-note ceiling", async () => {
+    const notebook = fakeNotebook({ name: "Work" });
+    appMock.ListNotebooks.mockResolvedValue([notebook]);
+    appMock.ListTags.mockResolvedValue([]);
+    // sortNotesByLastModified orders by updated_unix_ms descending, so a
+    // strictly decreasing timestamp per index (rather than the fixture
+    // default's identical timestamp for every note, which falls back to an
+    // id-string tiebreak with no relation to creation order) guarantees
+    // "... note 0" is the most recent and lands first, where the
+    // virtualizer's initial render window can actually find it.
+    const base = Date.UTC(2026, 0, 1);
+    const rootNotes = Array.from({ length: 10000 }, (_, index) =>
+      fakeNote({ title: `Root note ${index}`, updated_unix_ms: base - index }),
+    );
+    const workNotes = Array.from({ length: 10000 }, (_, index) =>
+      fakeNote({ title: `Work note ${index}`, notebook_id: notebook.id, updated_unix_ms: base - index }),
+    );
+    appMock.ListNotes.mockResolvedValue([...rootNotes, ...workNotes]);
+    renderShell();
+    const user = userEvent.setup();
+
+    await screen.findByText("Root note 0");
+
+    const start = performance.now();
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+    await screen.findByText("Work note 0");
+    const elapsed = performance.now() - start;
+
+    expect(elapsed).toBeLessThan(1000);
+    expect(screen.queryByText("Root note 0")).not.toBeInTheDocument();
+  });
+
+  // task 11.2: proves Settings opening (the same grouped modal task 7.9
+  // built) does not become coupled to note-list size, against the
+  // release-quality spec's 200ms settings-open budget
+  // (openspec/specs/release-quality/spec.md); see the notebook-switch test
+  // above for why this jsdom-timed floor is deliberately generous rather
+  // than a stand-in for hardware qualification.
+  it("opens Settings well under budget with 20,000 notes already loaded", async () => {
+    appMock.ListNotebooks.mockResolvedValue([]);
+    appMock.ListTags.mockResolvedValue([]);
+    const base = Date.UTC(2026, 0, 1);
+    appMock.ListNotes.mockResolvedValue(
+      Array.from({ length: 20000 }, (_, index) => fakeNote({ title: `Note ${index}`, updated_unix_ms: base - index })),
+    );
+    mockSyncSummary();
+    renderShell();
+    const user = userEvent.setup();
+
+    await screen.findByText("Note 0");
+
+    const start = performance.now();
+    await user.click(await screen.findByRole("button", { name: "settings.title" }));
+    await screen.findByRole("dialog", { name: "settings.title" });
+    const elapsed = performance.now() - start;
+
+    expect(elapsed).toBeLessThan(1000);
+  });
 });

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -90,6 +91,54 @@ func TestSearch20000NoteBudget(t *testing.T) {
 	const budget = 150 * time.Millisecond
 	if elapsed > budget {
 		t.Fatalf("SearchNotes() took %v at 20,000 notes, want <= %v", elapsed, budget)
+	}
+}
+
+// searchP95FixtureQueries is a spread of representative multi-word queries
+// run against the same 20,000-note fixture searchFixtureWords feeds, so
+// TestSearchNotesP95Budget measures a realistic query mix rather than one
+// query's incidentally-fast or incidentally-slow plan.
+var searchP95FixtureQueries = []string{
+	"project", "meeting recipe", "travel budget", "workout reading",
+	"notes plan", "review draft", "summary idea", "reminder family",
+	"client vendor", "report project meeting", "garden invoice",
+	"recipe travel budget workout", "plan review", "draft summary",
+	"idea reminder", "family client", "vendor report garden",
+	"invoice project", "meeting travel", "budget workout reading",
+}
+
+// TestSearchNotesP95Budget proves SearchNotes meets the release-quality
+// spec's 150ms p95 local-search budget (openspec/specs/release-quality/
+// spec.md, "Target-scale performance budgets") across a spread of queries
+// at the 20,000-note ceiling, rather than TestSearch20000NoteBudget's
+// single correctness-focused sample. Skipped in -short mode for the same
+// reason as that test: seeding 20,000 notes dominates an already-slow
+// suite.
+func TestSearchNotesP95Budget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping 20,000-note search p95 benchmark fixture in -short mode")
+	}
+
+	db := repoTestDB(t)
+	workspaceID := seedWorkspace(t, db)
+	seedSearchFixture(t, db, workspaceID, 20000)
+
+	ctx := context.Background()
+	samples := make([]time.Duration, 0, len(searchP95FixtureQueries))
+	for _, q := range searchP95FixtureQueries {
+		start := time.Now()
+		if _, err := SearchNotes(ctx, db, workspaceID, SearchQuery{Text: q}); err != nil {
+			t.Fatalf("SearchNotes(%q) error = %v", q, err)
+		}
+		samples = append(samples, time.Since(start))
+	}
+
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	p95 := samples[int(float64(len(samples)-1)*0.95)]
+
+	const budget = 150 * time.Millisecond
+	if p95 > budget {
+		t.Fatalf("SearchNotes() p95 = %v across %d queries at 20,000 notes, want <= %v", p95, len(samples), budget)
 	}
 }
 

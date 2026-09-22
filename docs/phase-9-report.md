@@ -281,7 +281,9 @@ constraint.
   displays and devices this report's authoring environment does not have.
   Their harnesses (`build.cmd cold-start`, Android instrumentation tests,
   `mobile/integration_test/editor_jank_test.dart`) are implemented and
-  ready to run there.
+  ready to run there. See
+  [the qualification checklist](phase-9-qualification-checklist.md) for
+  the complete runbook.
 - **CGO_ENABLED=0 blocks execution, not correctness, for most of `core/*`,
   `desktop`, and `server`.** Every test in those packages compiles and
   vets cleanly; a real C toolchain (as CI already provisions) is the

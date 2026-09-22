@@ -1,6 +1,6 @@
 module github.com/beresta-app/beresta
 
-go 1.26.3
+go 1.26.6
 
 require (
 	github.com/AnoRebel/go-sqlcipher v1.0.0
@@ -9,7 +9,7 @@ require (
 	github.com/klauspost/compress v1.19.2
 	github.com/reearth/ygo v1.48.0
 	github.com/wailsapp/wails/v2 v2.14.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/mobile v0.0.0-20260813181013-1960c775504c
 	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -26,12 +26,12 @@ type Invite struct {
 }
 
 type Registration struct {
-	InviteCode        string `json:"invite_code"`
-	UserID            string `json:"user_id"`
-	IdentityPublic    []byte `json:"identity_public"`
-	AuthorityPublic   []byte `json:"authority_public"`
-	DeviceID          string `json:"device_id"`
-	DeviceName        string `json:"device_name"`
+	InviteCode      string `json:"invite_code"`
+	UserID          string `json:"user_id"`
+	IdentityPublic  []byte `json:"identity_public"`
+	AuthorityPublic []byte `json:"authority_public"`
+	DeviceID        string `json:"device_id"`
+	DeviceName      string `json:"device_name"`
 	// Platform is a coarse, closed-set client OS identifier ("windows",
 	// "android") shown in the understandable device inventory; it carries
 	// no protocol meaning and is never validated against a fixed list here,

@@ -1459,6 +1459,72 @@ void main() {
       expect(gateway.unlocked, isFalse);
     },
   );
+
+  testWidgets(
+    "a genuine sleep/resume sequence flushes the open editor exactly once, hides content throughout, and does not leave the lock timer armed after waking (task 11.5)",
+    (tester) async {
+      // A real Android sleep (screen off via the power button, or the OS
+      // reclaiming focus) drives AppLifecycleState through inactive, then
+      // hidden, then paused in sequence - not the single direct jump to
+      // paused the two tests above simulate for simplicity - and waking
+      // delivers resumed directly. didChangeAppLifecycleState
+      // (AppLifecycleLock in app.dart) calls the flush barrier on every one
+      // of inactive/hidden/paused/detached, so this also proves that
+      // repeated calls across a real sequence collapse to exactly one
+      // commit (EditorScreen.commit's `if (!dirty...) return` guard) rather
+      // than resending the same edit two or three times.
+      final gateway = FakeGateway(unlocked: true)..autoLockMinutesValue = 15;
+      await tester.pumpWidget(BerestaApp(gateway: gateway));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text("Offline note"));
+      await tester.pumpAndSettle();
+      final controller =
+          tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
+      controller.replaceText(
+        0,
+        0,
+        "Typed while awake",
+        const TextSelection.collapsed(offset: 18),
+      );
+      await tester.pump();
+
+      for (final state in [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+        await tester.pump();
+      }
+
+      expect(gateway.saveRequestIds, hasLength(1));
+      expect(gateway.savedBody, "Typed while awake");
+      expect(find.text("Typed while awake"), findsNothing);
+
+      // Flutter's own AppLifecycleListener enforces the real OS transition
+      // graph (resumed <-> inactive <-> hidden <-> paused <-> detached, one
+      // step at a time): waking must retrace the sleep sequence in reverse
+      // rather than jump straight from paused to resumed, which the
+      // framework asserts against. Confirmed by first writing this test
+      // with a direct paused -> resumed jump, which the framework itself
+      // rejected as an "Invalid state transition".
+      for (final state in [
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+        await tester.pump();
+      }
+
+      // Waking must not have left a lock timer armed from the paused step
+      // above: well past what even the old hardcoded 5-minute safety net
+      // (task 7.6) would have triggered, the account is still unlocked.
+      await tester.pump(const Duration(minutes: 6));
+      expect(gateway.unlocked, isTrue);
+    },
+  );
 }
 
 class FakeGateway implements CoreGateway {

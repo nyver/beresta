@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("bootstrap", "format", "format-check", "locale-check", "lint", "test", "coverage-gate", "security-scan", "build", "server-build", "server-cross-build", "server-smoke", "package", "cold-start", "installer-smoke", "mobile-check", "mobile-bind-android", "mobile-build-android", "mobile-package-android", "mobile-test-android", "verify")]
+    [ValidateSet("bootstrap", "format", "format-check", "locale-check", "lint", "test", "coverage-gate", "security-scan", "secret-scan", "build", "server-build", "server-cross-build", "server-smoke", "package", "cold-start", "installer-smoke", "mobile-check", "mobile-bind-android", "mobile-build-android", "mobile-package-android", "mobile-test-android", "verify")]
     [string]$Task = "verify"
 )
 
@@ -596,6 +596,25 @@ function Invoke-SecurityScan {
     Invoke-Checked -FilePath $go -Arguments @("run", "github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.2.1", "--lockfile=go.mod")
 }
 
+function Invoke-SecretScan {
+    # task 11.8's secret-scan release gate: fails the build if any tracked
+    # file contains a credential-shaped string. --no-git scans the current
+    # working tree directly (what will actually be released) rather than
+    # gitleaks' default full-history scan, which would keep re-flagging
+    # every historical commit forever, including ones a later commit
+    # already fixed - the wrong model for a per-build gate. .gitleaks.toml
+    # (repo root) allowlists third_party/ (unmodified vendored C source),
+    # schema/testdata/ (fixed, publicly documented crypto test vectors),
+    # and build/ (gitignored local output --no-git would otherwise still
+    # walk, since it does not consult .gitignore).
+    $go = Get-GoExecutable
+    # --source . (relative, run from $projectRoot) rather than an absolute
+    # path: .gitleaks.toml's allowlist regexes match gitleaks' reported
+    # paths, which are relative to --source, so an absolute --source would
+    # silently defeat every path-based allowlist entry.
+    Invoke-Checked -FilePath $go -Arguments @("run", "github.com/zricethezav/gitleaks/v8@v8.21.2", "detect", "--source", ".", "--no-git", "--config", (Join-Path $projectRoot ".gitleaks.toml"), "-v") -WorkingDirectory $projectRoot
+}
+
 switch ($Task) {
     "bootstrap" { Invoke-Bootstrap }
     "format" { Invoke-Format }
@@ -605,6 +624,7 @@ switch ($Task) {
     "test" { Invoke-Tests }
     "coverage-gate" { Invoke-CoverageGate }
     "security-scan" { Invoke-SecurityScan }
+    "secret-scan" { Invoke-SecretScan }
     "build" { Invoke-Build }
     "server-build" { Invoke-ServerBuild }
     "server-cross-build" { Invoke-ServerCrossBuild }

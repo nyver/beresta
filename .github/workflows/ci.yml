@@ -73,6 +73,10 @@ jobs:
         shell: cmd
         run: build.cmd security-scan
 
+      - name: Secret scan
+        shell: cmd
+        run: build.cmd secret-scan
+
       - name: Fuzz malformed-input decoders (30s each)
         shell: cmd
         env:

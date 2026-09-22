@@ -14,7 +14,7 @@ const (
 	X25519PublicKeyBytes   = 32
 	X25519PrivateKeyBytes  = 32
 	Ed25519PublicKeyBytes  = ed25519.PublicKeySize
-	Ed25519PrivateKeyBytes = ed25519.PrivateKeySize
+	Ed25519PrivateKeyBytes = ed25519.PrivateKeySize // gitleaks:allow - a byte-length constant, not key material
 	Ed25519SignatureBytes  = ed25519.SignatureSize
 
 	MaxWorkspaceKeyEnvelopePlaintextBytes = 64 * 1024

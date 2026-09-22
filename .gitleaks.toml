@@ -1,0 +1,24 @@
+title = "Beresta gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# third_party/ vendors unmodified upstream C source (SQLite/SQLCipher)
+# whose variable/function names incidentally match gitleaks' generic
+# heuristics; it is not a project secret, and hand-editing vendored
+# upstream source to silence a scanner would defeat the point of vendoring
+# it unmodified. schema/testdata/ holds deliberately fixed, publicly known
+# cryptographic test vectors (each fixture carries its own "Never use this
+# randomness or these private keys in production" warning) used only for
+# interoperability tests, never to protect real data.
+[allowlist]
+paths = [
+  '''^third_party/''',
+  '''^schema/testdata/''',
+  # Local build outputs and downloaded toolchains/caches: gitignored (never
+  # committed) and irrelevant to a working-tree scan, but --no-git mode
+  # (used here so a fixed false positive stops being reported without
+  # needing history-aware allowlisting - see build.ps1's Invoke-SecretScan)
+  # walks the filesystem directly rather than respecting .gitignore.
+  '''^build[/\\]''',
+]

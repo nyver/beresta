@@ -62,7 +62,18 @@ and Windows Authenticode trust. It retains `beresta.exe.previous`, invokes the
 installer silently, verifies the installed executable's Authenticode trust,
 and restores the prior executable if installation or post-install validation
 fails. `beresta-updater rollback -installed <path>` restores that retained
-copy explicitly.
+copy explicitly. Rollback failure itself is tested, not only rollback
+success: a missing or corrupt preserved executable, and an installer
+failure that also fails its own rollback, both surface as reported errors
+with the installed executable left exactly as the failing installer left
+it, never falsely reported as recovered.
+
+A pending schema migration triggers its own separate safety net before the
+update path runs at all: the local database opens through a safety backup
+taken immediately before the migration applies, so a migration that
+corrupts the live database file (not merely a failed SQL statement inside
+a transaction, which never reaches disk) can still be recovered from that
+backup with every pre-migration record intact.
 
 ## Windows smoke tests
 

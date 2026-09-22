@@ -68,7 +68,22 @@ with its own invite code), then share the workspace between them:
 
 This makes the joining device a workspace member (not the workspace owner),
 matching the up-to-five-user household model. Only the owner can share a
-workspace it holds.
+workspace it holds. Sharing, joining, and disconnecting a device or member
+each stage through an explicit confirmation step before the underlying
+action runs, and every code (identity, grant, connection) renders as a QR
+image by default with the raw opaque text available behind a "Show code"
+toggle, so the primary flow never surfaces key material directly.
+
+The Devices section of Settings (see below) lists every device with
+access to the current workspace by platform and understandable name, when
+it was last seen, whether it is the current device, and its access state
+(Active or Revoked); disconnecting one requires confirming the same
+future-access-only limitation desktop shows - revocation stops a device's
+future synchronization but cannot erase content it already downloaded.
+Revoking a workspace member automatically rotates that workspace's key to
+every remaining device; this happens without any visible primary-flow
+state change, though it is recorded in Diagnostics' technical details if
+a rotation is still pending.
 
 The backup action first asks for an Android document-tree destination. Beresta
 creates and verifies the encrypted backup in private storage, copies it through
@@ -78,11 +93,23 @@ unchanged. “Import from destination” copies candidate backup sets back throu
 a bounded staging area, verifies the manifest and account-bound AEAD, and only
 then adds them to the restore catalog.
 
-Mobile settings control the automatic-lock interval, attachment retention
-mode, selected notebooks, and encrypted attachment-cache limit. Pinned files
-and unsynchronized local originals are never LRU candidates.
+Settings is one grouped bottom sheet with six sections - General, Security,
+Synchronization, Data, Advanced, and About - rather than separate backup,
+server, and settings buttons on the app bar. Security holds the automatic-
+lock interval and device unlock; Synchronization holds the cloud/device/
+sharing actions described above; Data holds backup, restore, and
+import/export, including attachment retention mode, selected notebooks,
+and the encrypted attachment-cache limit (pinned files and unsynchronized
+local originals are never LRU candidates); Advanced holds one "Check my
+data" action that runs a consolidated local-database-integrity, search-
+index-consistency, and backup-health check and reports either "No problems
+found" or a single actionable summary, never the individual maintenance
+jobs it runs on the user's behalf.
 
 Android's Share sheet accepts bounded text/link and image input. Captures made
 while locked are encrypted in private no-backup storage and imported only after
-unlock. The quick-note widget follows the same path and never displays a note
-title or body.
+unlock, from whichever of passphrase, biometric, or device-credential path the
+user actually completes; a one-time notice on the note list reports how many
+shared items were added once they are. The quick-note widget follows the same
+path and never displays a note title or body; an in-progress draft survives a
+rotation or low-memory process recreation instead of being silently lost.

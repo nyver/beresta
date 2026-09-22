@@ -7,7 +7,44 @@ Beresta is an offline-first encrypted notes application for Windows and Android 
 ## Project Status
 
 Beresta has completed the Windows desktop, home-server, HTTP synchronization,
-and Android application phases. Phases
+Android application, and product-hardening phases. The hardening phase
+(`openspec/changes/harden-product-ux-reliability`) reworked the product
+surface built on top of the earlier phases rather than adding new backend
+capability: shared, platform-neutral presentation contracts (local-save,
+synchronization, error, backup-health, and diagnostic states, with parity
+tests proving desktop and Android derive identical states from the same
+inputs) replace ad hoc per-platform status strings; the editor commit path
+is generation-tagged so a stale completion can never mark newer dirty
+content as saved, and a local-only flush barrier (never waiting on
+synchronization) runs before every navigation, workspace switch, lock, or
+update; the seven-state synchronization summary
+(`local_only`/`current`/`pending`/`offline`/`retrying`/`syncing`/
+`action_required`) and a stable network/server/trust/revocation/unsafe-
+operation error taxonomy (one localized message and recovery action per
+category) replace raw backend error strings everywhere; attachment,
+backup, and restore paths are fault-injection-tested at every durability
+boundary (before/after encryption, disk-full, permission-revoked, process
+termination); onboarding, unlock, sharing, and settings were rebuilt
+around local-first account creation, a QR-first pairing wizard, an
+understandable device/member list with revocation-limitation disclosure,
+automatic no-downtime workspace-key rotation on member revocation, and one
+grouped six-section settings surface (General/Security/Synchronization/
+Data/Advanced/About) on both clients; the Windows shell gained a stable
+region layout, a central command registry, first-use close-to-tray
+education, and a tray "Lock" command, while the Android shell gained the
+same stable-region layout, deterministic system-Back precedence, and
+hardened share/quick-note capture; a semantic design-token manifest now
+backs both clients' visual language (dark mode is deliberately not enabled
+yet - see Current Limitations); and a bounded, content-free performance-
+instrumentation layer, 20,000-note-scale benchmarks, editor jank
+harnesses, sync-status/LAN-throughput regression gates, real desktop-
+versus-Android cross-platform convergence tests, and a fail-closed secret-
+scanning build gate now back the release-quality budgets this document and
+[the release-quality spec](openspec/specs/release-quality/spec.md)
+describe. See [the phase-9 delivery report](docs/phase-9-report.md) for
+the complete change list, coverage, and known limitations.
+
+Phases
 1 and 2A delivered the architecture baseline and cryptographic core; phase 2B
 added the encrypted client store; phase 3 added the complete offline note
 application surface through `core/account`; phase 4 wires that surface into a
@@ -231,21 +268,31 @@ yet to deliver an actual revocation signal. The desktop app also runs a
 native system-tray icon - extracted from the running executable's own
 embedded icon (`shell32.dll`'s `ExtractIconExW`) rather than a generic
 stock icon, so it matches the app the same way the taskbar and Alt+Tab
-already do - with a "Quick Note" / "Show Beresta" / "Quit" context menu, a
-configurable global quick-note hotkey (default
+already do - with a "Quick Note" / "Show Beresta" / "Lock" / "Quit" context
+menu (in that order), a configurable global quick-note hotkey (default
 `Ctrl+Shift+N`, changeable from the Backups & Data dialog) that opens a
 focused capture surface and brings the main window forward even while it
 is hidden, and an opt-in "launch at sign-in" autostart toggle backed by
 the per-user Windows Run key, with a UI warning when a stale entry from a
 different install path is detected. Closing the main window hides it to
 the tray instead of exiting whenever the tray started successfully; the
-tray menu's "Quit" (or a failed tray/hotkey startup, logged to the
-console) is what actually ends the process. A named single-instance lock
-held for the process lifetime stops a second launch from opening a
+first time this happens, a one-time notification balloon explains where the
+app went, tracked by a persisted flag so it never repeats. The tray menu's
+"Lock" command shows the window and runs the same content-first flush-then-
+lock sequence as the in-app Lock button (never a direct backend lock that
+could bypass it), and "Quit" (or a failed tray/hotkey startup, logged to
+the console) is what actually ends the process. A named single-instance
+lock held for the process lifetime stops a second launch from opening a
 duplicate window, tray icon, and hotkey registration; launching again
 while Beresta is already running instead brings the existing main window
-to the foreground (or, if it is hidden to the tray, leaves it there - the
-tray icon is already the right way to reach it). A separate Synchronization
+to the foreground and restores it if it was hidden to the tray, matched
+by window class rather than title or visibility (so it works exactly when
+already hidden - the exact scenario a re-launch is trying to reach).
+A central command registry (`desktop/frontend/src/shell/commands.ts`)
+is the single source of truth for every shortcut, accelerator, and
+accessible name reachable through pointer, menu, tray, or keyboard, so a
+new note, quick note, search focus, settings, navigation toggle, or lock
+always resolves to the same handler regardless of entry point. A separate Synchronization
 entry now renders the shared local_only/current/active/offline/pending/
 retrying/action_required state model (`core/syncsummary.Summarize`) and
 listens for payload-less `sync:summary` events, refetching the summary via
@@ -462,6 +509,7 @@ build.cmd lint
 build.cmd test
 build.cmd coverage-gate
 build.cmd security-scan
+build.cmd secret-scan
 build.cmd build
 build.cmd server-build
 build.cmd server-cross-build
@@ -489,6 +537,7 @@ The commands mean:
 | `test` | Run Go, Vitest, and Flutter tests |
 | `coverage-gate` | Run `core/...` tests with coverage and fail below the release-quality spec's 80% floor |
 | `security-scan` | Run `govulncheck` and an OSV dependency scan against `go.mod` |
+| `secret-scan` | Run `gitleaks` against the working tree (`.gitleaks.toml` allowlists vendored third-party source and fixed public test vectors) and fail on any credential-shaped match |
 | `build` | Build the server, React bundle, and Windows Wails executable |
 | `server-build` | Build `build/output/beresta-server.exe` for the current host |
 | `server-cross-build` | Build static Windows amd64, Linux amd64, and Linux arm64 server binaries under `build/output/server/`, plus `SHA256SUMS`, a per-binary module manifest, and `provenance.json` |
@@ -680,12 +729,18 @@ seven valid daily backups are retained.
   before shipping. Raspberry Pi idle acceptance runs only on the opt-in
   `beresta-pi` reference runner; ordinary hosted CI cross-builds Linux arm64
   but cannot substitute for the physical RSS/CPU measurement.
-- Core statement coverage measured 63.1% in this development environment,
-  below the release-quality spec's 80% target; `build.cmd coverage-gate`
-  fails below that threshold and is a required release gate. `core/transport`
-  (39.7%), `core/mobileapi` (55.7%), and `core/store` (56.0%) are the
-  lowest-covered packages - see [the phase-8 delivery report](docs/phase-8-report.md)
-  for detail.
+- Core statement coverage measured 63.1% as of [the phase-8 delivery
+  report](docs/phase-8-report.md), below the release-quality spec's 80%
+  target; `build.cmd coverage-gate` fails below that threshold and is a
+  required release gate. `core/transport`, `core/mobileapi`, and
+  `core/store` were the lowest-covered packages at that measurement. A
+  development environment without a C compiler (SQLCipher is CGO-only)
+  cannot run any test touching those packages at all, so this number
+  could not be re-measured during the hardening phase; every `core/*`
+  package whose own tests never open a database was individually
+  re-measured instead and already clears 80% (see [the phase-9 delivery
+  report](docs/phase-9-report.md)). Re-measuring the real gate needs the
+  reference toolchain `build.cmd coverage-gate` already enforces in CI.
 - Revision rollback and portable/Evernote import recreate content as plain text; rich-text formatting is not round-tripped through either path (see [ASSUMPTIONS.md](ASSUMPTIONS.md)).
 - The SQLCipher encrypted round trip passes on Windows amd64 and on an Android arm64 device through the packaged AAR and Flutter application linkage.
 - The Go mobile binding, SQLCipher-linked Android AAR, and Flutter debug APK builds pass on Windows.

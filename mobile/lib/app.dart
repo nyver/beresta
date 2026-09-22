@@ -1551,6 +1551,13 @@ class _ServerSheetState extends State<ServerSheet> {
           bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
         ),
         shrinkWrap: true,
+        // Without this, the shrink-wrapped ListView still claims vertical
+        // drag gestures for itself instead of letting them bubble up to
+        // GroupedSettingsSheet's outer SingleChildScrollView, so once this
+        // group's content overflows the sheet it cannot be scrolled by
+        // touch (most visible on Android, where Synchronization's content
+        // - workspaces, devices, quarantine entries - routinely does).
+        physics: const NeverScrollableScrollPhysics(),
         children: [
           Text(
             widget.strings("server"),
@@ -2192,6 +2199,10 @@ class _SettingsSheetState extends State<SettingsSheet> {
           bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
         ),
         shrinkWrap: true,
+        // See ServerSheet's build() for why this is required alongside
+        // shrinkWrap: true - without it, touch drags inside this list
+        // never reach GroupedSettingsSheet's outer SingleChildScrollView.
+        physics: const NeverScrollableScrollPhysics(),
         children: [
           if (widget.section == SettingsSection.security)
             DropdownButtonFormField<int>(

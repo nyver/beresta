@@ -130,7 +130,9 @@ void main() {
     // pins the exact callback shape mobile/lib/app.dart wires in, so a
     // signature mismatch there fails a test instead of only surfacing
     // as a runtime no-op the first time a user pastes rich text.
+    // ignore: experimental_member_use
     final QuillClipboardConfig config = QuillClipboardConfig(
+      // ignore: experimental_member_use
       onRichTextPaste:
           (delta, isExternal) async => stripUnsupportedFormats(delta),
     );
@@ -140,6 +142,7 @@ void main() {
           ..insert("Heading four")
           ..insert("\n", {"header": 4});
 
+    // ignore: experimental_member_use
     final result = await config.onRichTextPaste!(pasted, true);
 
     expect(result!.toList(), stripUnsupportedFormats(pasted).toList());

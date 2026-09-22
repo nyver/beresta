@@ -3157,8 +3157,9 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
                 .toSet();
       });
     } catch (failure) {
-      if (mounted)
+      if (mounted) {
         setState(() => error = describeFailure(widget.strings, failure));
+      }
     } finally {
       if (mounted) setState(() => planning = false);
     }
@@ -3186,8 +3187,9 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
       );
       widget.onRestored();
     } catch (failure) {
-      if (mounted)
+      if (mounted) {
         setState(() => error = describeFailure(widget.strings, failure));
+      }
     } finally {
       if (mounted) setState(() => restoring = false);
     }
@@ -3225,8 +3227,9 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
       );
       widget.onRestored();
     } catch (failure) {
-      if (mounted)
+      if (mounted) {
         setState(() => error = describeFailure(widget.strings, failure));
+      }
     } finally {
       if (mounted) setState(() => restoring = false);
     }
@@ -3504,7 +3507,9 @@ class _EditorScreenState extends State<EditorScreen> {
         // harmlessly but silently vanish only later, when this note's
         // body is next saved as Markdown.
         config: QuillControllerConfig(
+          // ignore: experimental_member_use
           clipboardConfig: QuillClipboardConfig(
+            // ignore: experimental_member_use
             onRichTextPaste:
                 (delta, isExternal) async => stripUnsupportedFormats(delta),
           ),

@@ -679,7 +679,11 @@ queries, passwords, keys, tokens, or invite codes - the same allowlist
 diagnostics and copy-diagnostics already enforce. The Windows desktop client
 writes the equivalent bounded, rotated JSON log to
 `%AppData%\Beresta\logs\beresta-desktop.log` (same default size/retention,
-not yet operator-configurable).
+not yet operator-configurable). See
+[Data Recovery and Diagnostics](docs/data-recovery-and-diagnostics.md) for
+log retention, diagnostics contents, storage-pressure recovery,
+backup-versus-sync behavior, migration safety, and update rollback in one
+place.
 
 Create the first single-use invite after initialization:
 

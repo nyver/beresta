@@ -376,7 +376,8 @@ class Strings {
       "hide_code": "Скрыть код",
       "qr_alt_identity": "QR-код вашей идентификации",
       "qr_alt_grant": "QR-код созданного доступа к пространству",
-      "share_confirm_title": "Предоставить доступ этому устройству или человеку?",
+      "share_confirm_title":
+          "Предоставить доступ этому устройству или человеку?",
       "share_confirm_description":
           "Они смогут читать и изменять все заметки в этом пространстве. Позже вы сможете отключить их в списке устройств.",
       "share_confirm_button": "Подтвердить и создать код",
@@ -492,7 +493,8 @@ class Strings {
       "diagnostics_transport_security_mode": "Проверка сертификата",
       "diagnostics_transport_url": "URL сервера",
       "diagnostics_migration_version": "Версия схемы базы данных",
-      "diagnostics_rotation_pending": "Смена ключа рабочего пространства ожидает завершения",
+      "diagnostics_rotation_pending":
+          "Смена ключа рабочего пространства ожидает завершения",
       "diagnostics_none": "Нет",
       "backup_health_healthy": "В порядке",
       "backup_health_warning": "Требует внимания",

@@ -72,9 +72,13 @@ String devicePlatformLabel(Strings strings, String? platform) {
 /// that has never refreshed a session since this field was added reports no
 /// value, which reads as "Never" rather than a missing/blank field.
 String deviceLastSeenLabel(Strings strings, String? lastSeenAt) {
-  if (lastSeenAt == null || lastSeenAt.isEmpty) return strings("diagnostics_never");
+  if (lastSeenAt == null || lastSeenAt.isEmpty) {
+    return strings("diagnostics_never");
+  }
   final parsed = DateTime.tryParse(lastSeenAt);
-  return parsed == null ? strings("diagnostics_never") : parsed.toLocal().toString();
+  return parsed == null
+      ? strings("diagnostics_never")
+      : parsed.toLocal().toString();
 }
 
 /// Renders a localized error with the underlying platform failure appended
@@ -297,6 +301,7 @@ class _AppLifecycleLockState extends State<AppLifecycleLock>
       await widget.gateway.lock();
       if (mounted) widget.onSessionLocked();
     }
+
     if (minutes <= 0) {
       await lockNow();
       return;
@@ -656,9 +661,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     liveRegion: true,
                     child: Text(
                       error!,
-                      style: TextStyle(
-                        color: AppColors.statusDanger,
-                      ),
+                      style: TextStyle(color: AppColors.statusDanger),
                     ),
                   ),
                 LanguageControl(
@@ -1395,7 +1398,9 @@ class _ServerSheetState extends State<ServerSheet> {
         .status()
         .then((status) {
           if (mounted) {
-            setState(() => localDeviceId = status["device_id"] as String? ?? "");
+            setState(
+              () => localDeviceId = status["device_id"] as String? ?? "",
+            );
           }
         })
         .catchError((_) {
@@ -1653,10 +1658,7 @@ class _ServerSheetState extends State<ServerSheet> {
             child: Text(widget.strings("connect_with_code")),
           ),
           if (error != null)
-            Text(
-              error!,
-              style: TextStyle(color: AppColors.statusDanger),
-            ),
+            Text(error!, style: TextStyle(color: AppColors.statusDanger)),
           const SizedBox(height: 12),
           TextButton(
             onPressed: () => setState(() => advancedOpen = !advancedOpen),
@@ -1751,7 +1753,9 @@ class _ServerSheetState extends State<ServerSheet> {
                         ? Text(widget.strings("device_revoked"))
                         : TextButton(
                           onPressed: () => requestRevokeDevice(device),
-                          child: Text(widget.strings("device_disconnect_button")),
+                          child: Text(
+                            widget.strings("device_disconnect_button"),
+                          ),
                         ),
               ),
           ],
@@ -1807,7 +1811,8 @@ class _ServerSheetState extends State<ServerSheet> {
             onPressed:
                 identityCode.isEmpty
                     ? null
-                    : () => setState(() => showIdentityCode = !showIdentityCode),
+                    : () =>
+                        setState(() => showIdentityCode = !showIdentityCode),
             child: Text(
               widget.strings(
                 showIdentityCode ? "hide_code" : "show_code_to_copy",
@@ -1845,7 +1850,9 @@ class _ServerSheetState extends State<ServerSheet> {
               key: const Key("grant-show-code-button"),
               onPressed: () => setState(() => showGrantCode = !showGrantCode),
               child: Text(
-                widget.strings(showGrantCode ? "hide_code" : "show_code_to_copy"),
+                widget.strings(
+                  showGrantCode ? "hide_code" : "show_code_to_copy",
+                ),
               ),
             ),
             if (showGrantCode) ...[
@@ -2280,10 +2287,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
             ),
           ],
           if (error != null)
-            Text(
-              error!,
-              style: TextStyle(color: AppColors.statusDanger),
-            ),
+            Text(error!, style: TextStyle(color: AppColors.statusDanger)),
           const SizedBox(height: 12),
           FilledButton(
             onPressed: () async {
@@ -2506,18 +2510,14 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
                   else if (technicalError != null)
                     Text(
                       technicalError!,
-                      style: TextStyle(
-                        color: AppColors.statusDanger,
-                      ),
+                      style: TextStyle(color: AppColors.statusDanger),
                     )
                   else if (technical != null)
                     _technicalDetails(technical!),
                 if (copyError != null)
                   Text(
                     copyError!,
-                    style: TextStyle(
-                      color: AppColors.statusDanger,
-                    ),
+                    style: TextStyle(color: AppColors.statusDanger),
                   ),
                 TextButton(
                   onPressed: () => unawaited(handleCopy()),
@@ -2631,7 +2631,11 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
 /// per specs/product-experience's "Routine maintenance and user data
 /// check" requirement.
 class DataCheckSection extends StatefulWidget {
-  const DataCheckSection({required this.gateway, required this.strings, super.key});
+  const DataCheckSection({
+    required this.gateway,
+    required this.strings,
+    super.key,
+  });
 
   final CoreGateway gateway;
   final Strings strings;
@@ -2683,10 +2687,7 @@ class _DataCheckSectionState extends State<DataCheckSection> {
           Text(
             widget.strings("data_check_issue_${current["issue"]}"),
             style: TextStyle(
-              color:
-                  current["healthy"] == true
-                      ? null
-                      : AppColors.statusDanger,
+              color: current["healthy"] == true ? null : AppColors.statusDanger,
             ),
           ),
       ],
@@ -2852,10 +2853,7 @@ class _BackupSheetState extends State<BackupSheet> {
           },
         ),
         if (error != null)
-          Text(
-            error!,
-            style: TextStyle(color: AppColors.statusDanger),
-          ),
+          Text(error!, style: TextStyle(color: AppColors.statusDanger)),
         if (spaceError)
           OutlinedButton(
             onPressed: widget.gateway.selectBackupDestination,
@@ -2896,8 +2894,7 @@ class _BackupSheetState extends State<BackupSheet> {
                     ).toLocal().toString(),
                   ),
                   trailing: TextButton(
-                    onPressed:
-                        () => openRestoreOptions(backup["id"] as String),
+                    onPressed: () => openRestoreOptions(backup["id"] as String),
                     child: Text(widget.strings("restore")),
                   ),
                 );
@@ -3023,7 +3020,10 @@ class _GroupedSettingsSheetState extends State<GroupedSettingsSheet> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DiagnosticsSection(gateway: widget.gateway, strings: widget.strings),
+            DiagnosticsSection(
+              gateway: widget.gateway,
+              strings: widget.strings,
+            ),
             const Divider(),
             DataCheckSection(gateway: widget.gateway, strings: widget.strings),
           ],
@@ -3079,12 +3079,9 @@ class _GroupedSettingsSheetState extends State<GroupedSettingsSheet> {
                   children: [
                     for (final group in SettingsGroup.values)
                       ChoiceChip(
-                        label: Text(
-                          _settingsGroupLabel(widget.strings, group),
-                        ),
+                        label: Text(_settingsGroupLabel(widget.strings, group)),
                         selected: activeGroup == group,
-                        onSelected:
-                            (_) => setState(() => activeGroup = group),
+                        onSelected: (_) => setState(() => activeGroup = group),
                       ),
                   ],
                 ),
@@ -3268,12 +3265,7 @@ class _RestoreOptionsSheetState extends State<_RestoreOptionsSheet> {
                 ),
                 const SizedBox(height: 16),
                 if (error != null)
-                  Text(
-                    error!,
-                    style: TextStyle(
-                      color: AppColors.statusDanger,
-                    ),
-                  ),
+                  Text(error!, style: TextStyle(color: AppColors.statusDanger)),
                 if (plan == null)
                   FilledButton(
                     onPressed: planning ? null : loadPlan,
@@ -4100,8 +4092,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
                                     child: Center(
                                       child: Icon(
                                         Icons.broken_image_outlined,
-                                        color:
-                                            AppColors.statusDanger,
+                                        color: AppColors.statusDanger,
                                       ),
                                     ),
                                   );
@@ -4134,9 +4125,7 @@ class _AttachmentThumbnailState extends State<_AttachmentThumbnail> {
                     if (snapshot.hasError) {
                       return const ColoredBox(
                         color: AppColors.accentHoverTint,
-                        child: Center(
-                          child: Icon(Icons.broken_image_outlined),
-                        ),
+                        child: Center(child: Icon(Icons.broken_image_outlined)),
                       );
                     }
                     if (!snapshot.hasData) {

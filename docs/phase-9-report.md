@@ -146,10 +146,13 @@ three genuine false positives).
 **12. Documentation, qualification, and release review** - this report;
 `README.md`, `config.example.yaml`, the Android user guide, and desktop
 update documentation brought current; a new consolidated recovery/
-diagnostics reference (`docs/data-recovery-and-diagnostics.md`); physical
-Windows/Android qualification and a full release-pipeline rebuild remain
-scoped to environments this report's "Known limitations" section
-describes, not something any development sandbox can complete.
+diagnostics reference (`docs/data-recovery-and-diagnostics.md`); a
+completed lead Go/security/performance/UX/accessibility/localization/
+data-loss review that found and fixed two real release-gate defects (see
+"Review decisions"); physical Windows/Android qualification and a full
+release-pipeline rebuild remain scoped to environments this report's
+"Known limitations" section describes, not something any development
+sandbox can complete.
 
 ## Review decisions
 
@@ -186,6 +189,28 @@ phasing - building it would be a multi-day feature reversal of that
 phasing, not a hardening fix, so this phase instead hardened what already
 exists (signature verification, rollback, and now rollback-*failure*
 coverage).
+
+Task 12.7's lead review found and fixed two genuine release-gate defects
+rather than only auditing: the task 11.3 desktop/Android jank harnesses
+held `SyncNow`/`RunDataCheck` pending to simulate concurrent backend work,
+but neither editor's typing path ever calls those methods, so the harnesses
+measured nothing about concurrency despite their stated claim - rewritten
+to exercise a real concurrent case (desktop: a live background-sync remote
+merge into the open `Y.Doc`; Android: corrected to a plain sustained-typing
+regression floor, since no equivalent live-merge coupling exists on that
+platform per task 6.8); and `format-check` was failing against 10 files
+under `mobile/lib`/`mobile/test` (accumulated `dart format` line-wrap
+drift), fixed the same way task 12.6 fixed its `gofmt` counterpart. The
+review also re-confirmed `security-scan`, `secret-scan`, and task 6.8's
+`SaveNote` three-way-merge fix are all still intact. One further gap was
+surfaced - Android's Settings screen presents a fully-wired attachment
+retention/cache-limit UI with no code path that ever evicts anything (see
+"Known limitations" below) - and, after review with the change's author,
+was kept as a documented non-blocker rather than fixed in this pass: it
+causes unreclaimed local disk space, not data loss or corruption, and a
+correct fix needs new engineering (a write-time recording call, a
+trigger point, and an on-demand re-fetch path for evicted copies) that
+does not exist yet, not a review-time patch.
 
 ## Verification
 
@@ -302,7 +327,14 @@ constraint.
   no call site wiring it to a running trigger; the retention-mode/cache-
   limit settings are real and configurable, but nothing currently
   evicts automatically when they are exceeded (see
-  `docs/data-recovery-and-diagnostics.md`).
+  `docs/data-recovery-and-diagnostics.md`). This violates
+  product-experience/spec.md's "attachment-cache cleanup...SHALL run
+  automatically" requirement on Android specifically. Task 12.7's lead
+  review confirmed the gap, judged it a non-blocker (no data loss or
+  corruption - only unreclaimed local disk space), and deliberately left
+  it unfixed pending a follow-up change: closing it needs a write-time
+  recording call, a periodic/trigger point, and an on-demand re-fetch path
+  for evicted "redundant" copies, none of which exist yet.
 - **Dark mode is deliberately not enabled** pending the physical-display
   qualification matrix task 12.4/12.5 gate.
 - **Windows Hello remains removed**, not merely deferred: two
@@ -311,8 +343,12 @@ constraint.
   platform-level WinRT issue. Re-attempting it needs either a different
   native approach validated on real Hello-enrolled hardware, or a
   platform-level fix - neither buildable from this report's environment.
-- **Task 12.6's full release-pipeline rebuild and coverage gate**, and
-  task 12.7's release-blocking lead review, both depend on the reference
-  toolchain and physical qualification passes above and are recorded as
-  the actual remaining release gate, not additional engineering work this
-  phase left undone.
+- **Task 12.6's full release-pipeline rebuild and coverage gate** still
+  depends on the reference toolchain (a C compiler, Wails CLI + WebView2,
+  Android SDK/NDK) this report's environment does not have. Task 12.7's
+  lead review is complete for everything this sandbox can reach - it found
+  and fixed two real gate defects (see "Review decisions" above) and left
+  no other unresolved Go/security/performance/accessibility/localization/
+  data-loss blocker. Stable release remains gated on 12.4/12.5's physical
+  qualification and 12.6's toolchain-blocked artifacts, not on further
+  engineering work this phase left undone.

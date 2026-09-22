@@ -18,17 +18,14 @@ void main() {
     PlatformDispatcher.instance.onError = originalDispatcherOnError;
   });
 
-  test(
-    "debug mode (the default) does not install the release sanitizer",
-    () {
-      configureErrorReporting();
-      expect(FlutterError.onError, same(originalFlutterOnError));
-      expect(
-        PlatformDispatcher.instance.onError,
-        same(originalDispatcherOnError),
-      );
-    },
-  );
+  test("debug mode (the default) does not install the release sanitizer", () {
+    configureErrorReporting();
+    expect(FlutterError.onError, same(originalFlutterOnError));
+    expect(
+      PlatformDispatcher.instance.onError,
+      same(originalDispatcherOnError),
+    );
+  });
 
   test(
     "release mode logs only the error's runtime type, never its message or a seeded secret",
@@ -43,9 +40,7 @@ void main() {
       addTearDown(() => debugPrint = previousDebugPrint);
 
       const secret = "seeded-secret-note-body-canary";
-      FlutterError.onError!(
-        FlutterErrorDetails(exception: StateError(secret)),
-      );
+      FlutterError.onError!(FlutterErrorDetails(exception: StateError(secret)));
       final handled = PlatformDispatcher.instance.onError!(
         Exception(secret),
         StackTrace.current,

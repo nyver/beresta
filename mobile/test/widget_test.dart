@@ -69,11 +69,7 @@ void main() {
       ]) {
         await tester.tap(find.widgetWithText(ChoiceChip, label));
         await tester.pumpAndSettle();
-        expect(
-          tester.takeException(),
-          isNull,
-          reason: "settings group $label",
-        );
+        expect(tester.takeException(), isNull, reason: "settings group $label");
       }
     },
   );
@@ -245,10 +241,7 @@ void main() {
       await tester.tap(find.text("Connect now"));
       await tester.pumpAndSettle();
 
-      expect(
-        find.widgetWithText(TextField, "Connection code"),
-        findsOneWidget,
-      );
+      expect(find.widgetWithText(TextField, "Connection code"), findsOneWidget);
     },
   );
 
@@ -361,10 +354,7 @@ void main() {
         findsNothing,
       );
       // The account is still valid and password unlock remains available.
-      expect(
-        find.widgetWithText(TextField, "Passphrase"),
-        findsOneWidget,
-      );
+      expect(find.widgetWithText(TextField, "Passphrase"), findsOneWidget);
       expect(find.widgetWithText(FilledButton, "Unlock"), findsOneWidget);
     },
   );
@@ -476,51 +466,50 @@ void main() {
     },
   );
 
-  testWidgets(
-    "system Back closes an open dialog before reaching the editor's "
-    "flush/close, and never loses the pending edit (task 9.2)",
-    (tester) async {
-      final gateway = FakeGateway(unlocked: true)..note["title"] = "";
-      await tester.pumpWidget(BerestaApp(gateway: gateway));
-      await tester.pumpAndSettle();
+  testWidgets("system Back closes an open dialog before reaching the editor's "
+      "flush/close, and never loses the pending edit (task 9.2)", (
+    tester,
+  ) async {
+    final gateway = FakeGateway(unlocked: true)..note["title"] = "";
+    await tester.pumpWidget(BerestaApp(gateway: gateway));
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.add));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
 
-      final controller =
-          tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
-      controller.replaceText(
-        0,
-        0,
-        "Unsaved paragraph",
-        const TextSelection.collapsed(offset: 17),
-      );
-      await tester.pump();
+    final controller =
+        tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
+    controller.replaceText(
+      0,
+      0,
+      "Unsaved paragraph",
+      const TextSelection.collapsed(offset: 17),
+    );
+    await tester.pump();
 
-      // Open the tag picker: an overlay (a real Navigator route) above the
-      // still-dirty editor.
-      await tester.tap(find.text("Add tag"));
-      await tester.pumpAndSettle();
-      expect(find.byType(SimpleDialog), findsOneWidget);
+    // Open the tag picker: an overlay (a real Navigator route) above the
+    // still-dirty editor.
+    await tester.tap(find.text("Add tag"));
+    await tester.pumpAndSettle();
+    expect(find.byType(SimpleDialog), findsOneWidget);
 
-      // specs/mobile-clients' "System Back during editing": "the overlay
-      // closes first" - one system Back must dismiss only the topmost
-      // route (the dialog). The editor screen underneath must still be
-      // present: this same press must not also pop the editor.
-      await simulateSystemBack(tester);
-      await tester.pumpAndSettle();
-      expect(find.byType(SimpleDialog), findsNothing);
-      expect(find.byType(QuillEditor), findsOneWidget);
+    // specs/mobile-clients' "System Back during editing": "the overlay
+    // closes first" - one system Back must dismiss only the topmost
+    // route (the dialog). The editor screen underneath must still be
+    // present: this same press must not also pop the editor.
+    await simulateSystemBack(tester);
+    await tester.pumpAndSettle();
+    expect(find.byType(SimpleDialog), findsNothing);
+    expect(find.byType(QuillEditor), findsOneWidget);
 
-      // The next system Back reaches the editor itself: PopScope blocks
-      // the pop while dirty, flushes the pending edit durably, then lets
-      // the route close - the buffer is never lost.
-      await simulateSystemBack(tester);
-      await tester.pumpAndSettle();
-      expect(find.byType(QuillEditor), findsNothing);
-      expect(gateway.savedBody, "Unsaved paragraph");
-    },
-  );
+    // The next system Back reaches the editor itself: PopScope blocks
+    // the pop while dirty, flushes the pending edit durably, then lets
+    // the route close - the buffer is never lost.
+    await simulateSystemBack(tester);
+    await tester.pumpAndSettle();
+    expect(find.byType(QuillEditor), findsNothing);
+    expect(gateway.savedBody, "Unsaved paragraph");
+  });
 
   testWidgets(
     "does not delete a pre-existing empty note when merely opening and leaving it",
@@ -845,15 +834,14 @@ void main() {
   testWidgets(
     "connects from a pasted connection code without exposing the advanced fields",
     (tester) async {
-      final gateway =
-          FakeGateway(unlocked: true)
-            ..connectionInfo = {
-              "enabled": true,
-              "url": "https://code.example.com",
-              "protocol": "https",
-              "security_mode": "pinned",
-              "fingerprint": "cd34",
-            };
+      final gateway = FakeGateway(unlocked: true)
+        ..connectionInfo = {
+          "enabled": true,
+          "url": "https://code.example.com",
+          "protocol": "https",
+          "security_mode": "pinned",
+          "fingerprint": "cd34",
+        };
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 
@@ -1051,10 +1039,7 @@ void main() {
       expect(find.text("Kitchen tablet"), findsOneWidget);
       expect(find.text("Old laptop"), findsOneWidget);
       expect(find.text("Revoked"), findsOneWidget);
-      expect(
-        find.widgetWithText(TextButton, "Disconnect"),
-        findsOneWidget,
-      );
+      expect(find.widgetWithText(TextButton, "Disconnect"), findsOneWidget);
       // The device_id itself is a protocol identifier and must not appear
       // in this primary list (specs/identity-and-sharing's "Understandable
       // device inventory").
@@ -1098,10 +1083,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(gateway.revokedSyncDeviceIds, isEmpty);
-      expect(
-        find.textContaining("cannot erase notes or keys"),
-        findsOneWidget,
-      );
+      expect(find.textContaining("cannot erase notes or keys"), findsOneWidget);
 
       await tester.tap(find.widgetWithText(FilledButton, "Disconnect"));
       await tester.pumpAndSettle();
@@ -1361,10 +1343,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(gateway.takeShareImportCountCallCount, 1);
-      expect(
-        find.text("2 shared items added to your notes"),
-        findsOneWidget,
-      );
+      expect(find.text("2 shared items added to your notes"), findsOneWidget);
 
       // The count is consumed on read, so it must not repeat on the next
       // check (e.g. a later unlock in the same session that drained
@@ -1424,8 +1403,7 @@ void main() {
   testWidgets(
     "background auto-lock waits for the configured duration instead of a hardcoded 5 minutes",
     (tester) async {
-      final gateway =
-          FakeGateway(unlocked: true)..autoLockMinutesValue = 15;
+      final gateway = FakeGateway(unlocked: true)..autoLockMinutesValue = 15;
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
 

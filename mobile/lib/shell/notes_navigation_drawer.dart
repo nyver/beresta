@@ -177,10 +177,7 @@ class NotesNavigationDrawer extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(
-                child: Text(
-                  strings("tags"),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(strings("tags"), overflow: TextOverflow.ellipsis),
               ),
               IconButton(
                 tooltip: strings("new_tag"),

@@ -62,7 +62,9 @@ Delta stripUnsupportedFormats(Delta delta) {
       if (!_canonicalFormatKeys.contains(entry.key)) continue;
       if (entry.key == "header") {
         final level = entry.value;
-        if (level is! num || level < _minHeaderLevel || level > _maxHeaderLevel) {
+        if (level is! num ||
+            level < _minHeaderLevel ||
+            level > _maxHeaderLevel) {
           continue;
         }
       }

@@ -35,9 +35,7 @@ void main() {
     expect(gateway.runDataCheckCallCount, 0);
   });
 
-  testWidgets("shows a healthy result after running the check", (
-    tester,
-  ) async {
+  testWidgets("shows a healthy result after running the check", (tester) async {
     final gateway = FakeGateway(unlocked: true);
     await tester.pumpWidget(hostDataCheckSection(gateway));
     await tester.pumpAndSettle();

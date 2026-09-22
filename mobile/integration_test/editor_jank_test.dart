@@ -1,5 +1,3 @@
-import "dart:async";
-
 import "package:beresta/main.dart";
 import "package:flutter/material.dart";
 import "package:flutter_quill/flutter_quill.dart";
@@ -7,34 +5,6 @@ import "package:flutter_test/flutter_test.dart";
 import "package:integration_test/integration_test.dart";
 
 import "../test/widget_test.dart" show FakeGateway;
-
-/// A [FakeGateway] whose `syncNow`/`runDataCheck` calls stay pending until
-/// this test releases them, so task 11.3's "concurrent sync, backup, FTS
-/// maintenance, GC, and attachment encryption" are genuinely in flight for
-/// the whole typing run below rather than resolved before it starts.
-/// `runDataCheck` is this app's single combined entry point for FTS-index
-/// repair, backup-health, and integrity verification (task 7.10), so
-/// gating it stands in for backup/FTS-maintenance/GC together; attachment
-/// encryption has no distinct Dart-reachable call (it happens inside the
-/// Go core during an attachment add, which this harness does not exercise)
-/// so is represented by the same held-open background-work window.
-class _SlowBackgroundWorkGateway extends FakeGateway {
-  _SlowBackgroundWorkGateway({required super.unlocked});
-
-  final Completer<void> backgroundWork = Completer<void>();
-
-  @override
-  Future<void> syncNow() async {
-    syncNowCalls++;
-    await backgroundWork.future;
-  }
-
-  @override
-  Future<Map<String, dynamic>> runDataCheck() async {
-    await backgroundWork.future;
-    return {"outcome": "healthy"};
-  }
-}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -50,11 +20,28 @@ void main() {
   // device/emulator - the same hardware gap task 12.5's physical
   // qualification pass exists to close). It is included here, ready to
   // run there, rather than executed in this session.
+  //
+  // This measures sustained typing's real on-device frame-build cost, a
+  // general regression floor (it would catch, say, an accidental O(n^2)
+  // editor-update regression) rather than a specific "concurrent backend
+  // work never blocks typing" claim: unlike desktop, where an open note
+  // genuinely receives a live background-sync merge into the same
+  // document being edited (see NoteEditor.jank.test.tsx's real
+  // "sync:summary" trigger), Android's editor has no live CRDT binding to
+  // interrupt (task 6.8's documented architecture difference) - nothing
+  // in EditorScreen's typing path ever awaits or references a
+  // gateway.syncNow()/runDataCheck() call, so holding one of those calls
+  // artificially pending here would not exercise any real coupling, only
+  // add a Completer nothing under test ever observes. Dart's single-
+  // threaded event loop already guarantees typing cannot be blocked by an
+  // unrelated pending Future by construction, so there is no such claim
+  // left to prove empirically for this platform the way there was for
+  // desktop's live-merge case.
   testWidgets(
-    "typing stays within the editor frame budget while concurrent sync/backup/FTS-maintenance/GC work is in flight",
+    "typing stays within the editor frame budget during sustained input",
     (tester) async {
       final binding = IntegrationTestWidgetsFlutterBinding.instance;
-      final gateway = _SlowBackgroundWorkGateway(unlocked: true);
+      final gateway = FakeGateway(unlocked: true);
 
       await tester.pumpWidget(BerestaApp(gateway: gateway));
       await tester.pumpAndSettle();
@@ -63,36 +50,25 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(QuillEditor), findsOneWidget);
 
-      // Start the concurrent background work (sync + data check) and leave
-      // it running for the entire typing pass below.
-      unawaited(gateway.syncNow());
-      unawaited(gateway.runDataCheck());
-
       final controller =
           tester.widget<QuillEditor>(find.byType(QuillEditor)).controller;
 
-      await binding.traceAction(
-        () async {
-          // A realistic long note body (~2,000 characters), simulating
-          // sustained typing rather than a single keystroke - the same
-          // scale NoteEditor.jank.test.tsx uses on desktop.
-          const sentence = "The quick brown fox jumps over the lazy dog. ";
-          for (var i = 0; i < 40; i++) {
-            final offset = controller.document.length - 1;
-            controller.replaceText(
-              offset < 0 ? 0 : offset,
-              0,
-              sentence,
-              TextSelection.collapsed(offset: offset + sentence.length),
-            );
-            await tester.pump();
-          }
-        },
-        reportKey: "editor_typing_under_concurrent_background_work",
-      );
-
-      gateway.backgroundWork.complete();
-      await tester.pumpAndSettle();
+      await binding.traceAction(() async {
+        // A realistic long note body (~2,000 characters), simulating
+        // sustained typing rather than a single keystroke - the same scale
+        // NoteEditor.jank.test.tsx uses on desktop.
+        const sentence = "The quick brown fox jumps over the lazy dog. ";
+        for (var i = 0; i < 40; i++) {
+          final offset = controller.document.length - 1;
+          controller.replaceText(
+            offset < 0 ? 0 : offset,
+            0,
+            sentence,
+            TextSelection.collapsed(offset: offset + sentence.length),
+          );
+          await tester.pump();
+        }
+      }, reportKey: "editor_typing_frame_budget");
 
       expect(controller.document.toPlainText(), contains("quick brown fox"));
     },

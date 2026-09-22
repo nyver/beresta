@@ -14,7 +14,9 @@ void main() {
   late Map<String, dynamic> manifest;
 
   setUpAll(() {
-    manifest = jsonDecode(_findDesignTokensFile().readAsStringSync()) as Map<String, dynamic>;
+    manifest =
+        jsonDecode(_findDesignTokensFile().readAsStringSync())
+            as Map<String, dynamic>;
   });
 
   double remToPx(String rem) => double.parse(rem.replaceAll("rem", "")) * 16;
@@ -37,7 +39,8 @@ void main() {
     };
     cases.forEach((key, actual) {
       test("spacing.$key", () {
-        final manifestValue = (manifest["spacing"] as Map<String, dynamic>)[key] as String;
+        final manifestValue =
+            (manifest["spacing"] as Map<String, dynamic>)[key] as String;
         expect(actual(), closeTo(remToPx(manifestValue), 0.001));
       });
     });
@@ -53,7 +56,8 @@ void main() {
     };
     cases.forEach((key, actual) {
       test("radius.$key", () {
-        final manifestValue = (manifest["radius"] as Map<String, dynamic>)[key] as String;
+        final manifestValue =
+            (manifest["radius"] as Map<String, dynamic>)[key] as String;
         expect(actual(), closeTo(remToPx(manifestValue), 0.001));
       });
     });
@@ -80,16 +84,20 @@ void main() {
     };
     cases.forEach((key, actual) {
       test("iconSize.$key", () {
-        final manifestValue = (manifest["iconSize"] as Map<String, dynamic>)[key] as String;
+        final manifestValue =
+            (manifest["iconSize"] as Map<String, dynamic>)[key] as String;
         expect(actual(), closeTo(remToPx(manifestValue), 0.001));
       });
     });
   });
 
-  test("kTouchTargetMinimum matches design/tokens.json touchTarget.minimum", () {
-    final manifestValue = manifest["touchTarget"]["minimum"] as String;
-    expect(kTouchTargetMinimum, closeTo(remToPx(manifestValue), 0.001));
-  });
+  test(
+    "kTouchTargetMinimum matches design/tokens.json touchTarget.minimum",
+    () {
+      final manifestValue = manifest["touchTarget"]["minimum"] as String;
+      expect(kTouchTargetMinimum, closeTo(remToPx(manifestValue), 0.001));
+    },
+  );
 
   group("AppDuration matches design/tokens.json animationDuration.*", () {
     final cases = <String, Duration Function()>{
@@ -100,7 +108,9 @@ void main() {
     };
     cases.forEach((key, actual) {
       test("animationDuration.$key", () {
-        final manifestValue = (manifest["animationDuration"] as Map<String, dynamic>)[key] as String;
+        final manifestValue =
+            (manifest["animationDuration"] as Map<String, dynamic>)[key]
+                as String;
         expect(actual().inMilliseconds.toDouble(), msToDuration(manifestValue));
       });
     });
@@ -128,15 +138,19 @@ void main() {
         for (final segment in segments) {
           node = node[segment];
         }
-        final expectedHex = (node as String).replaceFirst("#", "").toUpperCase();
-        final actualHex = actual().toARGB32().toRadixString(16).substring(2).toUpperCase();
+        final expectedHex =
+            (node as String).replaceFirst("#", "").toUpperCase();
+        final actualHex =
+            actual().toARGB32().toRadixString(16).substring(2).toUpperCase();
         expect(actualHex, expectedHex);
       });
     });
   });
 
   group("AppDuration.resolve (task 10.4 reduced motion)", () {
-    testWidgets("returns the requested duration when motion is not reduced", (tester) async {
+    testWidgets("returns the requested duration when motion is not reduced", (
+      tester,
+    ) async {
       late Duration resolved;
       await tester.pumpWidget(
         MediaQuery(
@@ -152,21 +166,24 @@ void main() {
       expect(resolved, AppDuration.slow);
     });
 
-    testWidgets("collapses to instant when the platform requests reduced motion", (tester) async {
-      late Duration resolved;
-      await tester.pumpWidget(
-        MediaQuery(
-          data: const MediaQueryData(disableAnimations: true),
-          child: Builder(
-            builder: (context) {
-              resolved = AppDuration.resolve(context, AppDuration.slow);
-              return const SizedBox.shrink();
-            },
+    testWidgets(
+      "collapses to instant when the platform requests reduced motion",
+      (tester) async {
+        late Duration resolved;
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(disableAnimations: true),
+            child: Builder(
+              builder: (context) {
+                resolved = AppDuration.resolve(context, AppDuration.slow);
+                return const SizedBox.shrink();
+              },
+            ),
           ),
-        ),
-      );
-      expect(resolved, AppDuration.instant);
-    });
+        );
+        expect(resolved, AppDuration.instant);
+      },
+    );
   });
 }
 
@@ -182,5 +199,7 @@ File _findDesignTokensFile() {
     if (parent.path == dir.path) break;
     dir = parent;
   }
-  throw StateError("could not locate design/tokens.json above ${Directory.current.path}");
+  throw StateError(
+    "could not locate design/tokens.json above ${Directory.current.path}",
+  );
 }

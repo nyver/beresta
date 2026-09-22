@@ -35,65 +35,60 @@ void main() {
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(SystemChannels.platform, (call) async => null);
 
-  testWidgets(
-    "does not fetch diagnostics until the section is expanded",
-    (tester) async {
-      final gateway = FakeGateway(unlocked: true);
-      await tester.pumpWidget(hostDiagnosticsSection(gateway));
-      await tester.pumpAndSettle();
+  testWidgets("does not fetch diagnostics until the section is expanded", (
+    tester,
+  ) async {
+    final gateway = FakeGateway(unlocked: true);
+    await tester.pumpWidget(hostDiagnosticsSection(gateway));
+    await tester.pumpAndSettle();
 
-      expect(find.text("0.1.0"), findsNothing);
-    },
-  );
+    expect(find.text("0.1.0"), findsNothing);
+  });
 
-  testWidgets(
-    "loads and shows the summary once expanded",
-    (tester) async {
-      final gateway = FakeGateway(unlocked: true);
-      gateway.diagnosticSummaryValue = {
-        ...gateway.diagnosticSummaryValue,
-        "app_version": "9.9.9",
-        "platform": "android",
-        "pending_count": 3,
-      };
-      await tester.pumpWidget(hostDiagnosticsSection(gateway));
-      await tester.pumpAndSettle();
+  testWidgets("loads and shows the summary once expanded", (tester) async {
+    final gateway = FakeGateway(unlocked: true);
+    gateway.diagnosticSummaryValue = {
+      ...gateway.diagnosticSummaryValue,
+      "app_version": "9.9.9",
+      "platform": "android",
+      "pending_count": 3,
+    };
+    await tester.pumpWidget(hostDiagnosticsSection(gateway));
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.text("Diagnostics"));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text("Diagnostics"));
+    await tester.pumpAndSettle();
 
-      expect(find.text("9.9.9"), findsOneWidget);
-      expect(find.text("android"), findsOneWidget);
-      expect(find.text("3"), findsOneWidget);
-    },
-  );
+    expect(find.text("9.9.9"), findsOneWidget);
+    expect(find.text("android"), findsOneWidget);
+    expect(find.text("3"), findsOneWidget);
+  });
 
-  testWidgets(
-    "loads technical details only once that section is expanded",
-    (tester) async {
-      final gateway = FakeGateway(unlocked: true);
-      gateway.technicalDiagnosticsValue = {
-        ...gateway.technicalDiagnosticsValue,
-        "workspace_id": "ws-canary",
-        "device_id": "device-canary",
-        "cursor_sequence": 7,
-        "cursor_epoch": 1,
-      };
-      await tester.pumpWidget(hostDiagnosticsSection(gateway));
-      await tester.pumpAndSettle();
+  testWidgets("loads technical details only once that section is expanded", (
+    tester,
+  ) async {
+    final gateway = FakeGateway(unlocked: true);
+    gateway.technicalDiagnosticsValue = {
+      ...gateway.technicalDiagnosticsValue,
+      "workspace_id": "ws-canary",
+      "device_id": "device-canary",
+      "cursor_sequence": 7,
+      "cursor_epoch": 1,
+    };
+    await tester.pumpWidget(hostDiagnosticsSection(gateway));
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.text("Diagnostics"));
-      await tester.pumpAndSettle();
-      expect(find.text("ws-canary"), findsNothing);
+    await tester.tap(find.text("Diagnostics"));
+    await tester.pumpAndSettle();
+    expect(find.text("ws-canary"), findsNothing);
 
-      await tester.tap(find.text("Show technical details"));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text("Show technical details"));
+    await tester.pumpAndSettle();
 
-      expect(find.text("ws-canary"), findsOneWidget);
-      expect(find.text("device-canary"), findsOneWidget);
-      expect(find.text("7@1"), findsOneWidget);
-    },
-  );
+    expect(find.text("ws-canary"), findsOneWidget);
+    expect(find.text("device-canary"), findsOneWidget);
+    expect(find.text("7@1"), findsOneWidget);
+  });
 
   testWidgets(
     "copies the sanitized bundle to the clipboard and shows confirmation",

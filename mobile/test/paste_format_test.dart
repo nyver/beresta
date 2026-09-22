@@ -39,11 +39,9 @@ void main() {
   });
 
   test("keeps canonical attributes alongside dropped ones on the same run", () {
-    final delta = Delta()..insert("mixed", {
-      "bold": true,
-      "underline": true,
-      "font": "serif",
-    });
+    final delta =
+        Delta()
+          ..insert("mixed", {"bold": true, "underline": true, "font": "serif"});
 
     final result = stripUnsupportedFormats(delta);
 
@@ -82,20 +80,23 @@ void main() {
     }
   });
 
-  test("drops a checklist list value instead of keeping an unrenderable checkbox", () {
-    // flutter_quill's list format also accepts "checked"/"unchecked" for a
-    // checklist item (a paste source can produce this even though no
-    // toolbar button offers it) - the Go core's canonical projection only
-    // understands "bullet"/"ordered".
-    final delta =
-        Delta()
-          ..insert("Buy milk")
-          ..insert("\n", {"list": "checked"});
+  test(
+    "drops a checklist list value instead of keeping an unrenderable checkbox",
+    () {
+      // flutter_quill's list format also accepts "checked"/"unchecked" for a
+      // checklist item (a paste source can produce this even though no
+      // toolbar button offers it) - the Go core's canonical projection only
+      // understands "bullet"/"ordered".
+      final delta =
+          Delta()
+            ..insert("Buy milk")
+            ..insert("\n", {"list": "checked"});
 
-    final result = stripUnsupportedFormats(delta);
+      final result = stripUnsupportedFormats(delta);
 
-    expect(result.toList(), [Operation.insert("Buy milk\n")]);
-  });
+      expect(result.toList(), [Operation.insert("Buy milk\n")]);
+    },
+  );
 
   test("keeps bullet and ordered list values", () {
     for (final value in ["bullet", "ordered"]) {
@@ -121,31 +122,28 @@ void main() {
     ]);
   });
 
-  test(
-    "the app.dart wiring type-checks against QuillClipboardConfig's "
-    "onRichTextPaste signature",
-    () async {
-      // flutter_quill keeps the code path that actually calls
-      // onRichTextPaste (QuillController.getDeltaToPaste) @internal, so it
-      // cannot be driven directly from outside the package; this at least
-      // pins the exact callback shape mobile/lib/app.dart wires in, so a
-      // signature mismatch there fails a test instead of only surfacing
-      // as a runtime no-op the first time a user pastes rich text.
-      final QuillClipboardConfig config = QuillClipboardConfig(
-        onRichTextPaste:
-            (delta, isExternal) async => stripUnsupportedFormats(delta),
-      );
+  test("the app.dart wiring type-checks against QuillClipboardConfig's "
+      "onRichTextPaste signature", () async {
+    // flutter_quill keeps the code path that actually calls
+    // onRichTextPaste (QuillController.getDeltaToPaste) @internal, so it
+    // cannot be driven directly from outside the package; this at least
+    // pins the exact callback shape mobile/lib/app.dart wires in, so a
+    // signature mismatch there fails a test instead of only surfacing
+    // as a runtime no-op the first time a user pastes rich text.
+    final QuillClipboardConfig config = QuillClipboardConfig(
+      onRichTextPaste:
+          (delta, isExternal) async => stripUnsupportedFormats(delta),
+    );
 
-      final pasted =
-          Delta()
-            ..insert("Heading four")
-            ..insert("\n", {"header": 4});
+    final pasted =
+        Delta()
+          ..insert("Heading four")
+          ..insert("\n", {"header": 4});
 
-      final result = await config.onRichTextPaste!(pasted, true);
+    final result = await config.onRichTextPaste!(pasted, true);
 
-      expect(result!.toList(), stripUnsupportedFormats(pasted).toList());
-    },
-  );
+    expect(result!.toList(), stripUnsupportedFormats(pasted).toList());
+  });
 
   test("keeps typing normally after a degraded paste (re-edit)", () {
     final pasted = stripUnsupportedFormats(
@@ -159,7 +157,11 @@ void main() {
     // paste replaces the current (here: empty) selection.
     controller.document.replace(0, controller.document.length, pasted);
 
-    controller.document.replace(controller.document.length - 1, 0, " continued");
+    controller.document.replace(
+      controller.document.length - 1,
+      0,
+      " continued",
+    );
 
     expect(controller.document.toPlainText(), "Too deep continued\n");
   });

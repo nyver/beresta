@@ -149,6 +149,7 @@
   "revisions.restore_confirm_button": "Восстановить",
   "revisions.restoring": "Восстановление…",
   "settings.title": "Настройки",
+  "settings.language_label": "Язык",
   "backups.title": "Резервные копии",
   "backups.directory_label": "Расположение резервных копий",
   "backups.change_directory_button": "Изменить…",

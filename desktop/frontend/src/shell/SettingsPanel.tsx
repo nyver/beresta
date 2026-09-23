@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { diagnosticSummary, unwrapError, type DiagnosticSummary } from "../api";
-import { useI18n } from "../i18n";
+import { SUPPORTED_LOCALES, useI18n, type Locale } from "../i18n";
 import { main } from "../../wailsjs/go/models";
 import { BackupsPanel } from "./BackupsPanel";
 import { DataCheckPanel } from "./DataCheckPanel";
@@ -29,6 +29,39 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   "advanced",
   "about",
 ];
+
+// LANGUAGE_NAMES are shown in their own language regardless of the
+// currently active locale, matching Onboarding.tsx's language switch - a
+// language's own name is not itself translated.
+const LANGUAGE_NAMES: Record<Locale, string> = {
+  en: "English",
+  ru: "Русский",
+};
+
+/**
+ * LanguagePanel lets a language chosen once at onboarding be changed later
+ * (specs/product-experience's "Stable cross-platform information
+ * architecture" requirement expects this to stay reachable, matching the
+ * mobile client's always-available language control) instead of being
+ * fixed for the life of the account.
+ */
+function LanguagePanel() {
+  const { t, locale, setLocale } = useI18n();
+  return (
+    <section className="language-panel">
+      <label className="language-switch">
+        {t("settings.language_label")}
+        <select value={locale} onChange={(event) => void setLocale(event.target.value as Locale)}>
+          {SUPPORTED_LOCALES.map((option) => (
+            <option key={option} value={option}>
+              {LANGUAGE_NAMES[option]}
+            </option>
+          ))}
+        </select>
+      </label>
+    </section>
+  );
+}
 
 export interface SettingsPanelProps {
   activeGroup: SettingsGroup;
@@ -129,7 +162,12 @@ export function SettingsPanel({
       </div>
 
       <div className="settings-group-content" role="tabpanel">
-        {activeGroup === "general" ? <ShellIntegrationPanel /> : null}
+        {activeGroup === "general" ? (
+          <>
+            <LanguagePanel />
+            <ShellIntegrationPanel />
+          </>
+        ) : null}
 
         {activeGroup === "security" ? (
           <section className="settings-security-panel">

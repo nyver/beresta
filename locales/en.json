@@ -137,6 +137,7 @@
   "revisions.restore_confirm_button": "Restore",
   "revisions.restoring": "Restoring…",
   "settings.title": "Settings",
+  "settings.language_label": "Language",
   "backups.title": "Backups",
   "backups.directory_label": "Backup location",
   "backups.change_directory_button": "Change…",

@@ -69,6 +69,12 @@ type HTTPConfig struct {
 	RequestTimeout        time.Duration
 	MaxOperationBytes     int
 	MaxOperationsPerBatch int
+	// Platform is this client's coarse OS identifier ("windows", "android"),
+	// resent on every challenge verify/refresh so the server can backfill a
+	// device row whose platform was never recorded (registered before this
+	// field existed, or with an older client) without needing the device to
+	// be re-registered. Optional: an empty value simply skips the hint.
+	Platform string
 }
 
 type HTTP struct {
@@ -446,7 +452,7 @@ func (h *HTTP) ensureSession(ctx context.Context, forceRefresh bool) error {
 	}
 	proof := challengeProofJSON{
 		ChallengeID: challenge.ID, DeviceID: challenge.DeviceID, ServerFingerprint: challenge.ServerFingerprint,
-		Nonce: challenge.Nonce, Scope: challenge.Scope,
+		Nonce: challenge.Nonce, Scope: challenge.Scope, Platform: h.config.Platform,
 	}
 	signature, err := h.config.SignChallenge(authSignatureInput(proof))
 	if err != nil || len(signature) != ed25519.SignatureSize {
@@ -516,6 +522,10 @@ type challengeProofJSON struct {
 	Nonce             []byte `json:"nonce"`
 	Scope             string `json:"scope"`
 	Signature         []byte `json:"signature"`
+	// Platform is metadata only and deliberately excluded from
+	// authSignatureInput: it must stay out of the signed payload so older
+	// clients that never send it keep verifying against newer servers.
+	Platform string `json:"platform,omitempty"`
 }
 
 type sessionJSON struct {

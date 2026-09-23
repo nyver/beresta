@@ -76,6 +76,7 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 	httpTransport, err := transport.NewHTTP(transport.HTTPConfig{
 		BaseURL: request.URL, SecurityMode: transport.HTTPSecurityMode(request.SecurityMode),
 		PinnedFingerprint: request.Fingerprint, DeviceID: acc.DeviceID, SignChallenge: acc.SignDeviceChallenge,
+		Platform: "windows",
 	})
 	if err != nil {
 		return ServerConnectionInfo{}, mapError(err)

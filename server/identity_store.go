@@ -66,6 +66,10 @@ type ChallengeProof struct {
 	Nonce             []byte `json:"nonce"`
 	Scope             string `json:"scope"`
 	Signature         []byte `json:"signature"`
+	// Platform is an optional, unsigned hint used only to backfill a device
+	// row whose platform was never recorded (see verifyChallenge) - it plays
+	// no part in authentication and is ignored by authSignatureInput.
+	Platform string `json:"platform,omitempty"`
 }
 
 type Session struct {
@@ -276,6 +280,13 @@ func (s *Storage) verifyChallenge(ctx context.Context, proof ChallengeProof, rep
 	if proof.ServerFingerprint != s.serverFingerprint || len(proof.Nonce) == 0 || len(proof.Signature) != ed25519.SignatureSize || !validScope(proof.Scope) {
 		return Session{}, ErrUnauthorized
 	}
+	// Platform is optional, unsigned display metadata, not an authentication
+	// input: an oversized value (a buggy or hostile client) is dropped rather
+	// than failing the entire login/refresh, which would otherwise turn a
+	// cosmetic field into a way to lock a device out of sync.
+	if len(proof.Platform) > 32 {
+		proof.Platform = ""
+	}
 	digest := sha256.Sum256(proof.Nonce)
 	message := authSignatureInput(proof)
 	token, tokenHash, err := randomToken(32)
@@ -308,6 +319,16 @@ func (s *Storage) verifyChallenge(ctx context.Context, proof ChallengeProof, rep
 		if _, err := transaction.ExecContext(ctx, `
 			UPDATE devices SET last_seen_at = ? WHERE device_id = ?`, unixNow(now), proof.DeviceID); err != nil {
 			return Session{}, err
+		}
+		// Backfill a platform this device never recorded - registered before
+		// the field existed, or with a client build that predates sending it -
+		// without ever overwriting a value the device already reported.
+		if proof.Platform != "" {
+			if _, err := transaction.ExecContext(ctx, `
+				UPDATE devices SET platform = ? WHERE device_id = ? AND platform IS NULL`,
+				proof.Platform, proof.DeviceID); err != nil {
+				return Session{}, err
+			}
 		}
 		result, err := transaction.ExecContext(ctx, `
 			UPDATE challenges SET consumed_at = ? WHERE challenge_id = ? AND consumed_at IS NULL`, unixNow(now), proof.ChallengeID)

@@ -1309,7 +1309,7 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 	s.mu.Lock()
 	generation := s.syncGeneration
 	s.mu.Unlock()
-	remote, err := transport.NewHTTP(transport.HTTPConfig{BaseURL: config.URL, SecurityMode: transport.HTTPSecurityMode(config.SecurityMode), PinnedFingerprint: config.Fingerprint, DeviceID: value.DeviceID, SignChallenge: value.SignDeviceChallenge})
+	remote, err := transport.NewHTTP(transport.HTTPConfig{BaseURL: config.URL, SecurityMode: transport.HTTPSecurityMode(config.SecurityMode), PinnedFingerprint: config.Fingerprint, DeviceID: value.DeviceID, SignChallenge: value.SignDeviceChallenge, Platform: "android"})
 	if err != nil {
 		return err
 	}

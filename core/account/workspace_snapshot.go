@@ -68,11 +68,9 @@ func (a *Account) CreateWorkspaceSnapshot(ctx context.Context, workspaceID model
 	if err != nil {
 		return coresync.Snapshot{}, err
 	}
-	plaintext, err := corecrypto.TakeSecret(payload)
-	if err != nil {
-		return coresync.Snapshot{}, err
-	}
-	defer plaintext.Close()
+	// The archive holds the whole workspace history, so it is sealed through
+	// the snapshot-sized byte API rather than a size-capped Secret.
+	defer clear(payload)
 	id, err := model.NewID()
 	if err != nil {
 		return coresync.Snapshot{}, err
@@ -81,12 +79,12 @@ func (a *Account) CreateWorkspaceSnapshot(ctx context.Context, workspaceID model
 	if err != nil {
 		return coresync.Snapshot{}, err
 	}
-	encrypted, err := corecrypto.EncryptObject(entry.Key, corecrypto.ObjectMetadata{
+	encrypted, err := corecrypto.EncryptSnapshotObject(entry.Key, corecrypto.ObjectMetadata{
 		SchemaVersion: corecrypto.SchemaVersionV1, CryptoProfile: corecrypto.CryptoProfileV1,
 		WorkspaceID: workspaceID.Bytes(), ObjectID: id.Bytes(), ObjectType: corecrypto.ObjectTypeWorkspaceSnapshot, KeyID: entry.KeyID,
-	}, plaintext)
+	}, payload)
 	if err != nil {
-		return coresync.Snapshot{}, err
+		return coresync.Snapshot{}, fmt.Errorf("account: encrypt workspace snapshot (%d bytes): %w", len(payload), err)
 	}
 	digest := sha256.Sum256(encrypted.Ciphertext)
 	snapshot := coresync.Snapshot{ID: id, WorkspaceID: workspaceID, BaseSequence: cursor.LastSequence, CursorEpoch: cursor.Epoch,
@@ -151,17 +149,12 @@ func (a *Account) ApplyWorkspaceSnapshot(ctx context.Context, snapshot coresync.
 	if (status != 1 && status != 2) || len(creatorPublic) != ed25519.PublicKeySize || coresync.VerifySnapshot(snapshot, creatorPublic) != nil {
 		return coresync.SnapshotAcknowledgement{}, errors.New("account: snapshot signature verification failed")
 	}
-	plaintext, err := corecrypto.OpenObject(entry.Key, corecrypto.EncryptedObject{Metadata: corecrypto.ObjectMetadata{
+	payload, err := corecrypto.OpenSnapshotObject(entry.Key, corecrypto.EncryptedObject{Metadata: corecrypto.ObjectMetadata{
 		SchemaVersion: corecrypto.SchemaVersionV1, CryptoProfile: corecrypto.CryptoProfileV1, WorkspaceID: snapshot.WorkspaceID.Bytes(),
 		ObjectID: snapshot.ID.Bytes(), ObjectType: corecrypto.ObjectTypeWorkspaceSnapshot, KeyID: snapshot.KeyID,
 	}, Nonce: snapshot.Nonce, Ciphertext: snapshot.Ciphertext})
 	if err != nil {
 		return coresync.SnapshotAcknowledgement{}, errors.New("account: snapshot ciphertext authentication failed")
-	}
-	defer plaintext.Close()
-	var payload []byte
-	if err := plaintext.Use(func(value []byte) error { payload = append([]byte(nil), value...); return nil }); err != nil {
-		return coresync.SnapshotAcknowledgement{}, err
 	}
 	defer clear(payload)
 	operations, catalog, err := decodeWorkspaceSnapshotArchive(payload)

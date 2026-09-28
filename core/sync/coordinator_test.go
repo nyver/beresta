@@ -117,6 +117,15 @@ func TestCoordinatorProgressReflectsPendingBackoffRetry(t *testing.T) {
 			if !progress.LastSuccess.IsZero() {
 				t.Fatalf("Progress().LastSuccess = %v, want zero (sync has never succeeded)", progress.LastSuccess)
 			}
+			if progress.ErrorClass == "" {
+				t.Fatal("Progress().ErrorClass is empty during PhaseBackoff")
+			}
+			if progress.ErrorDetail == "" {
+				t.Fatal("Progress().ErrorDetail is empty during PhaseBackoff")
+			}
+			if progress.ErrorAt.IsZero() {
+				t.Fatal("Progress().ErrorAt is zero during PhaseBackoff")
+			}
 			return
 		}
 		time.Sleep(time.Millisecond)
@@ -185,6 +194,9 @@ func TestCoordinatorProgressResetsOnReattach(t *testing.T) {
 	}
 	if !progress.RetryDeadline.IsZero() {
 		t.Fatalf("Progress().RetryDeadline = %v, want zero", progress.RetryDeadline)
+	}
+	if progress.ErrorAt.IsZero() {
+		t.Fatal("Progress().ErrorAt is zero after the second worker reported PhaseQuarantine")
 	}
 }
 

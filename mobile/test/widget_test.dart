@@ -1897,6 +1897,8 @@ class FakeGateway implements CoreGateway {
     "workspace_id": "",
     "device_id": "",
     "last_error_class": "",
+    "last_error_detail": "",
+    "last_error_at_unix_ms": 0,
     "pending_operation_count": 0,
     "quarantined_operation_ids": <String>[],
     "cursor_sequence": 0,

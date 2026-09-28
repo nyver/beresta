@@ -364,6 +364,8 @@ export interface TechnicalDiagnostics {
   workspace_id: string;
   device_id: string;
   last_error_class: string;
+  last_error_detail: string;
+  last_error_at_unix_ms: number;
   pending_operation_count: number;
   quarantined_operation_ids: string[];
   cursor_sequence: number;

@@ -19,17 +19,19 @@ type Coordinator struct {
 	trigger   chan struct{}
 	done      chan error
 
-	// lastPhase, lastErrorClass, lastSuccess, and retryDeadline track the
-	// most recent Progress reported by the attached worker, exposed via
-	// Progress, so callers can derive a SyncSummary without replaying every
-	// Progress event themselves. They are reset on each Attach, since a new
-	// worker means a new (or newly reconnected) workspace whose progress
-	// history does not carry over.
-	lastPhase      Phase
-	lastErrorClass string
-	lastSuccess    time.Time
-	retryDeadline  time.Time
-	lastRetryCount int
+	// lastPhase, lastErrorClass, lastErrorDetail, lastErrorAt, lastSuccess,
+	// and retryDeadline track the most recent Progress reported by the
+	// attached worker, exposed via Progress, so callers can derive a
+	// SyncSummary without replaying every Progress event themselves. They
+	// are reset on each Attach, since a new worker means a new (or newly
+	// reconnected) workspace whose progress history does not carry over.
+	lastPhase       Phase
+	lastErrorClass  string
+	lastErrorDetail string
+	lastErrorAt     time.Time
+	lastSuccess     time.Time
+	retryDeadline   time.Time
+	lastRetryCount  int
 }
 
 func NewCoordinator(root context.Context) *Coordinator {
@@ -54,6 +56,8 @@ func (c *Coordinator) Attach(worker *Worker) error {
 	// over from whatever was attached before.
 	c.lastPhase = ""
 	c.lastErrorClass = ""
+	c.lastErrorDetail = ""
+	c.lastErrorAt = time.Time{}
 	c.lastSuccess = time.Time{}
 	c.retryDeadline = time.Time{}
 	c.lastRetryCount = 0
@@ -142,15 +146,22 @@ func (c *Coordinator) recordProgress(p Progress, now func() time.Time) {
 	defer c.mu.Unlock()
 	c.lastPhase = p.Phase
 	c.lastErrorClass = p.ErrorClass
+	c.lastErrorDetail = p.ErrorDetail
 	c.lastRetryCount = p.RetryCount
 	switch p.Phase {
 	case PhaseCurrent:
 		c.lastSuccess = now()
 		c.retryDeadline = time.Time{}
+		c.lastErrorAt = time.Time{}
 	case PhaseBackoff:
 		c.retryDeadline = now().Add(p.RetryIn)
+		c.lastErrorAt = now()
+	case PhaseQuarantine:
+		c.retryDeadline = time.Time{}
+		c.lastErrorAt = now()
 	default:
 		c.retryDeadline = time.Time{}
+		c.lastErrorAt = time.Time{}
 	}
 }
 
@@ -175,10 +186,19 @@ type CoordinatorProgress struct {
 	// time.Time when no retry is pending.
 	RetryDeadline time.Time
 	// ErrorClass is the classification of the error behind the last
-	// PhaseBackoff report (see classifySyncError), or empty when Phase is
-	// not PhaseBackoff. It is diagnostic-only and never carries operation
-	// content or protocol detail.
+	// PhaseBackoff or PhaseQuarantine report (see classifySyncError), or
+	// empty when the last reported phase was not an error. It is
+	// diagnostic-only and never carries operation content or protocol
+	// detail.
 	ErrorClass string
+	// ErrorDetail is the bounded, diagnostic-only description behind
+	// ErrorClass (see Progress.ErrorDetail), or empty when the last
+	// reported phase was not an error. It never carries operation
+	// ciphertext or key material.
+	ErrorDetail string
+	// ErrorAt is when ErrorClass/ErrorDetail were last reported, or the
+	// zero time.Time when the last reported phase was not an error.
+	ErrorAt time.Time
 	// RetryCount is how many consecutive cycles have failed since the last
 	// success. It is zero once a cycle succeeds.
 	RetryCount int
@@ -194,6 +214,8 @@ func (c *Coordinator) Progress() CoordinatorProgress {
 		LastSuccess:   c.lastSuccess,
 		RetryDeadline: c.retryDeadline,
 		ErrorClass:    c.lastErrorClass,
+		ErrorDetail:   c.lastErrorDetail,
+		ErrorAt:       c.lastErrorAt,
 		RetryCount:    c.lastRetryCount,
 	}
 }

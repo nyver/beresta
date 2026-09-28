@@ -45,15 +45,17 @@ status.
 
 The **technical details** layer additionally shows: the active workspace
 and device's opaque identifiers, the last synchronization error's
-classification (never its raw backend text), quarantined operation IDs
-from the unsafe-incoming-operation journal, the durable sync cursor's
-sequence and epoch, consecutive-failure retry count and remaining
-backoff, the configured transport's protocol/security mode/URL (already
-visible in Synchronization settings), the local database's applied schema
-migration version, and whether a workspace-key rotation this device began
-is still waiting to be confirmed applied everywhere (resolves
-automatically on a later sync cycle; only a value stuck at `true` across
-several syncs is worth investigating).
+classification, a bounded diagnostic detail string for that error (the
+underlying error message, truncated to 512 bytes - never operation
+ciphertext or key material) and when it was last reported, quarantined
+operation IDs from the unsafe-incoming-operation journal, the durable
+sync cursor's sequence and epoch, consecutive-failure retry count and
+remaining backoff, the configured transport's protocol/security mode/URL
+(already visible in Synchronization settings), the local database's
+applied schema migration version, and whether a workspace-key rotation
+this device began is still waiting to be confirmed applied everywhere
+(resolves automatically on a later sync cycle; only a value stuck at
+`true` across several syncs is worth investigating).
 
 A "Copy diagnostics" action renders the same bounded fields as a
 plain-text bundle for support conversations - never a raw log dump, and

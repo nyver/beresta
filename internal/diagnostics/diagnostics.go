@@ -149,6 +149,8 @@ func CopyDiagnostics(summary presentation.DiagnosticSummary, technical presentat
 	b.WriteString("Workspace ID: " + technical.WorkspaceID + "\n")
 	b.WriteString("Device ID: " + technical.DeviceID + "\n")
 	b.WriteString("Last error class: " + technical.LastErrorClass + "\n")
+	b.WriteString("Last error detail: " + technical.LastErrorDetail + "\n")
+	b.WriteString("Last error at: " + formatTime(technical.LastErrorAt) + "\n")
 	b.WriteString("Pending operation count: " + strconv.Itoa(technical.PendingOperationCount) + "\n")
 	b.WriteString("Quarantined operation IDs: " + strings.Join(technical.QuarantinedOperationIDs, ", ") + "\n")
 	b.WriteString("Cursor sequence: " + strconv.FormatUint(technical.CursorSequence, 10) + "\n")

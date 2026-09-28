@@ -826,6 +826,8 @@ export namespace main {
 	    workspace_id: string;
 	    device_id: string;
 	    last_error_class: string;
+	    last_error_detail: string;
+	    last_error_at_unix_ms: number;
 	    pending_operation_count: number;
 	    quarantined_operation_ids: string[];
 	    cursor_sequence: number;
@@ -847,6 +849,8 @@ export namespace main {
 	        this.workspace_id = source["workspace_id"];
 	        this.device_id = source["device_id"];
 	        this.last_error_class = source["last_error_class"];
+	        this.last_error_detail = source["last_error_detail"];
+	        this.last_error_at_unix_ms = source["last_error_at_unix_ms"];
 	        this.pending_operation_count = source["pending_operation_count"];
 	        this.quarantined_operation_ids = source["quarantined_operation_ids"];
 	        this.cursor_sequence = source["cursor_sequence"];

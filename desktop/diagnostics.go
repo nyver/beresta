@@ -153,6 +153,8 @@ func (a *App) collectTechnicalDiagnostics() (presentation.TechnicalDiagnostics, 
 	if coordinator != nil {
 		progress := coordinator.Progress()
 		technical.LastErrorClass = progress.ErrorClass
+		technical.LastErrorDetail = progress.ErrorDetail
+		technical.LastErrorAt = progress.ErrorAt
 		technical.RetryCount = progress.RetryCount
 		if remaining := time.Until(progress.RetryDeadline); !progress.RetryDeadline.IsZero() && remaining > 0 {
 			technical.RetryIn = remaining

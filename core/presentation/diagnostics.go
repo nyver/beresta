@@ -121,6 +121,16 @@ type TechnicalDiagnostics struct {
 	// recent synchronization failure (see core/sync's classifySyncError).
 	// It is empty when the last attempt succeeded or none has run yet.
 	LastErrorClass string
+	// LastErrorDetail is a bounded, diagnostic-only description of the
+	// most recent synchronization failure (see core/sync's
+	// syncErrorDetail): the underlying error's message, truncated to 512
+	// bytes. It never carries operation ciphertext or key material, and is
+	// empty exactly when LastErrorClass is empty.
+	LastErrorDetail string
+	// LastErrorAt is when LastErrorClass/LastErrorDetail were last
+	// reported, or the zero time.Time when the last attempt succeeded or
+	// none has run yet.
+	LastErrorAt time.Time
 	// PendingOperationCount is the durable count of local changes not yet
 	// acknowledged by a configured transport.
 	PendingOperationCount int

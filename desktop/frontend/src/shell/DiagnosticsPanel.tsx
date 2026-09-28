@@ -174,6 +174,18 @@ export function DiagnosticsPanel() {
                 <dd>{technical.last_error_class || t("diagnostics.none_label")}</dd>
               </div>
               <div>
+                <dt>{t("diagnostics.last_error_detail_label")}</dt>
+                <dd>{technical.last_error_detail || t("diagnostics.none_label")}</dd>
+              </div>
+              <div>
+                <dt>{t("diagnostics.last_error_at_label")}</dt>
+                <dd>
+                  {technical.last_error_at_unix_ms
+                    ? formatClockTime(technical.last_error_at_unix_ms)
+                    : t("diagnostics.none_label")}
+                </dd>
+              </div>
+              <div>
                 <dt>{t("diagnostics.pending_operation_count_label")}</dt>
                 <dd>{technical.pending_operation_count}</dd>
               </div>

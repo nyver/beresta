@@ -75,6 +75,8 @@ func TestCopyDiagnosticsIncludesEveryAllowlistedField(t *testing.T) {
 	}
 	technical := presentation.TechnicalDiagnostics{
 		WorkspaceID: "ws-canary", DeviceID: "device-canary", LastErrorClass: "transient_transport",
+		LastErrorDetail:       "sync: pull: dial tcp: connection refused",
+		LastErrorAt:           time.Date(2026, 1, 2, 3, 3, 0, 0, time.UTC),
 		PendingOperationCount: 7, QuarantinedOperationIDs: []string{"op-canary"},
 		CursorSequence: 42, CursorEpoch: 1, RetryCount: 2, RetryIn: 5 * time.Second,
 		TransportProtocol: "https", TransportSecurityMode: "pinned", TransportURL: "https://home.example:8443",
@@ -88,7 +90,9 @@ func TestCopyDiagnosticsIncludesEveryAllowlistedField(t *testing.T) {
 	for _, want := range []string{
 		"1.2.3", "windows", "true", "2026-01-02T03:04:05Z", "7", "offline", "healthy",
 		"2026-01-01T00:00:00Z", "external drive", "1024", "ok", "up_to_date",
-		"ws-canary", "device-canary", "transient_transport", "op-canary", "42", "1", "2", "5s",
+		"ws-canary", "device-canary", "transient_transport",
+		"sync: pull: dial tcp: connection refused", "2026-01-02T03:03:00Z",
+		"op-canary", "42", "1", "2", "5s",
 		"https", "pinned", "https://home.example:8443", "9",
 	} {
 		if !strings.Contains(bundle, want) {

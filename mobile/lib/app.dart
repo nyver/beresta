@@ -2567,6 +2567,20 @@ class _DiagnosticsSectionState extends State<DiagnosticsSection> {
               : widget.strings("diagnostics_none"),
         ),
         _diagnosticsRow(
+          widget.strings("diagnostics_last_error_detail"),
+          (technical["last_error_detail"] as String?)?.isNotEmpty == true
+              ? technical["last_error_detail"] as String
+              : widget.strings("diagnostics_none"),
+        ),
+        _diagnosticsRow(
+          widget.strings("diagnostics_last_error_at"),
+          ((technical["last_error_at_unix_ms"] as num?)?.toInt() ?? 0) > 0
+              ? DateTime.fromMillisecondsSinceEpoch(
+                (technical["last_error_at_unix_ms"] as num).toInt(),
+              ).toLocal().toString()
+              : widget.strings("diagnostics_none"),
+        ),
+        _diagnosticsRow(
           widget.strings("diagnostics_pending_operation_count"),
           "${technical["pending_operation_count"] ?? 0}",
         ),

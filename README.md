@@ -348,10 +348,11 @@ Both clients now expose a Settings > Diagnostics section (specs/product-experien
 whether sync is configured, last successful sync, pending changes, connection
 state, backup health, local storage usage, database health, and update status,
 always visible once expanded. An "expand technical details" layer additionally
-shows the workspace/device ID, last synchronization error class, quarantined
-operation IDs, cursor position, retry state, transport configuration, and the
-local database's schema migration version - internal identifiers that stay out
-of the primary summary. Both layers load only when opened. A "Copy diagnostics"
+shows the workspace/device ID, last synchronization error class with a bounded
+diagnostic detail string and timestamp, quarantined operation IDs, cursor
+position, retry state, transport configuration, and the local database's
+schema migration version - internal identifiers that stay out of the primary
+summary. Both layers load only when opened. A "Copy diagnostics"
 action renders the same bounded fields as a plain-text bundle for support
 conversations; `internal/diagnostics.CopyDiagnostics` accepts only these two
 fixed, reviewed schemas (`core/presentation.DiagnosticSummary` and

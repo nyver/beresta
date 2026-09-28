@@ -102,6 +102,8 @@ type TechnicalDiagnosticsDTO struct {
 	WorkspaceID             string   `json:"workspace_id"`
 	DeviceID                string   `json:"device_id"`
 	LastErrorClass          string   `json:"last_error_class"`
+	LastErrorDetail         string   `json:"last_error_detail"`
+	LastErrorAtUnixMS       int64    `json:"last_error_at_unix_ms"`
 	PendingOperationCount   int      `json:"pending_operation_count"`
 	QuarantinedOperationIDs []string `json:"quarantined_operation_ids"`
 	CursorSequence          uint64   `json:"cursor_sequence"`
@@ -124,6 +126,8 @@ func newTechnicalDiagnosticsDTO(technical presentation.TechnicalDiagnostics) Tec
 		WorkspaceID:             technical.WorkspaceID,
 		DeviceID:                technical.DeviceID,
 		LastErrorClass:          technical.LastErrorClass,
+		LastErrorDetail:         technical.LastErrorDetail,
+		LastErrorAtUnixMS:       unixMS(technical.LastErrorAt),
 		PendingOperationCount:   technical.PendingOperationCount,
 		QuarantinedOperationIDs: quarantined,
 		CursorSequence:          technical.CursorSequence,

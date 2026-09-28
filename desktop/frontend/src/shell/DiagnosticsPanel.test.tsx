@@ -29,6 +29,8 @@ function fakeTechnical(overrides: Partial<main.TechnicalDiagnosticsDTO> = {}): m
     workspace_id: "ws-1",
     device_id: "device-1",
     last_error_class: "transient_transport",
+    last_error_detail: "sync: pull: dial tcp: connection refused",
+    last_error_at_unix_ms: 0,
     pending_operation_count: 2,
     quarantined_operation_ids: [],
     cursor_sequence: 5,
@@ -84,6 +86,7 @@ describe("DiagnosticsPanel", () => {
     expect(await screen.findByText("ws-1")).toBeInTheDocument();
     expect(screen.getByText("device-1")).toBeInTheDocument();
     expect(screen.getByText("5@1")).toBeInTheDocument();
+    expect(screen.getByText("sync: pull: dial tcp: connection refused")).toBeInTheDocument();
     expect(screen.getByText("diagnostics.rotation_pending_label")).toBeInTheDocument();
     expect(screen.getByText("diagnostics.no")).toBeInTheDocument();
   });

@@ -118,6 +118,70 @@ func TestSyncRecoversAutomaticallyAfterTheServerBecomesReachableAgain(t *testing
 	}
 }
 
+// TestSyncReattachesAfterUnlockWhileTheServerIsDown covers the regression
+// where unlocking (or starting the app) while the configured server was
+// unreachable left the app permanently local-only: activate's single
+// background reconnect failed its preflight and nothing ever retried it. The
+// worker must instead attach immediately, report offline rather than
+// local-only while the server is down, and converge once a server with the
+// same identity is reachable again at the same address.
+func TestSyncReattachesAfterUnlockWhileTheServerIsDown(t *testing.T) {
+	cfg := server.DefaultConfig()
+	cfg.Server.DataDirectory = t.TempDir()
+	cfg.Backups.Enabled = false
+	cfg.Limits.RequestsPerSecond = 10000
+	cfg.Limits.RequestBurst = 10000
+	runtime, err := server.Initialize(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { runtime.Close() })
+
+	ts, addr := startTLSServerOnAddr(t, "127.0.0.1:0", runtime.TLSIdentity, runtime)
+
+	a := newTestApp(t)
+	dbPath := testDatabasePath(t, a)
+	passphrase := "correct horse battery staple"
+	if _, err := a.CreateAccount(CreateAccountRequest{DatabasePath: dbPath, Passphrase: passphrase}); err != nil {
+		t.Fatalf("CreateAccount: %v", err)
+	}
+	invite, err := runtime.Storage.CreateInvite(context.Background(), "unlock-offline", time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ConnectServer(ConnectServerRequest{
+		URL: ts.URL, InviteCode: invite.Code, Fingerprint: runtime.TLSIdentity.Fingerprint,
+		SecurityMode: "pinned", DeviceName: "unlock-offline",
+	}); err != nil {
+		t.Fatalf("ConnectServer: %v", err)
+	}
+	if err := a.LockAccount(); err != nil {
+		t.Fatalf("LockAccount: %v", err)
+	}
+
+	ts.Close()
+	if _, err := a.UnlockAccount(UnlockAccountRequest{DatabasePath: dbPath, Passphrase: passphrase}); err != nil {
+		t.Fatalf("UnlockAccount while server is down: %v", err)
+	}
+	waitForSyncState(t, a, presentation.SyncStateOffline)
+	if _, err := a.CreateNote("", "Written before the server came back"); err != nil {
+		t.Fatalf("CreateNote while server is down: %v", err)
+	}
+
+	recovered, _ := startTLSServerOnAddr(t, addr, runtime.TLSIdentity, runtime)
+	t.Cleanup(recovered.Close)
+
+	// SyncNow skips the remaining backoff delay; the worker would otherwise
+	// pick the server up on its own once that delay elapses.
+	if err := a.SyncNow(); err != nil {
+		t.Fatalf("SyncNow after recovery: %v", err)
+	}
+	waitForSyncState(t, a, presentation.SyncStateCurrent)
+	if summary, err := a.SyncSummary(); err != nil || summary.PendingCount != 0 {
+		t.Fatalf("SyncSummary after recovery = %+v, %v; want the queued note drained", summary, err)
+	}
+}
+
 // TestSyncSurfacesActionRequiredWhenTheServerTLSIdentityChanges covers task
 // 3.8's "TLS identity change" regression end to end, against real TLS
 // handshakes rather than a fake transport (specs/release-quality's "TLS

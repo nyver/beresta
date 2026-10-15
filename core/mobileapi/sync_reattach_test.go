@@ -2,10 +2,15 @@ package mobileapi
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"net"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/beresta-app/beresta/server"
 )
 
 // syncState decodes the "state" field out of a SyncSummary() JSON result,
@@ -172,4 +177,75 @@ func TestServiceConnectServerNeverLeavesALiveCoordinatorAttachedAfterLock(t *tes
 		}
 		service.Close()
 	}
+}
+
+// startMobileTLSServerOnAddr serves runtime's API over TLS on addr ("" or a
+// ":0" port picks a fresh one) and returns the server and the address it
+// actually bound, so a test can stop it and later restart it on exactly the
+// same address - what a restarted server looks like from the client side.
+func startMobileTLSServerOnAddr(t *testing.T, addr string, runtime *server.Runtime) (*httptest.Server, string) {
+	t.Helper()
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := tls.LoadX509KeyPair(runtime.TLSIdentity.CertificateFile, runtime.TLSIdentity.PrivateKeyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(runtime.API)
+	ts.Listener.Close()
+	ts.Listener = listener
+	ts.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS13}
+	ts.StartTLS()
+	return ts, listener.Addr().String()
+}
+
+// TestServiceReattachesAfterUnlockWhileTheServerIsDown covers the regression
+// where unlocking while the configured server was unreachable left the app
+// permanently local-only: reconnectSavedServer's single attempt failed its
+// preflight and nothing ever retried it. The worker must instead attach
+// immediately, report offline rather than local-only while the server is
+// down, and converge once the server is reachable again at the same address.
+func TestServiceReattachesAfterUnlockWhileTheServerIsDown(t *testing.T) {
+	cfg := server.DefaultConfig()
+	cfg.Server.DataDirectory = retryTempDir(t)
+	cfg.Backups.Enabled = false
+	cfg.Limits.RequestsPerSecond = 10000
+	cfg.Limits.RequestBurst = 10000
+	runtime, err := server.Initialize(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { runtime.Close() })
+	ts, addr := startMobileTLSServerOnAddr(t, "127.0.0.1:0", runtime)
+
+	service, dbPath := newConnectedMobileService(t, runtime, ts.URL, "unlock-offline")
+	if err := service.Lock(); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	ts.Close()
+	if _, err := service.UnlockAccount("unlock-offline", dbPath, "correct horse battery staple unlock-offline"); err != nil {
+		t.Fatalf("UnlockAccount while server is down: %v", err)
+	}
+	waitForServiceSyncState(t, service, "offline")
+
+	recovered, _ := startMobileTLSServerOnAddr(t, addr, runtime)
+	t.Cleanup(recovered.Close)
+
+	// SyncNow skips the remaining backoff delay; the worker would otherwise
+	// pick the server up on its own once that delay elapses.
+	if err := service.SyncNow(); err != nil {
+		t.Fatalf("SyncNow after recovery: %v", err)
+	}
+	waitForServiceSyncState(t, service, "current")
+}
+
+func waitForServiceSyncState(t *testing.T, service *Service, want string) {
+	t.Helper()
+	waitFor(t, 10*time.Second, "sync state never reached "+want, func() bool {
+		encoded, err := service.SyncSummary()
+		return err == nil && syncState(t, encoded) == want
+	})
 }

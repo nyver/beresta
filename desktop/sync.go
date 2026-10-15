@@ -41,7 +41,35 @@ type SyncQuarantineDTO struct {
 	ReceivedUnixMS int64  `json:"received_unix_ms"`
 }
 
+// ConnectServer connects (or re-registers) this device with a sync server
+// chosen interactively. It verifies the server up front - reachability,
+// certificate pin, and device authentication - so a wrong URL, fingerprint,
+// or invite is reported immediately instead of surfacing later as a sync
+// failure.
 func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo, error) {
+	return a.connectServer(request, true)
+}
+
+// reconnectSavedServer reattaches the server persisted in config after
+// unlock. Unlike ConnectServer it does not require the server to be
+// reachable right now: the worker is attached regardless, and its own
+// capped retry loop (core/sync.Worker.Run) keeps trying, reports the
+// offline state through SyncSummary, and picks the connection up as soon as
+// the server comes back. Requiring a successful preflight here left the app
+// permanently local-only whenever it was started while the server was down.
+func (a *App) reconnectSavedServer(config AppSettings) {
+	_, _ = a.connectServer(ConnectServerRequest{
+		URL: config.SyncServerURL, SecurityMode: config.SyncSecurityMode,
+		Fingerprint: config.SyncFingerprint, DeviceName: "Windows desktop",
+	}, false)
+}
+
+// connectServer implements ConnectServer and reconnectSavedServer. preflight
+// selects whether the server must answer diagnostics and the member device
+// directory before the worker is attached; without it no network request is
+// made here at all and the worker's first cycle performs the same steps
+// (see buildWorkspaceWorker's Prepare hook).
+func (a *App) connectServer(request ConnectServerRequest, preflight bool) (ServerConnectionInfo, error) {
 	if request.QRCode != "" {
 		parsed, err := sharecode.DecodeConnect(request.QRCode)
 		if err != nil {
@@ -92,12 +120,15 @@ func (a *App) ConnectServer(request ConnectServerRequest) (ServerConnectionInfo,
 			return ServerConnectionInfo{}, mapError(err)
 		}
 	}
-	diagnostics := httpTransport.Diagnose(ctx)
-	if !diagnostics.Reachable || !diagnostics.Authenticated {
-		return ServerConnectionInfo{}, mapError(errors.New("server connection diagnostics failed: " + string(diagnostics.ErrorClass)))
-	}
-	if err := refreshRemoteDevices(ctx, acc, httpTransport, workspaceID); err != nil {
-		return ServerConnectionInfo{}, mapError(err)
+	var diagnostics transport.Diagnostics
+	if preflight {
+		diagnostics = httpTransport.Diagnose(ctx)
+		if !diagnostics.Reachable || !diagnostics.Authenticated {
+			return ServerConnectionInfo{}, mapError(errors.New("server connection diagnostics failed: " + string(diagnostics.ErrorClass)))
+		}
+		if err := refreshRemoteDevices(ctx, acc, httpTransport, workspaceID); err != nil {
+			return ServerConnectionInfo{}, mapError(err)
+		}
 	}
 	worker, repository, err := a.buildWorkspaceWorker(acc, workspaceID, httpTransport)
 	if err != nil {

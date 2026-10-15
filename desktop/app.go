@@ -356,15 +356,10 @@ func (a *App) activate(acc *account.Account, protection, databasePath string) (A
 	}
 	a.emit(EventAccountUnlocked, info)
 	// Reattach a previously configured server without making unlock depend on
-	// network availability. ConnectServer performs authentication and leaves
-	// the complete local collection usable if the attempt fails.
+	// network availability: the worker is attached even while the server is
+	// unreachable and keeps retrying on its own (see reconnectSavedServer).
 	if settings.SyncEnabled {
-		go func(config AppSettings) {
-			_, _ = a.ConnectServer(ConnectServerRequest{
-				URL: config.SyncServerURL, SecurityMode: config.SyncSecurityMode,
-				Fingerprint: config.SyncFingerprint, DeviceName: "Windows desktop",
-			})
-		}(settings)
+		go a.reconnectSavedServer(settings)
 	}
 	return info, nil
 }

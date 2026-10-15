@@ -605,6 +605,12 @@ for enrollment, administration, backup/restore, service, container, and
 Raspberry Pi commands, including a Docker Compose deployment for VPS hosts on
 port 8446.
 
+A client that starts or unlocks while its configured server is unreachable
+keeps the server attached and reports `offline` rather than `local_only`. It
+retries with capped backoff and resumes synchronization by itself once the
+server is back. A failed startup or daily server backup is logged with its
+error and no longer stops the server.
+
 Publish a signed desktop update manifest, or a detached signature over any
 other release file (see [desktop update operations](docs/desktop-updates.md)):
 

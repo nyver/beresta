@@ -161,8 +161,13 @@ func (r *Runtime) Close() error {
 // Serve starts the TLS 1.3-only versioned API and optional metrics listener.
 func (r *Runtime) Serve(ctx context.Context) error {
 	if r.Config.Backups.Enabled {
+		// A failed backup (most often a full disk) must not take the sync
+		// service down with it: under a container or service manager with
+		// a restart policy, returning here turned one bad backup into an
+		// endless crash loop that left every client offline. The failure is
+		// logged and the scheduler retries at the next daily_at.
 		if _, err := r.Storage.EnsureDailyServerBackup(ctx, time.Now()); err != nil {
-			return fmt.Errorf("create startup daily server backup: %w", err)
+			slog.Error("startup daily server backup failed; serving without it", "error_class", "backup_failed", "error", err)
 		}
 		go r.runBackupScheduler(ctx)
 	}
@@ -282,7 +287,7 @@ func (r *Runtime) runBackupScheduler(ctx context.Context) {
 			return
 		case <-timer.C:
 			if _, err := r.Storage.EnsureDailyServerBackup(ctx, time.Now()); err != nil {
-				slog.Error("daily server backup failed", "error_class", "backup_failed")
+				slog.Error("daily server backup failed", "error_class", "backup_failed", "error", err)
 			}
 		}
 	}

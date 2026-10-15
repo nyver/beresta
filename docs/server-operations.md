@@ -74,8 +74,15 @@ targets with `build.cmd server-cross-build`; run the host smoke with
 
 ```text
 docker build -f build/server/Dockerfile -t beresta-server .
-docker run -d --rm -p 8446:8446 -v beresta-data:/data beresta-server
+docker run -d --name beresta-server --restart unless-stopped   --read-only --tmpfs /tmp:size=64m,mode=1777 -e TMPDIR=/tmp   --log-opt max-size=10m --log-opt max-file=3 --stop-timeout 20   -p 8446:8446 -v beresta-data:/data beresta-server
 ```
+
+Always give a long-running container a restart policy. A container started
+with `--rm` and no `--restart` is removed for good the first time it exits -
+after a crash, an out-of-memory kill, a Docker daemon upgrade or restart, or a
+host reboot - which looks like the server "stopping by itself". Cap the
+json-file log as shown: Docker never rotates it by default, and an unbounded
+log can fill a small VPS disk.
 
 Or with Compose, from the repository root:
 
@@ -108,3 +115,25 @@ most 1% sampled idle CPU. CI exposes the same check through the opt-in
   failure requires removing unreferenced attachments or changing the reviewed
   per-user quota before retrying.
 - WebSocket loss is not data loss. Clients resume cursor polling.
+- Clients that start or unlock while the server is unreachable stay attached
+  and show `offline`. They keep retrying with capped backoff (at most one
+  minute apart) and resume on their own once the server is back; "Sync now"
+  retries immediately.
+- A failed daily backup is logged as `backup_failed` with the underlying
+  error, and the server keeps serving. It retries at the next `daily_at`. Check
+  free disk space first.
+- If the container keeps stopping, check why it last exited before restarting
+  it:
+
+  ```text
+  docker ps -a --filter name=beresta-server
+  docker inspect beresta-server --format "status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}} finished={{.State.FinishedAt}} policy={{.HostConfig.RestartPolicy.Name}}"
+  docker logs --tail 200 beresta-server
+  df -h; free -m
+  journalctl -u docker --since "2 days ago" | tail -n 100
+  dmesg -T | grep -i -E "oom|killed process"
+  ```
+
+  `oom=true` or exit code 137 means the kernel killed it for memory; an empty
+  restart policy means nothing will start it again; a `server stopped` log line
+  carries the error that made the process exit.

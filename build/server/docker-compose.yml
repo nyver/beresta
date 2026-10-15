@@ -19,15 +19,35 @@ services:
     image: beresta-server:latest
     container_name: beresta-server
     restart: unless-stopped
+    # Longer than server.shutdown_timeout (15s) so a stop or daemon restart
+    # drains in-flight requests instead of being SIGKILLed after Docker's
+    # default 10s.
+    stop_grace_period: 20s
     ports:
       - "8446:8446"
     volumes:
       - beresta-data:/data
     read_only: true
+    # The scratch image has no writable temporary directory under a
+    # read-only root; SQLite needs one when it spills temporary data
+    # (large sorts, temporary indexes) to disk.
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      TMPDIR: /tmp
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Docker's default json-file log driver never rotates, so the per-request
+    # log lines eventually fill a small VPS disk and take the database (and
+    # the server) down with it. The server keeps its own bounded log under
+    # /data/logs as well.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   beresta-data:

@@ -249,20 +249,21 @@ func (s *Service) activate(value *account.Account, databasePath string) (string,
 }
 
 // reconnectSavedServer reattaches a previously configured server without
-// making unlock depend on network availability: ConnectServer performs
-// authentication in the background and leaves the complete local collection
-// usable if the attempt fails.
+// making unlock depend on network availability. Unlike ConnectServer it does
+// not require the server to be reachable right now: the worker is attached
+// regardless, and its own capped retry loop (core/sync.Worker.Run) keeps
+// trying, reports the offline state through SyncSummary, and picks the
+// connection up as soon as the server comes back. Requiring a successful
+// preflight here left the app permanently local-only whenever it was
+// unlocked while the server was down.
 func (s *Service) reconnectSavedServer(value *account.Account) {
 	cfg, err := loadSyncConnectionConfig(s.root, value.DB())
 	if err != nil || !cfg.Enabled {
 		return
 	}
-	encoded, err := marshal(connectConfig{URL: cfg.URL, SecurityMode: cfg.SecurityMode, Fingerprint: cfg.Fingerprint, DeviceName: "Android"})
-	if err != nil {
-		return
-	}
+	config := connectConfig{URL: cfg.URL, SecurityMode: cfg.SecurityMode, Fingerprint: cfg.Fingerprint, DeviceName: "Android"}
 	go func() {
-		_ = s.ConnectServer(fmt.Sprintf("auto-reconnect-%d", time.Now().UnixNano()), encoded)
+		_ = s.connectServer(fmt.Sprintf("auto-reconnect-%d", time.Now().UnixNano()), config, false)
 	}()
 }
 
@@ -1271,16 +1272,28 @@ type connectConfig struct {
 	DeviceName string `json:"device_name"`
 }
 
+// ConnectServer connects (or re-registers) this device with a sync server
+// chosen interactively. It verifies the server up front by loading the
+// workspace member device directory, so a wrong URL, fingerprint, or invite
+// is reported immediately instead of surfacing later as a sync failure.
 func (s *Service) ConnectServer(requestID, encoded string) error {
+	var config connectConfig
+	if err := strictJSON(encoded, &config); err != nil {
+		return err
+	}
+	return s.connectServer(requestID, config, true)
+}
+
+// connectServer implements ConnectServer and reconnectSavedServer. preflight
+// selects whether the server must answer before the worker is attached;
+// without it no network request is made here at all and the worker's first
+// cycle performs the same steps (see buildWorkspaceWorker's Prepare hook).
+func (s *Service) connectServer(requestID string, config connectConfig, preflight bool) error {
 	ctx, done, err := s.begin(requestID)
 	if err != nil {
 		return err
 	}
 	defer done()
-	var config connectConfig
-	if err := strictJSON(encoded, &config); err != nil {
-		return err
-	}
 	if config.QRCode != "" {
 		parsed, err := sharecode.DecodeConnect(config.QRCode)
 		if err != nil {
@@ -1322,8 +1335,10 @@ func (s *Service) ConnectServer(requestID, encoded string) error {
 			return err
 		}
 	}
-	if err := refreshMobileDevices(ctx, value, remote, workspaceID); err != nil {
-		return err
+	if preflight {
+		if err := refreshMobileDevices(ctx, value, remote, workspaceID); err != nil {
+			return err
+		}
 	}
 	worker, repository, err := s.buildWorkspaceWorker(value, workspaceID, remote)
 	if err != nil {
